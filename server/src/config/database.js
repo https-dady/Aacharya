@@ -5,7 +5,9 @@ import { env } from './env.js';
 
 const DATABASE_CONNECTION_TIMEOUT_MS = 10000;
 
-const DEFAULT_DNS_SERVERS = ['1.1.1.1', '8.8.8.8'];
+const DEFAULT_DNS_SERVERS = ['8.8.8.8', '8.8.4.4'];
+
+
 
 function configureDnsServers() {
   const configuredServers = process.env.MONGODB_DNS_SERVERS

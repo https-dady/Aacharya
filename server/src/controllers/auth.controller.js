@@ -7,6 +7,11 @@ import {
 
 import { generateAccessToken } from '../services/auth/token.service.js';
 
+import {
+  requestEmailVerification,
+  verifyEmailAddress,
+} from '../services/auth/email-verification.service.js';
+
 const REFRESH_COOKIE_NAME = 'aacharya_refresh_token';
 
 const REFRESH_COOKIE_OPTIONS = {
@@ -114,6 +119,36 @@ export async function logoutController(req, res, next) {
     return res.status(200).json({
       success: true,
       message: 'Logged out successfully.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function requestEmailVerificationController(req, res, next) {
+  try {
+    const result = await requestEmailVerification(req.user.id);
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function confirmEmailVerificationController(req, res, next) {
+  try {
+    const result = await verifyEmailAddress({
+      userId: req.user.id,
+      challengeId: req.body.challengeId,
+      otp: req.body.otp,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: result,
     });
   } catch (error) {
     return next(error);

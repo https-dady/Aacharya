@@ -129,19 +129,25 @@ describe('Email verification service', () => {
       storedDocument.purpose,
       OTP_PURPOSES.EMAIL_VERIFICATION,
     );
+
     assert.equal(storedDocument.targetEmail, user.email);
     assert.match(storedDocument.otpHash, /^[a-f\d]{64}$/i);
     assert.equal(storedDocument.attempts, 0);
     assert.equal(storedDocument.resendCount, 0);
-    assert.ok(storedDocument.expiresAt.getTime() > Date.now());
+
+    assert.ok(
+      storedDocument.expiresAt.getTime() > Date.now(),
+    );
 
     assert.equal(emailMock.mock.callCount(), 1);
+
     assert.equal(
       emailMock.mock.calls[0].arguments[0].to,
       user.email,
     );
 
     assert.equal(result.challengeId, CHALLENGE_ID);
+
     assert.equal(
       result.message,
       'Verification code sent to your account email.',
@@ -149,10 +155,12 @@ describe('Email verification service', () => {
   });
 
   it('does not issue a new OTP for an already verified user', async () => {
-    mockUserLookup(createUser({
-      isEmailVerified: true,
-      emailVerifiedAt: new Date(),
-    }));
+    mockUserLookup(
+      createUser({
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+      }),
+    );
 
     const createMock = mock.method(
       PasswordResetOtp,
@@ -227,7 +235,10 @@ describe('Email verification service', () => {
         updateFilter = filter;
         updateOperation = update;
 
-        return { acknowledged: true, modifiedCount: 1 };
+        return {
+          acknowledged: true,
+          modifiedCount: 1,
+        };
       },
     );
 
@@ -244,7 +255,9 @@ describe('Email verification service', () => {
       updateFilter.purpose,
       OTP_PURPOSES.EMAIL_VERIFICATION,
     );
+
     assert.equal(updateOperation.$inc.attempts, 1);
+
     assert.equal(
       updateFilter.attempts.$lt,
       env.passwordReset.maxAttempts,
@@ -264,13 +277,22 @@ describe('Email verification service', () => {
 
     let challengeFilter;
     let claimCalled = false;
+    let userUpdateCalled = false;
 
     mock.method(
       PasswordResetOtp,
       'findOne',
       (filter) => {
         challengeFilter = filter;
-        return createQueryMock(oldChallenge);
+
+        // Simulate MongoDB matching the targetEmail filter.
+        // An old-email challenge must not match the new email.
+        const matchingChallenge =
+          filter.targetEmail === oldChallenge.targetEmail
+            ? oldChallenge
+            : null;
+
+        return createQueryMock(matchingChallenge);
       },
     );
 
@@ -283,14 +305,12 @@ describe('Email verification service', () => {
       },
     );
 
-    // Safety mock: this operation must never be reached.
     mock.method(
       User,
       'findOneAndUpdate',
       async () => {
-        throw new Error(
-          'User must not be updated for an old email challenge',
-        );
+        userUpdateCalled = true;
+        return user;
       },
     );
 
@@ -300,14 +320,25 @@ describe('Email verification service', () => {
         challengeId: CHALLENGE_ID,
         otp: '123456',
       }),
-      { code: 'INVALID_EMAIL_VERIFICATION' },
+      (error) => error.code === 'INVALID_EMAIL_VERIFICATION',
     );
 
     assert.equal(
       challengeFilter.targetEmail,
       'new-address@example.com',
     );
-    assert.equal(claimCalled, false);
+
+    assert.equal(
+      claimCalled,
+      false,
+      'An old-email challenge must not be claimed',
+    );
+
+    assert.equal(
+      userUpdateCalled,
+      false,
+      'The user must not be updated for an old-email challenge',
+    );
   });
 
   it('invalidates the challenge when email delivery fails', async () => {
@@ -342,7 +373,10 @@ describe('Email verification service', () => {
         invalidationFilter = filter;
         invalidationUpdate = update;
 
-        return { acknowledged: true, modifiedCount: 1 };
+        return {
+          acknowledged: true,
+          modifiedCount: 1,
+        };
       },
     );
 
@@ -355,10 +389,12 @@ describe('Email verification service', () => {
     );
 
     assert.equal(invalidationFilter._id, CHALLENGE_ID);
+
     assert.equal(
       invalidationFilter.purpose,
       OTP_PURPOSES.EMAIL_VERIFICATION,
     );
+
     assert.ok(
       invalidationUpdate.$set.invalidatedAt instanceof Date,
     );
@@ -426,7 +462,6 @@ describe('Email verification service', () => {
     let userUpdateFilter;
     let userUpdateOperation;
 
-    // This was the missing mock causing the database timeout.
     mock.method(
       User,
       'findOneAndUpdate',
@@ -452,12 +487,18 @@ describe('Email verification service', () => {
       claimFilter.purpose,
       OTP_PURPOSES.EMAIL_VERIFICATION,
     );
+
     assert.ok(claimUpdate.$set.verifiedAt instanceof Date);
     assert.ok(claimUpdate.$set.consumedAt instanceof Date);
 
     assert.equal(userUpdateFilter.email, user.email);
     assert.equal(userUpdateFilter.isEmailVerified, false);
-    assert.equal(userUpdateOperation.$set.isEmailVerified, true);
+
+    assert.equal(
+      userUpdateOperation.$set.isEmailVerified,
+      true,
+    );
+
     assert.ok(
       userUpdateOperation.$set.emailVerifiedAt instanceof Date,
     );
