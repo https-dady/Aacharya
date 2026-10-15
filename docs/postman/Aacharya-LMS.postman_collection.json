@@ -1,0 +1,141 @@
+{
+  "info": {
+    "_postman_id": "aacharya-lms-api-v1",
+    "name": "Aacharya LMS API",
+    "description": "Postman collection for currently implemented Aacharya LMS health and metadata endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Application Liveness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/live",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "live"]
+            },
+            "description": "Checks whether the application process is running."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns HTTP 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Reports application as alive', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.eql(true);",
+                  "    pm.expect(body.data.status).to.eql('alive');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Application Readiness",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health/ready",
+              "host": ["{{baseUrl}}"],
+              "path": ["health", "ready"]
+            },
+            "description": "Checks application readiness and MongoDB connectivity. A 503 response indicates that the application is not ready."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns a valid readiness response', function () {",
+                  "    pm.expect([200, 503]).to.include(pm.response.code);",
+                  "});",
+                  "",
+                  "pm.test('Includes application and database checks', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body).to.have.property('success');",
+                  "    pm.expect(body.data).to.have.property('status');",
+                  "    pm.expect(body.data.checks.application).to.eql('ok');",
+                  "    pm.expect(body.data.checks).to.have.property('database');",
+                  "});",
+                  "",
+                  "pm.test('Response status matches readiness state', function () {",
+                  "    const body = pm.response.json();",
+                  "    if (body.data.status === 'ready') {",
+                  "        pm.expect(pm.response.code).to.eql(200);",
+                  "        pm.expect(body.success).to.eql(true);",
+                  "    } else {",
+                  "        pm.expect(pm.response.code).to.eql(503);",
+                  "        pm.expect(body.success).to.eql(false);",
+                  "    }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Metadata",
+      "item": [
+        {
+          "name": "API Metadata",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/meta",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "meta"]
+            },
+            "description": "Returns the API name, version, and active environment."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Returns HTTP 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Returns correct API metadata', function () {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.success).to.eql(true);",
+                  "    pm.expect(body.data.name).to.eql('Aacharya LMS API');",
+                  "    pm.expect(body.data.version).to.eql('1.0.0');",
+                  "    pm.expect(['development', 'test', 'production']).to.include(body.data.environment);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    }
+  ]
+}

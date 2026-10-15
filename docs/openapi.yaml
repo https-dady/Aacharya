@@ -1,0 +1,215 @@
+openapi: 3.1.0
+
+info:
+  title: Aacharya LMS API
+  version: 1.0.0
+  description: |
+    OpenAPI specification for the currently implemented Aacharya LMS API.
+    This specification documents existing health and metadata endpoints only.
+
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+
+tags:
+  - name: Health
+    description: Application health and readiness checks
+  - name: Metadata
+    description: API metadata
+
+paths:
+  /health/live:
+    get:
+      tags:
+        - Health
+      summary: Check application liveness
+      description: |
+        Confirms that the application process is running.
+        This endpoint does not require a database connection.
+      operationId: getHealthLive
+      responses:
+        "200":
+          description: Application is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LivenessResponse"
+              example:
+                success: true
+                data:
+                  status: alive
+
+  /health/ready:
+    get:
+      tags:
+        - Health
+      summary: Check application readiness
+      description: |
+        Checks whether the application is ready to serve requests,
+        including the MongoDB connection status.
+      operationId: getHealthReady
+      responses:
+        "200":
+          description: Application and database are ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+              example:
+                success: true
+                data:
+                  status: ready
+                  checks:
+                    application: ok
+                    database: connected
+        "503":
+          description: Application is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessResponse"
+              example:
+                success: false
+                data:
+                  status: not_ready
+                  checks:
+                    application: ok
+                    database: disconnected
+
+  /api/v1/meta:
+    get:
+      tags:
+        - Metadata
+      summary: Get API metadata
+      description: Returns the API name, version, and environment.
+      operationId: getApiMetadata
+      responses:
+        "200":
+          description: API metadata retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetadataResponse"
+              example:
+                success: true
+                data:
+                  name: Aacharya LMS API
+                  version: 1.0.0
+                  environment: development
+        "429":
+          description: API rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+              example:
+                success: false
+                error:
+                  code: TOO_MANY_REQUESTS
+                  message: Too many requests. Please try again later.
+
+components:
+  schemas:
+    LivenessResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          type: object
+          required:
+            - status
+          properties:
+            status:
+              type: string
+              const: alive
+
+    ReadinessResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          required:
+            - status
+            - checks
+          properties:
+            status:
+              type: string
+              enum:
+                - ready
+                - not_ready
+            checks:
+              type: object
+              required:
+                - application
+                - database
+              properties:
+                application:
+                  type: string
+                  const: ok
+                database:
+                  type: string
+                  enum:
+                    - connected
+                    - disconnected
+                    - connecting
+                    - disconnecting
+                    - unknown
+
+    MetadataResponse:
+      type: object
+      required:
+        - success
+        - data
+      properties:
+        success:
+          type: boolean
+          const: true
+        data:
+          type: object
+          required:
+            - name
+            - version
+            - environment
+          properties:
+            name:
+              type: string
+              const: Aacharya LMS API
+            version:
+              type: string
+              const: 1.0.0
+            environment:
+              type: string
+              enum:
+                - development
+                - test
+                - production
+
+    ErrorResponse:
+      type: object
+      required:
+        - success
+        - error
+      properties:
+        success:
+          type: boolean
+          const: false
+        error:
+          type: object
+          required:
+            - code
+            - message
+          properties:
+            code:
+              type: string
+            message:
+              type: string
