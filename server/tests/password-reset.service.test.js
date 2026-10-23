@@ -2,29 +2,36 @@ import assert from 'node:assert/strict';
 import { afterEach, describe, it, mock } from 'node:test';
 
 import { env } from '../src/config/env.js';
+
 import {
   PasswordResetOtp,
   OTP_PURPOSES,
 } from '../src/models/password-reset-otp.model.js';
+
 import {
   User,
   ACCOUNT_STATUSES,
 } from '../src/models/user.model.js';
+
+import { emailClient } from '../src/services/email/email.service.js';
 
 import {
   createPasswordResetChallenge,
   verifyPasswordResetOtp,
 } from '../src/services/auth/password-reset.service.js';
 
+const CHALLENGE_ID = '507f1f77bcf86cd799439011';
+
 afterEach(() => {
   mock.restoreAll();
 });
 
 describe('Password reset service', () => {
-  it('creates a challenge for an active user with verified email', async () => {
+  it('creates a challenge, stores a hashed OTP and sends the OTP by email', async () => {
     const user = {
       _id: 'user-123',
       email: 'student@example.com',
+      fullName: 'Test Student',
       status: ACCOUNT_STATUSES.ACTIVE,
       isEmailVerified: true,
     };
@@ -52,8 +59,23 @@ describe('Password reset service', () => {
         storedChallenge = document;
 
         return {
-          id: '507f1f77bcf86cd799439011',
+          _id: CHALLENGE_ID,
+          id: CHALLENGE_ID,
           expiresAt: document.expiresAt,
+        };
+      },
+    );
+
+    let emailArguments;
+
+    mock.method(
+      emailClient,
+      'sendTransactionalEmail',
+      async (arguments_) => {
+        emailArguments = arguments_;
+
+        return {
+          messageId: 'test-message-id',
         };
       },
     );
@@ -62,30 +84,58 @@ describe('Password reset service', () => {
       ' Student@Example.com ',
     );
 
-    assert.equal(
-      result.challengeId,
-      '507f1f77bcf86cd799439011',
-    );
+    assert.equal(result.challengeId, CHALLENGE_ID);
 
-    assert.equal(
-      result.recipientEmail,
-      'student@example.com',
-    );
+    assert.ok(result.expiresAt instanceof Date);
+    assert.ok(result.expiresAt.getTime() > Date.now());
 
-    assert.match(result.otp, /^\d{6}$/);
+    assert.equal('otp' in result, false);
+    assert.equal('recipientEmail' in result, false);
 
     assert.equal(
       storedChallenge.purpose,
       OTP_PURPOSES.PASSWORD_RESET,
     );
 
-    assert.notEqual(storedChallenge.otpHash, result.otp);
+    assert.equal(
+      storedChallenge.targetEmail,
+      'student@example.com',
+    );
 
+    assert.match(storedChallenge.otpHash, /^[a-f\d]{64}$/i);
     assert.equal(storedChallenge.attempts, 0);
     assert.equal(storedChallenge.resendCount, 0);
 
+    assert.equal(emailArguments.to, 'student@example.com');
+
+    assert.equal(
+      emailArguments.subject,
+      'Reset your Aacharya LMS password',
+    );
+
+    assert.match(
+      emailArguments.textContent,
+      /password reset code is \d{6}/i,
+    );
+
+    assert.match(
+      emailArguments.htmlContent,
+      /Use this code to reset your Aacharya LMS password/i,
+    );
+
+    const emailedOtp = emailArguments.textContent.match(
+      /password reset code is (\d{6})/i,
+    )?.[1];
+
     assert.ok(
-      storedChallenge.expiresAt.getTime() > Date.now(),
+      emailedOtp,
+      'The email should contain a six-digit OTP',
+    );
+
+    assert.notEqual(
+      storedChallenge.otpHash,
+      emailedOtp,
+      'The stored OTP must not be the plaintext OTP',
     );
   });
 
@@ -100,12 +150,21 @@ describe('Password reset service', () => {
       },
     );
 
+    const emailMock = mock.method(
+      emailClient,
+      'sendTransactionalEmail',
+      async () => {
+        throw new Error('Email should not be sent');
+      },
+    );
+
     const result = await createPasswordResetChallenge(
       'unknown@example.com',
     );
 
     assert.equal(result, null);
     assert.equal(createMock.mock.callCount(), 0);
+    assert.equal(emailMock.mock.callCount(), 0);
   });
 
   it('rejects malformed email input', async () => {
@@ -115,6 +174,80 @@ describe('Password reset service', () => {
         name: 'TypeError',
         message: 'A valid email address is required.',
       },
+    );
+  });
+
+  it('invalidates the challenge when email delivery fails', async () => {
+    mock.method(
+      User,
+      'findOne',
+      async () => ({
+        _id: 'user-123',
+        email: 'student@example.com',
+        fullName: 'Test Student',
+        status: ACCOUNT_STATUSES.ACTIVE,
+        isEmailVerified: true,
+      }),
+    );
+
+    mock.method(
+      PasswordResetOtp,
+      'updateMany',
+      async () => ({ acknowledged: true }),
+    );
+
+    mock.method(
+      PasswordResetOtp,
+      'create',
+      async (document) => ({
+        _id: CHALLENGE_ID,
+        id: CHALLENGE_ID,
+        expiresAt: document.expiresAt,
+      }),
+    );
+
+    mock.method(
+      emailClient,
+      'sendTransactionalEmail',
+      async () => {
+        throw new Error('Simulated email delivery failure');
+      },
+    );
+
+    let invalidationFilter;
+    let invalidationUpdate;
+
+    mock.method(
+      PasswordResetOtp,
+      'updateOne',
+      async (filter, update) => {
+        invalidationFilter = filter;
+        invalidationUpdate = update;
+
+        return {
+          acknowledged: true,
+          modifiedCount: 1,
+        };
+      },
+    );
+
+    await assert.rejects(
+      createPasswordResetChallenge('student@example.com'),
+      {
+        code: 'PASSWORD_RESET_EMAIL_DELIVERY_FAILED',
+        statusCode: 502,
+      },
+    );
+
+    assert.equal(invalidationFilter._id, CHALLENGE_ID);
+
+    assert.equal(
+      invalidationFilter.purpose,
+      OTP_PURPOSES.PASSWORD_RESET,
+    );
+
+    assert.ok(
+      invalidationUpdate.$set.invalidatedAt instanceof Date,
     );
   });
 
@@ -131,7 +264,7 @@ describe('Password reset service', () => {
 
     await assert.rejects(
       verifyPasswordResetOtp({
-        challengeId: '507f1f77bcf86cd799439011',
+        challengeId: CHALLENGE_ID,
         otp: '12AB56',
       }),
       {
@@ -142,7 +275,7 @@ describe('Password reset service', () => {
 
   it('rejects an incorrect OTP and increments the attempt count', async () => {
     const challenge = {
-      _id: '507f1f77bcf86cd799439011',
+      _id: CHALLENGE_ID,
       otpHash: 'a'.repeat(64),
     };
 
@@ -166,13 +299,15 @@ describe('Password reset service', () => {
         updateFilter = filter;
         updateOperation = update;
 
-        return { acknowledged: true };
+        return {
+          acknowledged: true,
+        };
       },
     );
 
     await assert.rejects(
       verifyPasswordResetOtp({
-        challengeId: '507f1f77bcf86cd799439011',
+        challengeId: CHALLENGE_ID,
         otp: '123456',
       }),
       {
@@ -181,7 +316,6 @@ describe('Password reset service', () => {
     );
 
     assert.equal(selectMock.mock.callCount(), 1);
-
     assert.equal(updateFilter._id, challenge._id);
 
     assert.equal(

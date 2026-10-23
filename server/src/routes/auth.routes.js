@@ -1,4 +1,5 @@
 import { Router } from 'express';
+
 import { z } from 'zod';
 
 import {
@@ -7,10 +8,15 @@ import {
   logoutController,
   requestEmailVerificationController,
   confirmEmailVerificationController,
+  requestPasswordResetController,
+  verifyPasswordResetOtpController,
+  confirmPasswordResetController,
 } from '../controllers/auth.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
+
 import { validate } from '../middleware/validate.middleware.js';
+
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
 const authRouter = Router();
@@ -30,6 +36,26 @@ const confirmEmailVerificationSchema = z.object({
   body: z.object({
     challengeId: z.string().regex(/^[a-f\d]{24}$/i),
     otp: z.string().regex(/^\d{6}$/),
+  }).strict(),
+});
+
+const requestPasswordResetSchema = z.object({
+  body: z.object({
+    email: z.string().trim().email().max(254),
+  }).strict(),
+});
+
+const verifyPasswordResetOtpSchema = z.object({
+  body: z.object({
+    challengeId: z.string().regex(/^[a-f\d]{24}$/i),
+    otp: z.string().regex(/^\d{6}$/),
+  }).strict(),
+});
+
+const confirmPasswordResetSchema = z.object({
+  body: z.object({
+    resetToken: z.string().min(32).max(128),
+    newPassword: z.string().min(8).max(256),
   }).strict(),
 });
 
@@ -65,6 +91,27 @@ authRouter.post(
   authRateLimiter,
   validate(confirmEmailVerificationSchema),
   confirmEmailVerificationController,
+);
+
+authRouter.post(
+  '/password/reset/request',
+  authRateLimiter,
+  validate(requestPasswordResetSchema),
+  requestPasswordResetController,
+);
+
+authRouter.post(
+  '/password/reset/verify',
+  authRateLimiter,
+  validate(verifyPasswordResetOtpSchema),
+  verifyPasswordResetOtpController,
+);
+
+authRouter.post(
+  '/password/reset/confirm',
+  authRateLimiter,
+  validate(confirmPasswordResetSchema),
+  confirmPasswordResetController,
 );
 
 export default authRouter;

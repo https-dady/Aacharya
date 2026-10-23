@@ -1,28 +1,39 @@
 import crypto from 'node:crypto';
 
 import { env } from '../../config/env.js';
+
 import {
   PasswordResetOtp,
   OTP_PURPOSES,
 } from '../../models/password-reset-otp.model.js';
+
 import {
   User,
   ACCOUNT_STATUSES,
 } from '../../models/user.model.js';
+
 import { RefreshSession } from '../../models/refresh-session.model.js';
+
 import { hashPassword } from './password.service.js';
 
+import { emailClient } from '../email/email.service.js';
+
 const OTP_LENGTH = 6;
+
 const OTP_TTL_MS =
   env.passwordReset.otpExpiresInMinutes * 60 * 1000;
+
 const RESET_TOKEN_TTL_MS = 5 * 60 * 1000;
+
 const MAX_ATTEMPTS = env.passwordReset.maxAttempts;
 
 function createResetError(statusCode, code, message) {
   const error = new Error(message);
+
   error.statusCode = statusCode;
   error.code = code;
   error.expose = true;
+
   return error;
 }
 
@@ -102,6 +113,16 @@ function isValidChallengeId(challengeId) {
   );
 }
 
+function escapeHtml(value) {
+  return value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  })[character]);
+}
+
 async function invalidateActiveChallenges(userId, purpose, now) {
   await PasswordResetOtp.updateMany(
     {
@@ -111,11 +132,51 @@ async function invalidateActiveChallenges(userId, purpose, now) {
       invalidatedAt: null,
     },
     {
-      $set: { invalidatedAt: now },
+      $set: {
+        invalidatedAt: now,
+      },
     },
   );
 }
 
+async function sendPasswordResetOtp(email, otp, fullName) {
+  const displayName = fullName || 'User';
+  const safeName = escapeHtml(displayName);
+
+  await emailClient.sendTransactionalEmail({
+    to: email,
+    subject: 'Reset your Aacharya LMS password',
+
+    textContent:
+      `Hello ${displayName},\n\n`
+      + `Your Aacharya LMS password reset code is ${otp}.\n`
+      + `This code expires in ${env.passwordReset.otpExpiresInMinutes} minutes.\n`
+      + 'Do not share this code with anyone.\n\n'
+      + 'If you did not request a password reset, you can ignore this email.',
+
+    htmlContent: `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:24px;color:#1D1F27">
+        <h2>Reset your password</h2>
+        <p>Hello ${safeName},</p>
+        <p>Use this code to reset your Aacharya LMS password:</p>
+        <div style="font-size:32px;font-weight:bold;letter-spacing:8px;padding:18px 0">${otp}</div>
+        <p>This code expires in <strong>${env.passwordReset.otpExpiresInMinutes} minutes</strong>.</p>
+        <p>Never share this code with anyone.</p>
+        <p>If you did not request a password reset, you can ignore this email.</p>
+      </div>
+    `,
+  });
+}
+
+/**
+ * Creates a password-reset challenge for an active account
+ * with a verified email address.
+ *
+ * The OTP is sent through the configured email provider.
+ * It is never included in the returned result.
+ *
+ * Returns null when the account is not eligible.
+ */
 export async function createPasswordResetChallenge(email) {
   const normalizedEmail = normalizeEmail(email);
 
@@ -149,14 +210,43 @@ export async function createPasswordResetChallenge(email) {
     resendCount: 0,
   });
 
+  try {
+    await sendPasswordResetOtp(
+      normalizedEmail,
+      otp,
+      user.fullName,
+    );
+  } catch {
+    await PasswordResetOtp.updateOne(
+      {
+        _id: challenge._id,
+        purpose: OTP_PURPOSES.PASSWORD_RESET,
+        consumedAt: null,
+        invalidatedAt: null,
+      },
+      {
+        $set: {
+          invalidatedAt: new Date(),
+        },
+      },
+    );
+
+    throw createResetError(
+      502,
+      'PASSWORD_RESET_EMAIL_DELIVERY_FAILED',
+      'The password reset email could not be sent. Please try again later.',
+    );
+  }
+
   return {
     challengeId: challenge.id,
-    otp,
     expiresAt: challenge.expiresAt,
-    recipientEmail: normalizedEmail,
   };
 }
 
+/**
+ * Invalidates an active password-reset challenge.
+ */
 export async function invalidatePasswordResetChallenge(challengeId) {
   if (!isValidChallengeId(challengeId)) {
     return;
@@ -171,12 +261,23 @@ export async function invalidatePasswordResetChallenge(challengeId) {
       invalidatedAt: null,
     },
     {
-      $set: { invalidatedAt: new Date() },
+      $set: {
+        invalidatedAt: new Date(),
+      },
     },
   );
 }
 
-export async function verifyPasswordResetOtp({ challengeId, otp }) {
+/**
+ * Verifies an OTP and issues a short-lived reset token.
+ *
+ * The raw reset token is returned only once. Its hash is stored
+ * in MongoDB instead of the raw token.
+ */
+export async function verifyPasswordResetOtp({
+  challengeId,
+  otp,
+}) {
   if (
     !isValidChallengeId(challengeId)
     || typeof otp !== 'string'
@@ -213,7 +314,9 @@ export async function verifyPasswordResetOtp({ challengeId, otp }) {
         attempts: { $lt: MAX_ATTEMPTS },
       },
       {
-        $inc: { attempts: 1 },
+        $inc: {
+          attempts: 1,
+        },
       },
     );
 
@@ -222,6 +325,7 @@ export async function verifyPasswordResetOtp({ challengeId, otp }) {
 
   const resetToken = generateResetToken();
   const resetTokenHash = hashResetToken(resetToken);
+
   const resetTokenExpiresAt = new Date(
     now.getTime() + RESET_TOKEN_TTL_MS,
   );
@@ -244,7 +348,9 @@ export async function verifyPasswordResetOtp({ challengeId, otp }) {
         resetTokenExpiresAt,
       },
     },
-    { new: true },
+    {
+      new: true,
+    },
   );
 
   if (!claimedChallenge) {
@@ -257,7 +363,14 @@ export async function verifyPasswordResetOtp({ challengeId, otp }) {
   };
 }
 
-export async function resetPassword({ resetToken, newPassword }) {
+/**
+ * Consumes a reset token, updates the password and revokes
+ * existing refresh sessions.
+ */
+export async function resetPassword({
+  resetToken,
+  newPassword,
+}) {
   if (
     typeof resetToken !== 'string'
     || resetToken.length < 32
@@ -291,9 +404,13 @@ export async function resetPassword({ resetToken, newPassword }) {
       invalidatedAt: null,
     },
     {
-      $set: { consumedAt: now },
+      $set: {
+        consumedAt: now,
+      },
     },
-    { new: false },
+    {
+      new: false,
+    },
   );
 
   if (!challenge) {
@@ -310,7 +427,9 @@ export async function resetPassword({ resetToken, newPassword }) {
         passwordHash,
         passwordChangedAt: now,
       },
-      $inc: { tokenVersion: 1 },
+      $inc: {
+        tokenVersion: 1,
+      },
     },
     {
       new: true,
@@ -328,9 +447,13 @@ export async function resetPassword({ resetToken, newPassword }) {
       revokedAt: null,
     },
     {
-      $set: { revokedAt: now },
+      $set: {
+        revokedAt: now,
+      },
     },
   );
 
-  return { success: true };
+  return {
+    success: true,
+  };
 }

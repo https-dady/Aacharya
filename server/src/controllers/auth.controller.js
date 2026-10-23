@@ -1,3 +1,7 @@
+import crypto from 'node:crypto';
+
+import { env } from '../config/env.js';
+
 import { login } from '../services/auth/auth.service.js';
 
 import {
@@ -11,6 +15,12 @@ import {
   requestEmailVerification,
   verifyEmailAddress,
 } from '../services/auth/email-verification.service.js';
+
+import {
+  createPasswordResetChallenge,
+  verifyPasswordResetOtp,
+  resetPassword,
+} from '../services/auth/password-reset.service.js';
 
 const REFRESH_COOKIE_NAME = 'aacharya_refresh_token';
 
@@ -30,6 +40,28 @@ function createAuthenticationError(statusCode, code, message) {
   error.expose = true;
 
   return error;
+}
+
+function sendPasswordResetRequestResponse(res, challenge) {
+  const expiresAt = challenge?.expiresAt
+    ?? new Date(
+      Date.now()
+        + env.passwordReset.otpExpiresInMinutes * 60 * 1000,
+    );
+
+  const challengeId = challenge?.challengeId
+    ?? crypto.randomBytes(12).toString('hex');
+
+  return res.status(200).json({
+    success: true,
+    data: {
+      challengeId,
+      expiresAt,
+      message:
+        'If an eligible account exists for this email, '
+        + 'a password reset code has been sent.',
+    },
+  });
 }
 
 export async function loginController(req, res, next) {
@@ -144,6 +176,51 @@ export async function confirmEmailVerificationController(req, res, next) {
       userId: req.user.id,
       challengeId: req.body.challengeId,
       otp: req.body.otp,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function requestPasswordResetController(req, res, next) {
+  try {
+    const challenge = await createPasswordResetChallenge(req.body.email);
+
+    return sendPasswordResetRequestResponse(res, challenge);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function verifyPasswordResetOtpController(req, res, next) {
+  try {
+    const result = await verifyPasswordResetOtp({
+      challengeId: req.body.challengeId,
+      otp: req.body.otp,
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        resetToken: result.resetToken,
+        expiresAt: result.expiresAt,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function confirmPasswordResetController(req, res, next) {
+  try {
+    const result = await resetPassword({
+      resetToken: req.body.resetToken,
+      newPassword: req.body.newPassword,
     });
 
     return res.status(200).json({
