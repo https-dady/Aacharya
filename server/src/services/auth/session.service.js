@@ -50,6 +50,24 @@ function normalizeMetadata(metadata = {}) {
 }
 
 /**
+ * Returns only the user fields required by the authenticated frontend.
+ * Password hashes, token versions and other internal fields are excluded.
+ */
+function serializeUser(user) {
+  return {
+    id: user.id,
+    institutionalId: user.institutionalId,
+    fullName: user.fullName,
+    email: user.email ?? null,
+    role: user.role,
+    status: user.status,
+    department: user.department,
+    isEmailVerified: user.isEmailVerified,
+    lastLoginAt: user.lastLoginAt,
+  };
+}
+
+/**
  * Creates a refresh session.
  * Only the SHA-256 hash of the refresh token is stored.
  */
@@ -76,7 +94,7 @@ export async function createRefreshSession(
 }
 
 /**
- * Rotates a refresh token and preserves its session family.
+ * Rotates a refresh token and returns the refreshed user's safe profile.
  */
 export async function rotateRefreshSession(
   refreshToken,
@@ -197,6 +215,7 @@ export async function rotateRefreshSession(
 
   return {
     userId: user.id,
+    user: serializeUser(user),
     refreshToken: newRefreshToken,
   };
 }
