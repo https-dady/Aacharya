@@ -11,6 +11,8 @@ import authRoutes from './routes/auth.routes.js';
 import departmentRoutes from './routes/department.routes.js';
 import hodRoutes from './routes/hod.routes.js';
 
+import facultyRoutes from './routes/faculty.routes.js';
+
 import { apiRateLimiter } from './middleware/rate-limit.middleware.js';
 
 import {
@@ -77,6 +79,9 @@ app.use('/api/v1/departments', departmentRoutes);
 
 // Account provisioning: HOD creation
 app.use('/api/v1/provisioning', hodRoutes);
+
+// Faculty account provisioning
+app.use('/api/v1/provisioning/faculty', facultyRoutes);
 
 // Error handling
 app.use(notFoundHandler);
