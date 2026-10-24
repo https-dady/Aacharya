@@ -24,9 +24,10 @@ function AuthProvider({ children }) {
   const saveAccessToken = useCallback((token) => {
     if (token) {
       sessionStorage.setItem(ACCESS_TOKEN_KEY, token);
-    } else {
-      sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+      return;
     }
+
+    sessionStorage.removeItem(ACCESS_TOKEN_KEY);
   }, []);
 
   const login = useCallback(
@@ -35,7 +36,9 @@ function AuthProvider({ children }) {
       const data = getAuthData(response);
 
       if (!data?.accessToken || !data?.user) {
-        throw new Error('Invalid authentication response from the server.');
+        throw new Error(
+          'Invalid authentication response from the server.',
+        );
       }
 
       saveAccessToken(data.accessToken);
@@ -60,13 +63,14 @@ function AuthProvider({ children }) {
       const response = await authService.refreshToken();
       const data = getAuthData(response);
 
-      if (!data?.accessToken) {
+      if (!data?.accessToken || !data?.user) {
         saveAccessToken(null);
         setUser(null);
         return false;
       }
 
       saveAccessToken(data.accessToken);
+      setUser(data.user);
 
       return true;
     } catch {
@@ -82,17 +86,19 @@ function AuthProvider({ children }) {
 
     async function initializeAuth() {
       try {
-        const token = sessionStorage.getItem(ACCESS_TOKEN_KEY);
-
-        if (token) {
-          return;
-        }
-
         const response = await authService.refreshToken();
         const data = getAuthData(response);
 
-        if (active && data?.accessToken) {
+        if (!active) {
+          return;
+        }
+
+        if (data?.accessToken && data?.user) {
           saveAccessToken(data.accessToken);
+          setUser(data.user);
+        } else {
+          saveAccessToken(null);
+          setUser(null);
         }
       } catch {
         if (active) {
