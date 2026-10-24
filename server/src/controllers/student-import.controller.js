@@ -319,11 +319,19 @@ export async function importStudentsController(req, res, next) {
     }
 
     if (error instanceof mongoose.Error.ValidationError) {
-      return res.status(400).json({
-        success: false,
-        message: 'One or more student records failed database validation.',
-      });
-    }
+  const validationErrors = Object.entries(error.errors || {}).map(
+    ([field, detail]) => ({
+      field,
+      message: detail.message,
+    }),
+  );
+
+  return res.status(400).json({
+    success: false,
+    message: 'One or more student records failed database validation.',
+    errors: validationErrors,
+  });
+}
 
     const duplicateResponse = getDuplicateKeyResponse(error);
 
