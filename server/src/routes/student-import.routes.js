@@ -5,6 +5,10 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
+import {
+  downloadStudentImportTemplateController,
+} from '../controllers/student-import-template.controller.js';
+
 const studentImportRouter = Router();
 
 const importStudentsSchema = z.object({
@@ -18,6 +22,13 @@ const importStudentsSchema = z.object({
     sectionId: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid section ID.'),
   }),
 });
+
+studentImportRouter.get(
+  '/students/import-template',
+  authenticate,
+  authRateLimiter,
+  downloadStudentImportTemplateController,
+);
 
 studentImportRouter.post(
   '/sections/:sectionId/students/import',
