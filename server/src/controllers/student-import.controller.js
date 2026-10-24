@@ -34,6 +34,11 @@ import {
 const MAX_IMPORT_SIZE = 1024 * 1024;
 const MAX_STUDENTS_PER_IMPORT = 500;
 
+const RETRYABLE_TRANSACTION_ERROR_CODES = new Set([
+  112,
+  251,
+]);
+
 function sendImportError(res, error) {
   return res.status(400).json({
     success: false,
@@ -46,6 +51,22 @@ function normalizeIdentifier(value) {
   return String(value || '')
     .trim()
     .toLowerCase();
+}
+
+function isRetryableTransactionError(error) {
+  if (typeof error?.hasErrorLabel === 'function') {
+    if (
+      error.hasErrorLabel('TransientTransactionError')
+      || error.hasErrorLabel('UnknownTransactionCommitResult')
+    ) {
+      return true;
+    }
+  }
+
+  return (
+    RETRYABLE_TRANSACTION_ERROR_CODES.has(error?.code)
+    || error?.codeName === 'WriteConflict'
+  );
 }
 
 async function hashPasswordsWithLimit(rows, concurrency = 8) {
@@ -125,6 +146,39 @@ async function replayPreviousImport(
   });
 }
 
+async function recoverConcurrentImport(
+  res,
+  idempotencyContext,
+) {
+  const racedImport = await StudentImportBatch.findOne({
+    mentor: idempotencyContext.mentorId,
+    section: idempotencyContext.sectionId,
+    idempotencyKey: idempotencyContext.idempotencyKey,
+  }).lean();
+
+  if (!racedImport) {
+    return null;
+  }
+
+  return replayPreviousImport(
+    res,
+    racedImport,
+    idempotencyContext.payloadHash,
+  );
+}
+
+function sendRetryableImportResponse(res) {
+  res.set('Retry-After', '2');
+
+  return res.status(503).json({
+    success: false,
+    message:
+      'The import could not be completed because of a temporary database transaction conflict. Retry the same request with the same Idempotency-Key.',
+    code: 'STUDENT_IMPORT_RETRY_REQUIRED',
+    retryable: true,
+  });
+}
+
 export async function importStudentsController(req, res, next) {
   let session;
   let idempotencyContext;
@@ -133,9 +187,9 @@ export async function importStudentsController(req, res, next) {
     const idempotencyKey = req.idempotencyKey;
 
     if (
-      typeof idempotencyKey !== 'string' ||
-      idempotencyKey.length < 16 ||
-      idempotencyKey.length > 128
+      typeof idempotencyKey !== 'string'
+      || idempotencyKey.length < 16
+      || idempotencyKey.length > 128
     ) {
       throw new StudentImportIdempotencyError(
         'A valid Idempotency-Key is required.',
@@ -145,9 +199,9 @@ export async function importStudentsController(req, res, next) {
     const mentor = await User.findById(req.user?.id);
 
     if (
-      !mentor ||
-      mentor.status !== ACCOUNT_STATUSES.ACTIVE ||
-      mentor.role !== USER_ROLES.MENTOR
+      !mentor
+      || mentor.status !== ACCOUNT_STATUSES.ACTIVE
+      || mentor.role !== USER_ROLES.MENTOR
     ) {
       return res.status(403).json({
         success: false,
@@ -172,8 +226,8 @@ export async function importStudentsController(req, res, next) {
     }
 
     const hasCsvContent =
-      typeof req.body?.csvContent === 'string' &&
-      req.body.csvContent.length > 0;
+      typeof req.body?.csvContent === 'string'
+      && req.body.csvContent.length > 0;
 
     const hasXlsxFile = Boolean(req.file?.buffer);
 
@@ -322,10 +376,10 @@ export async function importStudentsController(req, res, next) {
       }
 
       if (
-        !activeMentor.department ||
-        !mentor.department ||
-        activeMentor.department.toString() !==
-          mentor.department.toString()
+        !activeMentor.department
+        || !mentor.department
+        || activeMentor.department.toString()
+          !== mentor.department.toString()
       ) {
         const error = new Error(
           'Mentor department assignment is invalid or has changed.',
@@ -502,24 +556,36 @@ export async function importStudentsController(req, res, next) {
       return sendImportError(res, error);
     }
 
+    /*
+     * A competing request may have completed the same logical import
+     * first. Recover from the durable idempotency record instead of
+     * returning a duplicate-key error when that record exists.
+     *
+     * If the payload differs, replayPreviousImport returns HTTP 409.
+     */
     if (error?.code === 11000 && idempotencyContext) {
       try {
-        const racedImport = await StudentImportBatch.findOne({
-          mentor: idempotencyContext.mentorId,
-          section: idempotencyContext.sectionId,
-          idempotencyKey: idempotencyContext.idempotencyKey,
-        }).lean();
+        const recoveryResponse = await recoverConcurrentImport(
+          res,
+          idempotencyContext,
+        );
 
-        if (racedImport) {
-          return replayPreviousImport(
-            res,
-            racedImport,
-            idempotencyContext.payloadHash,
-          );
+        if (recoveryResponse) {
+          return recoveryResponse;
         }
-      } catch (replayError) {
-        return next(replayError);
+      } catch (recoveryError) {
+        return next(recoveryError);
       }
+    }
+
+    /*
+     * MongoDB transaction helpers retry labelled transient errors
+     * automatically. If retries are exhausted, ask the client to
+     * retry with the SAME key. The transaction is atomic, so this
+     * does not intentionally expose a partial import.
+     */
+    if (isRetryableTransactionError(error)) {
+      return sendRetryableImportResponse(res);
     }
 
     if (error instanceof mongoose.Error.ValidationError) {
