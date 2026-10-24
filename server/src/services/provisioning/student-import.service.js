@@ -243,8 +243,10 @@ function normalizeHeaders(headers) {
     );
   }
 
+  // FIX: Compare normalized headers against lowercase
+  // required column names.
   const missing = REQUIRED_COLUMNS.filter(
-    (column) => !normalized.includes(column),
+    (column) => !normalized.includes(column.toLowerCase()),
   );
 
   if (missing.length > 0) {
