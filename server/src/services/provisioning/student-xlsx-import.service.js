@@ -1,4 +1,7 @@
-import { parseStudentCsv, StudentImportError } from './student-import.service.js';
+import {
+  parseStudentCsv,
+  StudentImportError,
+} from './student-import.service.js';
 
 const REQUIRED_COLUMNS = [
   'institutionalId',
@@ -13,11 +16,16 @@ const ALLOWED_COLUMNS = [
   ...OPTIONAL_COLUMNS,
 ];
 
-/**
- * Converts spreadsheet rows into CSV-compatible content.
- * The XLSX library is injected to avoid coupling this service
- * to a particular workbook-loading implementation.
- */
+function escapeCsvValue(value) {
+  const text = String(value ?? '');
+
+  if (/[",\r\n]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+
+  return text;
+}
+
 export function parseStudentWorksheet(worksheetRows) {
   if (!Array.isArray(worksheetRows) || worksheetRows.length < 2) {
     throw new StudentImportError(
@@ -32,6 +40,12 @@ export function parseStudentWorksheet(worksheetRows) {
   const normalizedHeaders = headers.map((header) =>
     header.toLowerCase(),
   );
+
+  if (normalizedHeaders.some((header) => !header)) {
+    throw new StudentImportError(
+      'The spreadsheet contains an empty column name.',
+    );
+  }
 
   if (new Set(normalizedHeaders).size !== normalizedHeaders.length) {
     throw new StudentImportError(
@@ -62,27 +76,69 @@ export function parseStudentWorksheet(worksheetRows) {
     );
   }
 
-  const csvEscape = (value) => {
-    const text = String(value ?? '');
+  const csvLines = [headers.map(escapeCsvValue).join(',')];
 
-    return /[",\r\n]/.test(text)
-      ? `"${text.replace(/"/g, '""')}"`
-      : text;
-  };
+  const originalRowNumbers = [];
+  const rowErrors = [];
 
-  const csvContent = worksheetRows
-    .map((row) => {
-      if (!Array.isArray(row)) {
-        throw new StudentImportError(
-          'The spreadsheet contains an invalid row.',
-        );
-      }
+  for (let index = 1; index < worksheetRows.length; index += 1) {
+    const worksheetRow = worksheetRows[index];
 
-      return headers
-        .map((_, index) => csvEscape(row[index]))
-        .join(',');
-    })
-    .join('\n');
+    const rowNumber =
+      worksheetRow && !Array.isArray(worksheetRow)
+        ? worksheetRow.rowNumber ?? index + 1
+        : index + 1;
 
-  return parseStudentCsv(csvContent);
+    const values =
+      worksheetRow && !Array.isArray(worksheetRow)
+        ? worksheetRow.values
+        : worksheetRow;
+
+    if (!Array.isArray(values)) {
+      rowErrors.push({
+        row: rowNumber,
+        message: 'Invalid spreadsheet row.',
+      });
+      continue;
+    }
+
+    if (values.length > headers.length) {
+      rowErrors.push({
+        row: rowNumber,
+        message: `Expected at most ${headers.length} columns but received ${values.length}.`,
+      });
+      continue;
+    }
+
+    const normalizedValues = headers.map((_, columnIndex) =>
+      String(values[columnIndex] ?? '').trim(),
+    );
+
+    if (normalizedValues.every((value) => value === '')) {
+      continue;
+    }
+
+    csvLines.push(normalizedValues.map(escapeCsvValue).join(','));
+    originalRowNumbers.push(rowNumber);
+  }
+
+  if (rowErrors.length > 0) {
+    throw new StudentImportError(
+      'The spreadsheet contains invalid rows.',
+      rowErrors,
+    );
+  }
+
+  if (originalRowNumbers.length === 0) {
+    throw new StudentImportError(
+      'The spreadsheet does not contain any student records.',
+    );
+  }
+
+  const parsedRows = parseStudentCsv(csvLines.join('\n'));
+
+  return parsedRows.map((student, index) => ({
+    ...student,
+    rowNumber: originalRowNumbers[index],
+  }));
 }
