@@ -9,6 +9,7 @@ import ResetPassword from './features/auth/pages/ResetPassword.jsx';
 import EmailVerification from './features/auth/pages/EmailVerification.jsx';
 
 import authService from './features/auth/services/authService.js';
+import { useAuth } from './features/auth/context/AuthContext.jsx';
 
 const INITIAL_LOGIN_FORM = {
   institutionalId: '',
@@ -71,9 +72,7 @@ function DecorativeGrid() {
       <div className="grid-orbit grid-orbit-three" />
 
       <div className="grid-floating-card floating-card-one">
-        <span className="floating-icon floating-icon-lavender">
-          A
-        </span>
+        <span className="floating-icon floating-icon-lavender">A</span>
 
         <span>
           <strong>Learn with purpose</strong>
@@ -82,9 +81,7 @@ function DecorativeGrid() {
       </div>
 
       <div className="grid-floating-card floating-card-two">
-        <span className="floating-icon floating-icon-butter">
-          ✓
-        </span>
+        <span className="floating-icon floating-icon-butter">✓</span>
 
         <span>
           <strong>Your journey, organized</strong>
@@ -96,11 +93,7 @@ function DecorativeGrid() {
         <div className="symbol-ring symbol-ring-outer" />
         <div className="symbol-ring symbol-ring-inner" />
 
-        <svg
-          className="symbol-book"
-          viewBox="0 0 100 100"
-          fill="none"
-        >
+        <svg className="symbol-book" viewBox="0 0 100 100" fill="none">
           <path
             d="M50 30C40 23 28 22 17 26V66C29 62 41 64 50 71V30Z"
             stroke="currentColor"
@@ -244,7 +237,29 @@ function AuthenticatedView({ user, onLogout, loading, error }) {
   );
 }
 
+function SessionLoadingView() {
+  return (
+    <div
+      className="flex min-h-48 items-center justify-center"
+      role="status"
+      aria-live="polite"
+    >
+      <p className="text-sm text-[#A4A4AF]">
+        Restoring your session...
+      </p>
+    </div>
+  );
+}
+
 export default function App() {
+  const {
+    user,
+    loading: authInitializing,
+    login,
+    logout,
+    setUser,
+  } = useAuth();
+
   const [screen, setScreen] = useState('login');
 
   const [loginForm, setLoginForm] = useState(INITIAL_LOGIN_FORM);
@@ -253,10 +268,6 @@ export default function App() {
 
   const [emailVerificationChallengeId, setEmailVerificationChallengeId] =
     useState('');
-
-  const [emailVerificationOtp, setEmailVerificationOtp] = useState('');
-
-  const [user, setUser] = useState(null);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -285,30 +296,15 @@ export default function App() {
     setLoading(true);
 
     try {
-      const response = await authService.login({
+      const authenticatedUser = await login({
         institutionalId: loginForm.institutionalId.trim(),
         password: loginForm.password,
       });
 
-      const data = getResponseData(response);
-
-      if (!data?.accessToken || !data?.user) {
-        throw new Error(
-          'The server response is missing the account or access token.',
-        );
-      }
-
-      sessionStorage.setItem(
-        'aacharya_access_token',
-        data.accessToken,
-      );
-
-      setUser(data.user);
       setLoginForm(INITIAL_LOGIN_FORM);
 
-      if (data.user.isEmailVerified === false) {
+      if (authenticatedUser.isEmailVerified === false) {
         setEmailVerificationChallengeId('');
-        setEmailVerificationOtp('');
         switchScreen('email-verification');
       } else {
         switchScreen('authenticated');
@@ -430,7 +426,6 @@ export default function App() {
       }
 
       setEmailVerificationChallengeId(data.challengeId);
-      setEmailVerificationOtp('');
 
       setSuccess('Verification code requested successfully.');
 
@@ -462,7 +457,6 @@ export default function App() {
           : current,
       );
 
-      setEmailVerificationOtp('');
       setEmailVerificationChallengeId('');
 
       switchScreen('authenticated');
@@ -480,19 +474,13 @@ export default function App() {
     setLoading(true);
 
     try {
-      await authService.logout();
+      await logout();
     } catch {
-      // Local authentication state is cleared even if logout cannot
-      // reach the server. The server-side refresh session may remain
-      // valid until it expires or is revoked separately.
+      // AuthContext clears local authentication state in its finally block.
     } finally {
-      sessionStorage.removeItem('aacharya_access_token');
-
-      setUser(null);
       setLoginForm(INITIAL_LOGIN_FORM);
       setRecovery(INITIAL_RECOVERY_STATE);
       setEmailVerificationChallengeId('');
-      setEmailVerificationOtp('');
 
       setLoading(false);
       switchScreen('login');
@@ -510,9 +498,42 @@ export default function App() {
     switchScreen('login');
   }
 
+  /*
+   * Wait for AuthProvider to finish checking the existing session.
+   * This prevents the login form from flashing while initialization runs.
+   */
+  if (authInitializing) {
+    return (
+      <main className="auth-shell">
+        <section className="auth-panel">
+          <div className="mobile-brand">
+            <BrandHeader />
+          </div>
+
+          <div className="auth-card">
+            <SessionLoadingView />
+          </div>
+
+          <AuthFooter />
+        </section>
+      </main>
+    );
+  }
+
+  /*
+   * If the context has restored a user after refresh, show the
+   * authenticated screen rather than leaving the app on the login form.
+   */
+  const effectiveScreen =
+    user && screen === 'login'
+      ? user.isEmailVerified === false
+        ? 'email-verification'
+        : 'authenticated'
+      : screen;
+
   const isAuthenticatedScreen =
-    screen === 'authenticated' ||
-    screen === 'email-verification';
+    effectiveScreen === 'authenticated' ||
+    effectiveScreen === 'email-verification';
 
   return (
     <main className="auth-shell">
@@ -584,7 +605,7 @@ export default function App() {
         </div>
 
         <div className="auth-card">
-          {screen === 'login' && (
+          {effectiveScreen === 'login' && (
             <Login
               form={loginForm}
               setForm={setLoginForm}
@@ -596,7 +617,7 @@ export default function App() {
             />
           )}
 
-          {screen === 'forgot-password' && (
+          {effectiveScreen === 'forgot-password' && (
             <ForgotPassword
               email={recovery.email}
               onSubmit={handleRequestPasswordReset}
@@ -607,7 +628,7 @@ export default function App() {
             />
           )}
 
-          {screen === 'verify-reset-otp' && (
+          {effectiveScreen === 'verify-reset-otp' && (
             <VerifyResetOtp
               email={recovery.email}
               challengeId={recovery.challengeId}
@@ -619,7 +640,7 @@ export default function App() {
             />
           )}
 
-          {screen === 'reset-password' && (
+          {effectiveScreen === 'reset-password' && (
             <ResetPassword
               resetToken={recovery.resetToken}
               onSubmit={handleConfirmPasswordReset}
@@ -630,7 +651,7 @@ export default function App() {
             />
           )}
 
-          {screen === 'email-verification' && (
+          {effectiveScreen === 'email-verification' && (
             <EmailVerification
               email={user?.email || ''}
               challengeId={emailVerificationChallengeId}
@@ -643,7 +664,7 @@ export default function App() {
             />
           )}
 
-          {screen === 'authenticated' && (
+          {effectiveScreen === 'authenticated' && (
             <AuthenticatedView
               user={user}
               onLogout={handleLogout}
