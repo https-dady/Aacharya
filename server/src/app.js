@@ -5,8 +5,10 @@ import pinoHttp from 'pino-http';
 import cookieParser from 'cookie-parser';
 
 import { env } from './config/env.js';
+
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
+import departmentRoutes from './routes/department.routes.js';
 
 import { apiRateLimiter } from './middleware/rate-limit.middleware.js';
 
@@ -66,8 +68,11 @@ app.get('/api/v1/meta', (_req, res) => {
   });
 });
 
-// Authentication routes: login and refresh.
+// Authentication routes.
 app.use('/api/v1/auth', authRoutes);
+
+// Department management routes.
+app.use('/api/v1/departments', departmentRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
