@@ -13,6 +13,7 @@ import hodRoutes from './routes/hod.routes.js';
 
 import facultyRoutes from './routes/faculty.routes.js';
 import batchRoutes from './routes/batch.routes.js';
+import sectionRoutes from './routes/section.routes.js';
 
 import { apiRateLimiter } from './middleware/rate-limit.middleware.js';
 
@@ -86,6 +87,9 @@ app.use('/api/v1/provisioning/faculty', facultyRoutes);
 
 // Batch management
 app.use('/api/v1/provisioning/batches', batchRoutes);
+
+// Section management
+app.use('/api/v1/provisioning', sectionRoutes);
 
 // Error handling
 app.use(notFoundHandler);
