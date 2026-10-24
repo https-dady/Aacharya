@@ -20,8 +20,10 @@ export function studentImportIdempotencyMiddleware(
     if (error instanceof StudentImportIdempotencyError) {
       return res.status(error.statusCode).json({
         success: false,
-        message: error.message,
-        code: error.code,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
       });
     }
 
