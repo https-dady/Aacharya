@@ -314,44 +314,52 @@ export async function importStudentsController(req, res, next) {
       message: 'Students imported successfully.',
       data: result,
     });
-  } catch (error) {
-    if (error instanceof StudentImportError) {
-      return sendImportError(res, error);
-    }
-
-    if (error instanceof mongoose.Error.ValidationError) {
-  const validationErrors = Object.entries(error.errors || {}).map(
-    ([field, detail]) => ({
-      field,
-      message: detail.message,
-    }),
-  );
-
-  return res.status(400).json({
-    success: false,
-    message: 'One or more student records failed database validation.',
-    errors: validationErrors,
-  });
-}
-
-    const duplicateResponse = getDuplicateKeyResponse(error);
-
-    if (duplicateResponse) {
-      return res.status(409).json(duplicateResponse);
-    }
-
-    if ([400, 403, 404, 409].includes(error.statusCode)) {
-      return res.status(error.statusCode).json({
-        success: false,
-        message: error.message,
-        ...(error.conflicts ? { conflicts: error.conflicts } : {}),
-      });
-    }
-
-    return next(error);
-  } finally {
-    if (session) {
-      await session.endSession();
-    }
+} catch (error) {
+  if (error instanceof StudentImportError) {
+    return sendImportError(res, error);
   }
+
+  if (error instanceof mongoose.Error.ValidationError) {
+    return res.status(400).json({
+      success: false,
+      message: 'One or more student records failed database validation.',
+      errors: Object.entries(error.errors || {}).map(
+        ([field, detail]) => ({
+          field,
+          message: detail.message,
+        }),
+      ),
+    });
+  }
+
+  if (error?.code === 11000) {
+    const duplicateFields = Object.keys(error.keyPattern || {});
+
+    const message = duplicateFields.includes('institutionalId')
+      ? 'An institutional ID already exists. Refresh the student data and retry.'
+      : duplicateFields.includes('email')
+        ? 'An email address already exists. Refresh the student data and retry.'
+        : 'A duplicate student record was detected.';
+
+    return res.status(409).json({
+      success: false,
+      message,
+      code: 'DUPLICATE_STUDENT_RECORD',
+    });
+  }
+
+  if ([400, 403, 404, 409].includes(error.statusCode)) {
+    return res.status(error.statusCode).json({
+      success: false,
+      message: error.message,
+      ...(error.conflicts ? { conflicts: error.conflicts } : {}),
+    });
+  }
+
+  return next(error);
+} finally {
+  if (session) {
+    await session.endSession();
+  }
+}
 }
