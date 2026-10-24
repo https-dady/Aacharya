@@ -10,6 +10,10 @@ import {
 
 const MAX_FILE_SIZE = 1024 * 1024;
 const MAX_STUDENTS = 500;
+const MAX_WORKSHEETS = 1;
+const MAX_COLUMNS = 4;
+const MAX_CELL_LENGTH = 1024;
+const MAX_HEADER_LENGTH = 50;
 
 const REQUIRED_HEADERS = [
   'institutionalId',
@@ -22,10 +26,19 @@ const ALLOWED_HEADERS = [
   'email',
 ];
 
+function normalizeHeader(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase();
+}
+
 function cellToText(cell, rowNumber, columnNumber) {
-  if (cell.type === ExcelJS.ValueType.Formula) {
+  if (
+    cell.type === ExcelJS.ValueType.Formula ||
+    cell.type === ExcelJS.ValueType.SharedFormula
+  ) {
     throw new StudentImportError(
-      `Formula or unsupported cell value at row ${rowNumber}, column ${columnNumber}.`,
+      `Formula cells are not allowed at row ${rowNumber}, column ${columnNumber}.`,
     );
   }
 
@@ -38,13 +51,27 @@ function cellToText(cell, rowNumber, columnNumber) {
     );
   }
 
-  return String(cell.value ?? '').trim();
+  const value = String(cell.value ?? '').trim();
+
+  if (value.length > MAX_CELL_LENGTH) {
+    throw new StudentImportError(
+      `Cell content exceeds the maximum allowed length at row ${rowNumber}, column ${columnNumber}.`,
+    );
+  }
+
+  if (value.includes('\u0000')) {
+    throw new StudentImportError(
+      `Null characters are not allowed at row ${rowNumber}, column ${columnNumber}.`,
+    );
+  }
+
+  return value;
 }
 
-export async function readStudentXlsx(buffer) {
+function validateWorkbookBuffer(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
     throw new StudentImportError(
-      'An XLSX file is required.',
+      'A non-empty XLSX file is required.',
     );
   }
 
@@ -54,40 +81,37 @@ export async function readStudentXlsx(buffer) {
     );
   }
 
-  let workbook;
+  /*
+   * XLSX files are ZIP containers.
+   * Reject buffers that do not begin with a ZIP signature.
+   */
+  const hasZipSignature =
+    buffer.length >= 4 &&
+    buffer[0] === 0x50 &&
+    buffer[1] === 0x4b &&
+    (
+      (
+        buffer[2] === 0x03 &&
+        buffer[3] === 0x04
+      ) ||
+      (
+        buffer[2] === 0x05 &&
+        buffer[3] === 0x06
+      ) ||
+      (
+        buffer[2] === 0x07 &&
+        buffer[3] === 0x08
+      )
+    );
 
-  try {
-    workbook = new ExcelJS.Workbook();
-
-    await workbook.xlsx.load(buffer);
-  } catch {
+  if (!hasZipSignature) {
     throw new StudentImportError(
       'The uploaded file is not a valid XLSX workbook.',
     );
   }
+}
 
-  if (workbook.worksheets.length !== 1) {
-    throw new StudentImportError(
-      'The workbook must contain exactly one worksheet.',
-    );
-  }
-
-  const worksheet = workbook.worksheets[0];
-
-  if (worksheet.rowCount > MAX_STUDENTS + 1) {
-    throw new StudentImportError(
-      `A maximum of ${MAX_STUDENTS} spreadsheet rows can be processed, including the header.`,
-    );
-  }
-
-  if (worksheet.state !== 'visible') {
-    throw new StudentImportError(
-      'The worksheet must be visible.',
-    );
-  }
-
-  const headerRow = worksheet.getRow(1);
-
+function validateHeaders(headerRow) {
   const headerWidth = Math.max(
     headerRow.cellCount,
     headerRow.actualCellCount,
@@ -95,7 +119,7 @@ export async function readStudentXlsx(buffer) {
 
   if (
     headerWidth < REQUIRED_HEADERS.length ||
-    headerWidth > ALLOWED_HEADERS.length
+    headerWidth > MAX_COLUMNS
   ) {
     throw new StudentImportError(
       `The XLSX header must contain ${REQUIRED_HEADERS.join(', ')} and may optionally include email.`,
@@ -109,26 +133,32 @@ export async function readStudentXlsx(buffer) {
     column <= headerWidth;
     column += 1
   ) {
-    headers.push(
-      cellToText(
-        headerRow.getCell(column),
-        1,
-        column,
-      ),
+    const value = cellToText(
+      headerRow.getCell(column),
+      1,
+      column,
     );
+
+    if (
+      !value ||
+      value.length > MAX_HEADER_LENGTH
+    ) {
+      throw new StudentImportError(
+        `Invalid or empty column name at column ${column}.`,
+      );
+    }
+
+    headers.push(value);
   }
 
-  const normalized = headers.map((header) =>
-    header.toLowerCase(),
+  const normalizedHeaders = headers.map(
+    normalizeHeader,
   );
 
-  if (normalized.some((header) => !header)) {
-    throw new StudentImportError(
-      'The spreadsheet contains an empty column name.',
-    );
-  }
-
-  if (new Set(normalized).size !== normalized.length) {
+  if (
+    new Set(normalizedHeaders).size !==
+    normalizedHeaders.length
+  ) {
     throw new StudentImportError(
       'The spreadsheet contains duplicate column names.',
     );
@@ -138,7 +168,8 @@ export async function readStudentXlsx(buffer) {
     (header) =>
       !ALLOWED_HEADERS.some(
         (allowed) =>
-          allowed.toLowerCase() === header.toLowerCase(),
+          normalizeHeader(allowed) ===
+          normalizeHeader(header),
       ),
   );
 
@@ -150,7 +181,9 @@ export async function readStudentXlsx(buffer) {
 
   const missing = REQUIRED_HEADERS.filter(
     (required) =>
-      !normalized.includes(required.toLowerCase()),
+      !normalizedHeaders.includes(
+        normalizeHeader(required),
+      ),
   );
 
   if (missing.length > 0) {
@@ -158,6 +191,87 @@ export async function readStudentXlsx(buffer) {
       `Missing required columns: ${missing.join(', ')}.`,
     );
   }
+
+  return {
+    headers,
+    headerWidth,
+  };
+}
+
+function validateWorksheet(worksheet) {
+  if (worksheet.state !== 'visible') {
+    throw new StudentImportError(
+      'The worksheet must be visible.',
+    );
+  }
+
+  if (worksheet.rowCount > MAX_STUDENTS + 1) {
+    throw new StudentImportError(
+      `The worksheet cannot contain more than ${MAX_STUDENTS} student rows plus one header row.`,
+    );
+  }
+
+  /*
+   * Reject merged cells because they can make individual
+   * student fields ambiguous.
+   */
+  if (worksheet.model?.merges?.length > 0) {
+    throw new StudentImportError(
+      'Merged cells are not allowed in the student import template.',
+    );
+  }
+
+  /*
+   * Hidden columns could conceal values from the operator.
+   */
+  for (
+    let columnNumber = 1;
+    columnNumber <= MAX_COLUMNS;
+    columnNumber += 1
+  ) {
+    const column = worksheet.getColumn(columnNumber);
+
+    if (column.hidden) {
+      throw new StudentImportError(
+        `Hidden columns are not allowed (column ${columnNumber}).`,
+      );
+    }
+  }
+}
+
+export async function readStudentXlsx(buffer) {
+  validateWorkbookBuffer(buffer);
+
+  let workbook;
+
+  try {
+    workbook = new ExcelJS.Workbook();
+
+    await workbook.xlsx.load(buffer);
+  } catch {
+    throw new StudentImportError(
+      'The uploaded file is not a valid or readable XLSX workbook.',
+    );
+  }
+
+  if (
+    workbook.worksheets.length !== MAX_WORKSHEETS
+  ) {
+    throw new StudentImportError(
+      'The workbook must contain exactly one worksheet.',
+    );
+  }
+
+  const worksheet = workbook.worksheets[0];
+
+  validateWorksheet(worksheet);
+
+  const headerRow = worksheet.getRow(1);
+
+  const {
+    headers,
+    headerWidth,
+  } = validateHeaders(headerRow);
 
   const worksheetRows = [];
 
@@ -201,6 +315,10 @@ export async function readStudentXlsx(buffer) {
       );
     }
 
+    /*
+     * Ignore completely empty rows while preserving the
+     * original spreadsheet row number for error reporting.
+     */
     if (values.every((value) => !value)) {
       continue;
     }
@@ -223,6 +341,10 @@ export async function readStudentXlsx(buffer) {
     );
   }
 
+  /*
+   * Delegate field-level validation and duplicate detection
+   * to the existing shared worksheet parser.
+   */
   return parseStudentWorksheet([
     headers,
     ...worksheetRows,

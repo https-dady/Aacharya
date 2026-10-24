@@ -104,6 +104,14 @@ export async function importStudentsController(
       });
     }
 
+    if (!mentor.department) {
+      return res.status(403).json({
+        success: false,
+        message:
+          'The mentor is not assigned to a department.',
+      });
+    }
+
     const { sectionId } = req.params;
 
     if (!mongoose.isValidObjectId(sectionId)) {
@@ -248,7 +256,8 @@ export async function importStudentsController(
 
     await session.withTransaction(async () => {
       /*
-       * Recheck the mentor's account inside the transaction.
+       * Recheck the mentor's account and department
+       * inside the transaction.
        */
       const activeMentor = await User.findOne({
         _id: mentor._id,
@@ -266,32 +275,30 @@ export async function importStudentsController(
         throw error;
       }
 
-      /*
-       * Only an active section can receive student accounts.
-       */
-      const section = await Section.findOne({
-        _id: sectionId,
-        status: 'ACTIVE',
-      }).session(session);
-
-      if (!section) {
+      if (
+        !activeMentor.department ||
+        !mentor.department ||
+        activeMentor.department.toString() !==
+          mentor.department.toString()
+      ) {
         const error = new Error(
-          'Active section not found.',
+          'Mentor department assignment is invalid or has changed.',
         );
 
-        error.statusCode = 404;
+        error.statusCode = 403;
 
         throw error;
       }
 
+      /*
+       * Confirm the mentor is still assigned to the section.
+       */
       const currentAssignedSections = (
         activeMentor.assignedSections || []
       ).map((id) => id.toString());
 
       if (
-        !currentAssignedSections.includes(
-          section._id.toString(),
-        )
+        !currentAssignedSections.includes(sectionId)
       ) {
         const error = new Error(
           'You are not assigned to this section.',
@@ -303,18 +310,38 @@ export async function importStudentsController(
       }
 
       /*
+       * Only an active section belonging to the mentor's
+       * current department can receive student accounts.
+       */
+      const section = await Section.findOne({
+        _id: sectionId,
+        department: activeMentor.department,
+        status: 'ACTIVE',
+      }).session(session);
+
+      if (!section) {
+        const error = new Error(
+          'No active section was found in your department.',
+        );
+
+        error.statusCode = 404;
+
+        throw error;
+      }
+
+      /*
        * Confirm the section belongs to an active batch
-       * within the same department.
+       * in the same department.
        */
       const batch = await Batch.findOne({
         _id: section.batch,
-        department: section.department,
+        department: activeMentor.department,
         status: 'ACTIVE',
       }).session(session);
 
       if (!batch) {
         const error = new Error(
-          'The section does not belong to an active batch.',
+          'The section does not belong to an active batch in your department.',
         );
 
         error.statusCode = 400;
@@ -322,6 +349,9 @@ export async function importStudentsController(
         throw error;
       }
 
+      /*
+       * Confirm the mentor is still assigned to this batch.
+       */
       const currentAssignedBatches = (
         activeMentor.assignedBatches || []
       ).map((id) => id.toString());
@@ -394,7 +424,7 @@ export async function importStudentsController(
       }
 
       /*
-       * Prepare all student documents.
+       * Prepare student documents.
        * Password hashes are already available.
        */
       const students = rows.map((row, index) => ({

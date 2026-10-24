@@ -1,10 +1,19 @@
 import { Router } from 'express';
 import { z } from 'zod';
 
-import { assignMentorController } from '../controllers/mentor.controller.js';
+import {
+  assignMentorController,
+  listMentorsController,
+} from '../controllers/mentor.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
+
+import {
+  USER_ROLES,
+  ACCOUNT_STATUSES,
+} from '../models/user.model.js';
 
 const mentorRouter = Router();
 
@@ -21,7 +30,49 @@ const assignMentorSchema = z.object({
     batchIds: z.array(objectIdSchema).max(100),
     sectionIds: z.array(objectIdSchema).max(500),
   }).strict(),
+
+  query: z.object({}),
 });
+
+const listMentorsSchema = z.object({
+  params: z.object({}),
+
+  body: z.object({}),
+
+  query: z.object({
+    page: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100000)
+      .optional(),
+
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional(),
+
+    search: z.string().trim().max(100).optional(),
+
+    status: z
+      .enum([
+        ACCOUNT_STATUSES.ACTIVE,
+        ACCOUNT_STATUSES.SUSPENDED,
+        ACCOUNT_STATUSES.DISABLED,
+      ])
+      .optional(),
+  }).strict(),
+});
+
+mentorRouter.get(
+  '/mentors',
+  authenticate,
+  authRateLimiter,
+  validate(listMentorsSchema),
+  listMentorsController,
+);
 
 mentorRouter.patch(
   '/faculty/:facultyId/mentor',

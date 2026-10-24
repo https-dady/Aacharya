@@ -19,50 +19,102 @@ function createError(statusCode, code, message) {
   return error;
 }
 
+async function getActiveHodDepartment(userId) {
+  const hod = await User.findById(userId)
+    .select('role status department');
+
+  if (
+    !hod
+    || hod.status !== ACCOUNT_STATUSES.ACTIVE
+    || hod.role !== USER_ROLES.HOD
+  ) {
+    throw createError(
+      hod ? 403 : 401,
+      hod ? 'FORBIDDEN' : 'UNAUTHORIZED',
+      'Only an active HOD can manage mentor assignments.',
+    );
+  }
+
+  if (!hod.department) {
+    throw createError(
+      409,
+      'DEPARTMENT_NOT_ASSIGNED',
+      'The HOD is not assigned to a department.',
+    );
+  }
+
+  const department = await Department.findOne({
+    _id: hod.department,
+    hod: hod._id,
+    status: 'ACTIVE',
+  }).select('_id name code');
+
+  if (!department) {
+    throw createError(
+      409,
+      'DEPARTMENT_ASSIGNMENT_INVALID',
+      'The HOD does not have an active department assignment.',
+    );
+  }
+
+  return { hod, department };
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function normalizeMentor(mentor, department, batches, sections) {
+  const assignedBatchIds = new Set(
+    (mentor.assignedBatches ?? []).map((id) => id.toString()),
+  );
+
+  const assignedSectionIds = new Set(
+    (mentor.assignedSections ?? []).map((id) => id.toString()),
+  );
+
+  return {
+    id: mentor._id.toString(),
+    institutionalId: mentor.institutionalId,
+    fullName: mentor.fullName,
+    email: mentor.email ?? null,
+    role: mentor.role,
+    status: mentor.status,
+
+    department: {
+      id: department._id.toString(),
+      name: department.name,
+      code: department.code,
+    },
+
+    assignedBatches: batches
+      .filter((batch) => assignedBatchIds.has(batch._id.toString()))
+      .map((batch) => ({
+        id: batch._id.toString(),
+        name: batch.name,
+        code: batch.code,
+        academicYear: batch.academicYear,
+      })),
+
+    assignedSections: sections
+      .filter((section) => assignedSectionIds.has(section._id.toString()))
+      .map((section) => ({
+        id: section._id.toString(),
+        name: section.name,
+        code: section.code,
+        batch: section.batch.toString(),
+      })),
+
+    createdAt: mentor.createdAt,
+    updatedAt: mentor.updatedAt,
+  };
+}
+
 export async function assignMentorController(req, res, next) {
   try {
-    const hod = await User.findById(req.user?.id)
-      .select('role status department');
-
-    if (
-      !hod
-      || hod.status !== ACCOUNT_STATUSES.ACTIVE
-      || hod.role !== USER_ROLES.HOD
-    ) {
-      return next(
-        createError(
-          hod ? 403 : 401,
-          hod ? 'FORBIDDEN' : 'UNAUTHORIZED',
-          'Only an active HOD can assign mentors.',
-        ),
-      );
-    }
-
-    if (!hod.department) {
-      return next(
-        createError(
-          409,
-          'DEPARTMENT_NOT_ASSIGNED',
-          'The HOD is not assigned to a department.',
-        ),
-      );
-    }
-
-    const department = await Department.findOne({
-      _id: hod.department,
-      hod: hod._id,
-      status: 'ACTIVE',
-    }).select('_id name code');
-
-    if (!department) {
-      return next(
-        createError(
-          409,
-          'DEPARTMENT_ASSIGNMENT_INVALID',
-          'The HOD does not have an active department assignment.',
-        ),
-      );
-    }
+    const { hod, department } = await getActiveHodDepartment(
+      req.user?.id,
+    );
 
     const { facultyId } = req.params;
     const { batchIds, sectionIds } = req.body;
@@ -164,23 +216,143 @@ export async function assignMentorController(req, res, next) {
           email: faculty.email,
           role: faculty.role,
           status: faculty.status,
+
           department: {
             id: department.id,
             name: department.name,
             code: department.code,
           },
+
           assignedBatches: batches.map((batch) => ({
             id: batch.id,
             name: batch.name,
             code: batch.code,
             academicYear: batch.academicYear,
           })),
+
           assignedSections: sections.map((section) => ({
             id: section.id,
             name: section.name,
             code: section.code,
             batch: section.batch.toString(),
           })),
+        },
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function listMentorsController(req, res, next) {
+  try {
+    const { department } = await getActiveHodDepartment(
+      req.user?.id,
+    );
+
+    const page = Number(req.query.page ?? 1);
+    const limit = Number(req.query.limit ?? 20);
+    const search = String(req.query.search ?? '').trim();
+
+    const filter = {
+      department: department._id,
+      role: USER_ROLES.MENTOR,
+    };
+
+    if (req.query.status) {
+      filter.status = req.query.status;
+    }
+
+    if (search) {
+      const searchRegex = new RegExp(
+        escapeRegex(search),
+        'i',
+      );
+
+      filter.$or = [
+        { institutionalId: searchRegex },
+        { fullName: searchRegex },
+        { email: searchRegex },
+      ];
+    }
+
+    const skip = (page - 1) * limit;
+
+    const [mentors, total] = await Promise.all([
+      User.find(filter)
+        .select(
+          'institutionalId fullName email role status department assignedBatches assignedSections createdAt updatedAt',
+        )
+        .sort({
+          fullName: 1,
+          _id: 1,
+        })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+
+      User.countDocuments(filter),
+    ]);
+
+    const batchIds = [
+      ...new Set(
+        mentors.flatMap((mentor) =>
+          (mentor.assignedBatches ?? []).map((id) => id.toString()),
+        ),
+      ),
+    ];
+
+    const sectionIds = [
+      ...new Set(
+        mentors.flatMap((mentor) =>
+          (mentor.assignedSections ?? []).map((id) => id.toString()),
+        ),
+      ),
+    ];
+
+    const [batches, sections] = await Promise.all([
+      batchIds.length
+        ? Batch.find({
+            _id: { $in: batchIds },
+            department: department._id,
+          }).select('_id name code academicYear')
+        : [],
+
+      sectionIds.length
+        ? Section.find({
+            _id: { $in: sectionIds },
+            department: department._id,
+          }).select('_id name code batch')
+        : [],
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Mentors retrieved successfully.',
+
+      data: {
+        mentors: mentors.map((mentor) =>
+          normalizeMentor(
+            mentor,
+            department,
+            batches,
+            sections,
+          ),
+        ),
+
+        department: {
+          id: department.id,
+          name: department.name,
+          code: department.code,
+        },
+
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNextPage: page * limit < total,
+          hasPreviousPage: page > 1,
         },
       },
     });

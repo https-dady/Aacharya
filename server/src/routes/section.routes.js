@@ -3,20 +3,24 @@ import { z } from 'zod';
 
 import {
   createSectionController,
+  listSectionsController,
 } from '../controllers/section.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
+import { SECTION_STATUSES } from '../models/section.model.js';
+
 const sectionRouter = Router();
+
+const batchIdSchema = z
+  .string()
+  .regex(/^[a-f\d]{24}$/i, 'A valid batch ID is required.');
 
 const createSectionSchema = z.object({
   params: z.object({
-    batchId: z.string().regex(
-      /^[a-f\d]{24}$/i,
-      'A valid batch ID is required.',
-    ),
+    batchId: batchIdSchema,
   }).strict(),
 
   body: z.object({
@@ -32,7 +36,50 @@ const createSectionSchema = z.object({
         'Section code can contain letters, numbers, and hyphens.',
       ),
   }).strict(),
+
+  query: z.object({}),
 });
+
+const listSectionsSchema = z.object({
+  params: z.object({
+    batchId: batchIdSchema,
+  }).strict(),
+
+  body: z.object({}),
+
+  query: z.object({
+    page: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100000)
+      .optional(),
+
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional(),
+
+    search: z.string().trim().max(100).optional(),
+
+    status: z
+      .enum([
+        SECTION_STATUSES.ACTIVE,
+        SECTION_STATUSES.INACTIVE,
+      ])
+      .optional(),
+  }).strict(),
+});
+
+sectionRouter.get(
+  '/batches/:batchId/sections',
+  authenticate,
+  authRateLimiter,
+  validate(listSectionsSchema),
+  listSectionsController,
+);
 
 sectionRouter.post(
   '/batches/:batchId/sections',
