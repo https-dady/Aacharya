@@ -5,11 +5,6 @@ const TEMPLATE_HEADERS = [
   'email',
 ];
 
-const TEMPLATE_EXAMPLE_ROWS = [
-  ['STU001', 'Rahul Sharma', 'ChangeMe123!', 'rahul@example.com'],
-  ['STU002', 'Priya Verma', 'ChangeMe456!', 'priya@example.com'],
-];
-
 function escapeCsvValue(value) {
   const stringValue = String(value ?? '');
 
@@ -20,16 +15,21 @@ function escapeCsvValue(value) {
   return stringValue;
 }
 
+/**
+ * Generates a blank CSV template for student account provisioning.
+ *
+ * Required columns:
+ * - institutionalId
+ * - fullName
+ * - password
+ *
+ * Optional column:
+ * - email
+ *
+ * No example credentials are included in the downloadable template.
+ */
 export function generateStudentImportTemplate() {
-  const rows = [
-    TEMPLATE_HEADERS,
-    ...TEMPLATE_EXAMPLE_ROWS,
-  ];
-
-  return rows
-    .map((row) => row.map(escapeCsvValue).join(','))
-    .join('\r\n')
-    .concat('\r\n');
+  return `${TEMPLATE_HEADERS.join(',')}\r\n`;
 }
 
 export function generateStudentImportHeaders() {
