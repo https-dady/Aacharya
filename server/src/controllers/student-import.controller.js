@@ -270,6 +270,7 @@ export async function importStudentsController(req, res, next) {
         }
       }
 
+      const importRowNumbers = rows.map((row) => row.rowNumber);
       const students = [];
 
       for (let index = 0; index < rows.length; index += 1) {
