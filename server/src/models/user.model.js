@@ -68,7 +68,6 @@ const userSchema = new Schema(
         values: Object.values(USER_ROLES),
         message: 'Invalid user role.',
       },
-      immutable: true,
     },
 
     status: {
