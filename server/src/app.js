@@ -16,6 +16,8 @@ import batchRoutes from './routes/batch.routes.js';
 import sectionRoutes from './routes/section.routes.js';
 import mentorRoutes from './routes/mentor.routes.js';
 import studentRoutes from './routes/student.routes.js';
+import studentImportRoutes from './routes/student-import.routes.js';
+
 
 import { apiRateLimiter } from './middleware/rate-limit.middleware.js';
 
@@ -98,6 +100,10 @@ app.use('/api/v1/provisioning', mentorRoutes);
 
 // Student account provisioning
 app.use('/api/v1/provisioning', studentRoutes);
+
+// Import bulk student CSV
+app.use('/api/v1/provisioning', studentImportRoutes);
+
 
 // Error handling
 app.use(notFoundHandler);
