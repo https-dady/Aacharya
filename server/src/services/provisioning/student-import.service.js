@@ -4,9 +4,7 @@ const REQUIRED_COLUMNS = [
   'password',
 ];
 
-const OPTIONAL_COLUMNS = [
-  'email',
-];
+const OPTIONAL_COLUMNS = ['email'];
 
 const ALLOWED_COLUMNS = [
   ...REQUIRED_COLUMNS,
@@ -56,6 +54,30 @@ function parseCsvLine(line, lineNumber) {
   return values;
 }
 
+function findDuplicateRows(rows, field, normalize = (value) => value) {
+  const firstRowByValue = new Map();
+  const duplicates = [];
+
+  for (const row of rows) {
+    const value = normalize(row[field]);
+
+    if (!value) {
+      continue;
+    }
+
+    if (firstRowByValue.has(value)) {
+      duplicates.push({
+        row: row.rowNumber,
+        message: `Duplicate ${field} "${row[field]}" also appears on row ${firstRowByValue.get(value)}.`,
+      });
+    } else {
+      firstRowByValue.set(value, row.rowNumber);
+    }
+  }
+
+  return duplicates;
+}
+
 export function parseStudentCsv(csvContent) {
   if (typeof csvContent !== 'string' || !csvContent.trim()) {
     throw new StudentImportError('The CSV file is empty.');
@@ -83,6 +105,12 @@ export function parseStudentCsv(csvContent) {
   const normalizedHeaders = headers.map((header) =>
     header.toLowerCase(),
   );
+
+  if (normalizedHeaders.some((header) => !header)) {
+    throw new StudentImportError(
+      'The CSV contains an empty column name.',
+    );
+  }
 
   if (new Set(normalizedHeaders).size !== normalizedHeaders.length) {
     throw new StudentImportError(
@@ -181,10 +209,10 @@ export function parseStudentCsv(csvContent) {
     }
 
     rows.push({
-      institutionalId: row.institutionalId,
-      fullName: row.fullName,
+      institutionalId: row.institutionalId.trim(),
+      fullName: row.fullName.trim(),
       password: row.password,
-      email: row.email || undefined,
+      email: row.email?.trim().toLowerCase() || undefined,
       rowNumber: lineNumber,
     });
   }
@@ -193,6 +221,30 @@ export function parseStudentCsv(csvContent) {
     throw new StudentImportError(
       'The CSV contains invalid student records.',
       errors,
+    );
+  }
+
+  const duplicateIdErrors = findDuplicateRows(
+    rows,
+    'institutionalId',
+    (value) => value.trim().toUpperCase(),
+  );
+
+  const duplicateEmailErrors = findDuplicateRows(
+    rows,
+    'email',
+    (value) => value.trim().toLowerCase(),
+  );
+
+  const duplicateErrors = [
+    ...duplicateIdErrors,
+    ...duplicateEmailErrors,
+  ];
+
+  if (duplicateErrors.length > 0) {
+    throw new StudentImportError(
+      'The CSV contains duplicate student identifiers.',
+      duplicateErrors,
     );
   }
 
