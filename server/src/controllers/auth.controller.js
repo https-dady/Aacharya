@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 
 import { env } from '../config/env.js';
 
+import { User } from '../models/user.model.js';
+
 import { login } from '../services/auth/auth.service.js';
 
 import {
@@ -43,14 +45,14 @@ function createAuthenticationError(statusCode, code, message) {
 }
 
 function sendPasswordResetRequestResponse(res, challenge) {
-  const expiresAt = challenge?.expiresAt
-    ?? new Date(
-      Date.now()
-        + env.passwordReset.otpExpiresInMinutes * 60 * 1000,
+  const expiresAt =
+    challenge?.expiresAt ??
+    new Date(
+      Date.now() + env.passwordReset.otpExpiresInMinutes * 60 * 1000,
     );
 
-  const challengeId = challenge?.challengeId
-    ?? crypto.randomBytes(12).toString('hex');
+  const challengeId =
+    challenge?.challengeId ?? crypto.randomBytes(12).toString('hex');
 
   return res.status(200).json({
     success: true,
@@ -58,8 +60,8 @@ function sendPasswordResetRequestResponse(res, challenge) {
       challengeId,
       expiresAt,
       message:
-        'If an eligible account exists for this email, '
-        + 'a password reset code has been sent.',
+        'If an eligible account exists for this email, ' +
+        'a password reset code has been sent.',
     },
   });
 }
@@ -100,6 +102,13 @@ export async function refreshController(req, res, next) {
     const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
 
     if (!refreshToken) {
+      res.clearCookie(REFRESH_COOKIE_NAME, {
+        httpOnly: REFRESH_COOKIE_OPTIONS.httpOnly,
+        secure: REFRESH_COOKIE_OPTIONS.secure,
+        sameSite: REFRESH_COOKIE_OPTIONS.sameSite,
+        path: REFRESH_COOKIE_OPTIONS.path,
+      });
+
       return next(
         createAuthenticationError(
           401,
@@ -114,6 +123,27 @@ export async function refreshController(req, res, next) {
       ipAddress: req.ip,
     });
 
+    const user = await User.findById(result.userId).select(
+      'institutionalId fullName email role isEmailVerified status',
+    );
+
+    if (!user || user.status !== 'ACTIVE') {
+      res.clearCookie(REFRESH_COOKIE_NAME, {
+        httpOnly: REFRESH_COOKIE_OPTIONS.httpOnly,
+        secure: REFRESH_COOKIE_OPTIONS.secure,
+        sameSite: REFRESH_COOKIE_OPTIONS.sameSite,
+        path: REFRESH_COOKIE_OPTIONS.path,
+      });
+
+      return next(
+        createAuthenticationError(
+          401,
+          'INVALID_REFRESH_SESSION',
+          'The refresh session is no longer valid.',
+        ),
+      );
+    }
+
     const accessToken = generateAccessToken(result.userId);
 
     res.cookie(
@@ -125,8 +155,15 @@ export async function refreshController(req, res, next) {
     return res.status(200).json({
       success: true,
       data: {
-        user: result.user,
         accessToken,
+        user: {
+          id: user.id,
+          institutionalId: user.institutionalId,
+          fullName: user.fullName,
+          email: user.email ?? null,
+          role: user.role,
+          isEmailVerified: user.isEmailVerified,
+        },
       },
     });
   } catch (error) {

@@ -1,36 +1,101 @@
-import { render, screen, fireEvent } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { BrowserRouter } from 'react-router-dom';
 
 import App from './App.jsx';
+import { AuthProvider } from './features/auth/context/AuthContext.jsx';
+import authService from './features/auth/services/authService.js';
 
-describe('App component', () => {
-  it('renders the starter heading', () => {
-    render(<App />);
+vi.mock('./features/auth/services/authService.js', () => ({
+  default: {
+    refreshToken: vi.fn(),
+    login: vi.fn(),
+    logout: vi.fn(),
+    requestEmailVerification: vi.fn(),
+    confirmEmailVerification: vi.fn(),
+    requestPasswordReset: vi.fn(),
+    verifyPasswordResetOtp: vi.fn(),
+    confirmPasswordReset: vi.fn(),
+  },
+}));
 
-    expect(
-      screen.getByRole('heading', { name: 'Get started' }),
-    ).toBeInTheDocument();
-  });
+function renderApp() {
+  return render(
+    <BrowserRouter>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </BrowserRouter>,
+  );
+}
 
-  it('increments the counter when clicked', () => {
-    render(<App />);
+afterEach(() => {
+  cleanup();
+  sessionStorage.clear();
+  vi.clearAllMocks();
+});
 
-    const counterButton = screen.getByRole('button', {
-      name: 'Count is 0',
+describe('App authentication', () => {
+  it('renders the login screen when no session exists', async () => {
+    authService.refreshToken.mockRejectedValueOnce(
+      new Error('No active session'),
+    );
+
+    renderApp();
+
+    await waitFor(() => {
+      expect(
+        screen.queryByText('Restoring your session...'),
+      ).not.toBeInTheDocument();
     });
 
-    fireEvent.click(counterButton);
-
     expect(
-      screen.getByRole('button', { name: 'Count is 1' }),
+      screen.getByRole('button', { name: /sign in/i }),
     ).toBeInTheDocument();
   });
 
-  it('renders the documentation section', () => {
-    render(<App />);
+  it('restores the authenticated user after refresh', async () => {
+    authService.refreshToken.mockResolvedValueOnce({
+      success: true,
+      data: {
+        accessToken: 'test-access-token',
+        user: {
+          id: 'user-1',
+          institutionalId: 'STU001',
+          fullName: 'Test Student',
+          email: 'student@example.com',
+          role: 'STUDENT',
+          isEmailVerified: true,
+        },
+      },
+    });
+
+    renderApp();
 
     expect(
-      screen.getByRole('heading', { name: 'Documentation' }),
+      await screen.findByText('Welcome,'),
     ).toBeInTheDocument();
+
+    expect(
+      screen.getByText('Test Student.'),
+    ).toBeInTheDocument();
+
+    expect(sessionStorage.getItem('aacharya_access_token')).toBe(
+      'test-access-token',
+    );
+  });
+
+  it('shows the login screen if the refresh session is invalid', async () => {
+    authService.refreshToken.mockRejectedValueOnce(
+      new Error('Invalid refresh session'),
+    );
+
+    renderApp();
+
+    expect(
+      await screen.findByRole('button', { name: /sign in/i }),
+    ).toBeInTheDocument();
+
+    expect(sessionStorage.getItem('aacharya_access_token')).toBeNull();
   });
 });

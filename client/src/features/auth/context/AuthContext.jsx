@@ -1,15 +1,12 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
 } from 'react';
 
+import AuthContext from './auth-context.js';
 import authService from '../services/authService.js';
-
-const AuthContext = createContext(null);
 
 const ACCESS_TOKEN_KEY = 'aacharya_access_token';
 
@@ -22,10 +19,9 @@ function getAuthData(response) {
 function saveAccessToken(token) {
   if (token) {
     sessionStorage.setItem(ACCESS_TOKEN_KEY, token);
-    return;
+  } else {
+    sessionStorage.removeItem(ACCESS_TOKEN_KEY);
   }
-
-  sessionStorage.removeItem(ACCESS_TOKEN_KEY);
 }
 
 function AuthProvider({ children }) {
@@ -75,7 +71,6 @@ function AuthProvider({ children }) {
     } catch {
       saveAccessToken(null);
       setUser(null);
-
       return false;
     }
   }, []);
@@ -146,16 +141,4 @@ function AuthProvider({ children }) {
   );
 }
 
-function useAuth() {
-  const context = useContext(AuthContext);
-
-  if (!context) {
-    throw new Error(
-      'useAuth must be used within an AuthProvider.',
-    );
-  }
-
-  return context;
-}
-
-export { AuthProvider, useAuth };
+export { AuthProvider };

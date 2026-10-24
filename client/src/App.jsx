@@ -9,8 +9,7 @@ import ResetPassword from './features/auth/pages/ResetPassword.jsx';
 import EmailVerification from './features/auth/pages/EmailVerification.jsx';
 
 import authService from './features/auth/services/authService.js';
-import { useAuth } from './features/auth/context/AuthContext.jsx';
-
+import useAuth from './features/auth/context/useAuth.js';
 const INITIAL_LOGIN_FORM = {
   institutionalId: '',
   password: '',
