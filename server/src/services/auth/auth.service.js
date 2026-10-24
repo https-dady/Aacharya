@@ -1,4 +1,7 @@
-import { User, ACCOUNT_STATUSES } from '../../models/user.model.js';
+import {
+  User,
+  ACCOUNT_STATUSES,
+} from '../../models/user.model.js';
 
 import { comparePassword } from './password.service.js';
 
@@ -11,8 +14,21 @@ import { createRefreshSession } from './session.service.js';
 
 function createAuthenticationError() {
   const error = new Error('Invalid institutional ID or password.');
+
   error.statusCode = 401;
   error.code = 'INVALID_CREDENTIALS';
+  error.expose = true;
+
+  return error;
+}
+
+function createAccountUnavailableError() {
+  const error = new Error(
+    'This account is not available for login.',
+  );
+
+  error.statusCode = 403;
+  error.code = 'ACCOUNT_UNAVAILABLE';
   error.expose = true;
 
   return error;
@@ -53,23 +69,29 @@ export async function login(
   }
 
   if (user.status !== ACCOUNT_STATUSES.ACTIVE) {
-    const error = new Error(
-      'This account is not available for login.',
-    );
-
-    error.statusCode = 403;
-    error.code = 'ACCOUNT_UNAVAILABLE';
-    error.expose = true;
-
-    throw error;
+    throw createAccountUnavailableError();
   }
 
-  const accessToken = generateAccessToken(user.id);
-  const refreshToken = generateRefreshToken(user.id);
+  const tokenVersion = user.tokenVersion ?? 0;
 
-  await createRefreshSession(user, refreshToken, metadata);
+  const accessToken = generateAccessToken(
+    user.id,
+    tokenVersion,
+  );
+
+  const refreshToken = generateRefreshToken(
+    user.id,
+    tokenVersion,
+  );
+
+  await createRefreshSession(
+    user,
+    refreshToken,
+    metadata,
+  );
 
   user.lastLoginAt = new Date();
+
   await user.save();
 
   return {
@@ -84,6 +106,7 @@ export async function login(
       isEmailVerified: user.isEmailVerified,
       lastLoginAt: user.lastLoginAt,
     },
+
     tokens: {
       accessToken,
       refreshToken,

@@ -2,8 +2,6 @@ import crypto from 'node:crypto';
 
 import { env } from '../config/env.js';
 
-import { User } from '../models/user.model.js';
-
 import { login } from '../services/auth/auth.service.js';
 
 import {
@@ -11,7 +9,9 @@ import {
   revokeRefreshSession,
 } from '../services/auth/session.service.js';
 
-import { generateAccessToken } from '../services/auth/token.service.js';
+import {
+  generateAccessToken,
+} from '../services/auth/token.service.js';
 
 import {
   requestEmailVerification,
@@ -26,13 +26,20 @@ import {
 
 const REFRESH_COOKIE_NAME = 'aacharya_refresh_token';
 
-const REFRESH_COOKIE_OPTIONS = {
+const REFRESH_COOKIE_OPTIONS = Object.freeze({
   httpOnly: true,
-  secure: process.env.NODE_ENV === 'production',
+  secure: env.nodeEnv === 'production',
   sameSite: 'strict',
   path: '/api/v1/auth',
   maxAge: 7 * 24 * 60 * 60 * 1000,
-};
+});
+
+const REFRESH_COOKIE_CLEAR_OPTIONS = Object.freeze({
+  httpOnly: REFRESH_COOKIE_OPTIONS.httpOnly,
+  secure: REFRESH_COOKIE_OPTIONS.secure,
+  sameSite: REFRESH_COOKIE_OPTIONS.sameSite,
+  path: REFRESH_COOKIE_OPTIONS.path,
+});
 
 function createAuthenticationError(statusCode, code, message) {
   const error = new Error(message);
@@ -44,15 +51,24 @@ function createAuthenticationError(statusCode, code, message) {
   return error;
 }
 
+function clearRefreshCookie(res) {
+  res.clearCookie(
+    REFRESH_COOKIE_NAME,
+    REFRESH_COOKIE_CLEAR_OPTIONS,
+  );
+}
+
 function sendPasswordResetRequestResponse(res, challenge) {
   const expiresAt =
-    challenge?.expiresAt ??
-    new Date(
-      Date.now() + env.passwordReset.otpExpiresInMinutes * 60 * 1000,
+    challenge?.expiresAt
+    ?? new Date(
+      Date.now()
+        + env.passwordReset.otpExpiresInMinutes * 60 * 1000,
     );
 
   const challengeId =
-    challenge?.challengeId ?? crypto.randomBytes(12).toString('hex');
+    challenge?.challengeId
+    ?? crypto.randomBytes(12).toString('hex');
 
   return res.status(200).json({
     success: true,
@@ -60,8 +76,8 @@ function sendPasswordResetRequestResponse(res, challenge) {
       challengeId,
       expiresAt,
       message:
-        'If an eligible account exists for this email, ' +
-        'a password reset code has been sent.',
+        'If an eligible account exists for this email, '
+        + 'a password reset code has been sent.',
     },
   });
 }
@@ -98,53 +114,33 @@ export async function loginController(req, res, next) {
 }
 
 export async function refreshController(req, res, next) {
+  const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
+
+  if (!refreshToken) {
+    clearRefreshCookie(res);
+
+    return next(
+      createAuthenticationError(
+        401,
+        'MISSING_REFRESH_SESSION',
+        'A refresh session is required.',
+      ),
+    );
+  }
+
   try {
-    const refreshToken = req.cookies?.[REFRESH_COOKIE_NAME];
-
-    if (!refreshToken) {
-      res.clearCookie(REFRESH_COOKIE_NAME, {
-        httpOnly: REFRESH_COOKIE_OPTIONS.httpOnly,
-        secure: REFRESH_COOKIE_OPTIONS.secure,
-        sameSite: REFRESH_COOKIE_OPTIONS.sameSite,
-        path: REFRESH_COOKIE_OPTIONS.path,
-      });
-
-      return next(
-        createAuthenticationError(
-          401,
-          'MISSING_REFRESH_SESSION',
-          'A refresh session is required.',
-        ),
-      );
-    }
-
-    const result = await rotateRefreshSession(refreshToken, {
-      userAgent: req.get('user-agent'),
-      ipAddress: req.ip,
-    });
-
-    const user = await User.findById(result.userId).select(
-      'institutionalId fullName email role isEmailVerified status',
+    const result = await rotateRefreshSession(
+      refreshToken,
+      {
+        userAgent: req.get('user-agent'),
+        ipAddress: req.ip,
+      },
     );
 
-    if (!user || user.status !== 'ACTIVE') {
-      res.clearCookie(REFRESH_COOKIE_NAME, {
-        httpOnly: REFRESH_COOKIE_OPTIONS.httpOnly,
-        secure: REFRESH_COOKIE_OPTIONS.secure,
-        sameSite: REFRESH_COOKIE_OPTIONS.sameSite,
-        path: REFRESH_COOKIE_OPTIONS.path,
-      });
-
-      return next(
-        createAuthenticationError(
-          401,
-          'INVALID_REFRESH_SESSION',
-          'The refresh session is no longer valid.',
-        ),
-      );
-    }
-
-    const accessToken = generateAccessToken(result.userId);
+    const accessToken = generateAccessToken(
+      result.userId,
+      result.tokenVersion,
+    );
 
     res.cookie(
       REFRESH_COOKIE_NAME,
@@ -156,17 +152,11 @@ export async function refreshController(req, res, next) {
       success: true,
       data: {
         accessToken,
-        user: {
-          id: user.id,
-          institutionalId: user.institutionalId,
-          fullName: user.fullName,
-          email: user.email ?? null,
-          role: user.role,
-          isEmailVerified: user.isEmailVerified,
-        },
+        user: result.user,
       },
     });
   } catch (error) {
+    clearRefreshCookie(res);
     return next(error);
   }
 }
@@ -179,23 +169,23 @@ export async function logoutController(req, res, next) {
       await revokeRefreshSession(refreshToken);
     }
 
-    res.clearCookie(REFRESH_COOKIE_NAME, {
-      httpOnly: REFRESH_COOKIE_OPTIONS.httpOnly,
-      secure: REFRESH_COOKIE_OPTIONS.secure,
-      sameSite: REFRESH_COOKIE_OPTIONS.sameSite,
-      path: REFRESH_COOKIE_OPTIONS.path,
-    });
+    clearRefreshCookie(res);
 
     return res.status(200).json({
       success: true,
       message: 'Logged out successfully.',
     });
   } catch (error) {
+    clearRefreshCookie(res);
     return next(error);
   }
 }
 
-export async function requestEmailVerificationController(req, res, next) {
+export async function requestEmailVerificationController(
+  req,
+  res,
+  next,
+) {
   try {
     const result = await requestEmailVerification(req.user.id);
 
@@ -208,7 +198,11 @@ export async function requestEmailVerificationController(req, res, next) {
   }
 }
 
-export async function confirmEmailVerificationController(req, res, next) {
+export async function confirmEmailVerificationController(
+  req,
+  res,
+  next,
+) {
   try {
     const result = await verifyEmailAddress({
       userId: req.user.id,
@@ -225,9 +219,15 @@ export async function confirmEmailVerificationController(req, res, next) {
   }
 }
 
-export async function requestPasswordResetController(req, res, next) {
+export async function requestPasswordResetController(
+  req,
+  res,
+  next,
+) {
   try {
-    const challenge = await createPasswordResetChallenge(req.body.email);
+    const challenge = await createPasswordResetChallenge(
+      req.body.email,
+    );
 
     return sendPasswordResetRequestResponse(res, challenge);
   } catch (error) {
@@ -235,7 +235,11 @@ export async function requestPasswordResetController(req, res, next) {
   }
 }
 
-export async function verifyPasswordResetOtpController(req, res, next) {
+export async function verifyPasswordResetOtpController(
+  req,
+  res,
+  next,
+) {
   try {
     const result = await verifyPasswordResetOtp({
       challengeId: req.body.challengeId,
@@ -254,12 +258,18 @@ export async function verifyPasswordResetOtpController(req, res, next) {
   }
 }
 
-export async function confirmPasswordResetController(req, res, next) {
+export async function confirmPasswordResetController(
+  req,
+  res,
+  next,
+) {
   try {
     const result = await resetPassword({
       resetToken: req.body.resetToken,
       newPassword: req.body.newPassword,
     });
+
+    clearRefreshCookie(res);
 
     return res.status(200).json({
       success: true,

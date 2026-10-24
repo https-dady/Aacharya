@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
 import { RefreshSession } from '../../models/refresh-session.model.js';
+
 import {
   User,
   ACCOUNT_STATUSES,
@@ -12,11 +13,16 @@ import {
 } from './token.service.js';
 
 function hashToken(token) {
-  return crypto.createHash('sha256').update(token).digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(token)
+    .digest('hex');
 }
 
 function createSessionError() {
-  const error = new Error('The refresh session is invalid or expired.');
+  const error = new Error(
+    'The refresh session is invalid or expired.',
+  );
 
   error.statusCode = 401;
   error.code = 'INVALID_REFRESH_SESSION';
@@ -49,10 +55,6 @@ function normalizeMetadata(metadata = {}) {
   };
 }
 
-/**
- * Returns only the user fields required by the authenticated frontend.
- * Password hashes, token versions and other internal fields are excluded.
- */
 function serializeUser(user) {
   return {
     id: user.id,
@@ -67,35 +69,62 @@ function serializeUser(user) {
   };
 }
 
-/**
- * Creates a refresh session.
- * Only the SHA-256 hash of the refresh token is stored.
- */
+async function revokeSessionFamily(familyId) {
+  if (!familyId) {
+    return;
+  }
+
+  await RefreshSession.updateMany(
+    {
+      familyId,
+      revokedAt: null,
+    },
+    {
+      $set: {
+        revokedAt: new Date(),
+      },
+    },
+  );
+}
+
 export async function createRefreshSession(
   user,
   refreshToken,
   metadata = {},
 ) {
   if (!user?._id || !refreshToken) {
-    throw new TypeError('A user and refresh token are required.');
+    throw new TypeError(
+      'A user and refresh token are required.',
+    );
   }
 
-  const tokenHash = hashToken(refreshToken);
-  const expiresAt = getTokenExpiry(refreshToken);
-  const familyId = crypto.randomUUID();
+  let payload;
+
+  try {
+    payload = verifyRefreshToken(refreshToken);
+  } catch {
+    throw createSessionError();
+  }
+
+  const userId = user._id.toString();
+  const tokenVersion = user.tokenVersion ?? 0;
+
+  if (
+    payload.userId !== userId
+    || payload.tokenVersion !== tokenVersion
+  ) {
+    throw createSessionError();
+  }
 
   await RefreshSession.create({
     user: user._id,
-    familyId,
-    tokenHash,
-    expiresAt,
+    familyId: crypto.randomUUID(),
+    tokenHash: hashToken(refreshToken),
+    expiresAt: getTokenExpiry(refreshToken),
     ...normalizeMetadata(metadata),
   });
 }
 
-/**
- * Rotates a refresh token and returns the refreshed user's safe profile.
- */
 export async function rotateRefreshSession(
   refreshToken,
   metadata = {},
@@ -120,20 +149,8 @@ export async function rotateRefreshSession(
     throw createSessionError();
   }
 
-  // Reuse of a revoked token invalidates active sessions in its family.
   if (existingSession.revokedAt) {
-    if (existingSession.familyId) {
-      await RefreshSession.updateMany(
-        {
-          familyId: existingSession.familyId,
-          revokedAt: null,
-        },
-        {
-          $set: { revokedAt: now },
-        },
-      );
-    }
-
+    await revokeSessionFamily(existingSession.familyId);
     throw createSessionError();
   }
 
@@ -141,25 +158,29 @@ export async function rotateRefreshSession(
     throw createSessionError();
   }
 
-  const user = await User.findById(payload.userId);
+  const user = await User.findById(payload.userId)
+    .select('+tokenVersion');
 
-  if (!user || user.status !== ACCOUNT_STATUSES.ACTIVE) {
-    if (existingSession.familyId) {
-      await RefreshSession.updateMany(
-        {
-          familyId: existingSession.familyId,
-          revokedAt: null,
-        },
-        {
-          $set: { revokedAt: now },
-        },
-      );
-    }
-
+  if (
+    !user
+    || user.status !== ACCOUNT_STATUSES.ACTIVE
+  ) {
+    await revokeSessionFamily(existingSession.familyId);
     throw createSessionError();
   }
 
-  // Atomically claim the active session to prevent normal concurrent reuse.
+  const currentTokenVersion = user.tokenVersion ?? 0;
+  const refreshTokenVersion = payload.tokenVersion ?? 0;
+
+  if (refreshTokenVersion !== currentTokenVersion) {
+    await revokeSessionFamily(existingSession.familyId);
+    throw createSessionError();
+  }
+
+  /*
+   * Claim the current session atomically so concurrent requests
+   * cannot both rotate the same active refresh token.
+   */
   const claimedSession = await RefreshSession.findOneAndUpdate(
     {
       _id: existingSession._id,
@@ -167,7 +188,9 @@ export async function rotateRefreshSession(
       expiresAt: { $gt: now },
     },
     {
-      $set: { revokedAt: now },
+      $set: {
+        revokedAt: now,
+      },
     },
     {
       new: false,
@@ -175,56 +198,58 @@ export async function rotateRefreshSession(
   ).select('+tokenHash');
 
   if (!claimedSession) {
-    if (existingSession.familyId) {
-      await RefreshSession.updateMany(
-        {
-          familyId: existingSession.familyId,
-          revokedAt: null,
-        },
-        {
-          $set: { revokedAt: new Date() },
-        },
-      );
-    }
-
+    await revokeSessionFamily(existingSession.familyId);
     throw createSessionError();
   }
 
-  const newRefreshToken = generateRefreshToken(user.id);
+  const newRefreshToken = generateRefreshToken(
+    user.id,
+    currentTokenVersion,
+  );
+
   const newTokenHash = hashToken(newRefreshToken);
   const newExpiresAt = getTokenExpiry(newRefreshToken);
 
-  await RefreshSession.create({
-    user: user._id,
-    familyId: claimedSession.familyId,
-    tokenHash: newTokenHash,
-    expiresAt: newExpiresAt,
-    ...normalizeMetadata(metadata),
-  });
+  try {
+    await RefreshSession.create({
+      user: user._id,
+      familyId: claimedSession.familyId,
+      tokenHash: newTokenHash,
+      expiresAt: newExpiresAt,
+      ...normalizeMetadata(metadata),
+    });
 
-  await RefreshSession.updateOne(
-    {
-      _id: claimedSession._id,
-    },
-    {
-      $set: {
-        replacedByTokenHash: newTokenHash,
+    await RefreshSession.updateOne(
+      {
+        _id: claimedSession._id,
       },
-    },
-  );
+      {
+        $set: {
+          replacedByTokenHash: newTokenHash,
+        },
+      },
+    );
+  } catch (error) {
+    await revokeSessionFamily(claimedSession.familyId);
+    throw error;
+  }
 
   return {
     userId: user.id,
+    tokenVersion: currentTokenVersion,
     user: serializeUser(user),
     refreshToken: newRefreshToken,
   };
 }
 
-/**
- * Revokes the supplied refresh session during logout.
- * Invalid refresh tokens are ignored.
- */
 export async function revokeRefreshSession(refreshToken) {
+  if (
+    typeof refreshToken !== 'string'
+    || !refreshToken.trim()
+  ) {
+    return;
+  }
+
   let payload;
 
   try {

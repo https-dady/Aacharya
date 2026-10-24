@@ -14,8 +14,22 @@ function validateUserId(userId) {
   return userId.trim();
 }
 
-function createToken(userId, tokenType) {
+function validateTokenVersion(tokenVersion) {
+  if (
+    !Number.isSafeInteger(tokenVersion)
+    || tokenVersion < 0
+  ) {
+    throw new TypeError(
+      'A valid non-negative token version is required.',
+    );
+  }
+
+  return tokenVersion;
+}
+
+function createToken(userId, tokenType, tokenVersion = 0) {
   const subject = validateUserId(userId);
+  const version = validateTokenVersion(tokenVersion);
 
   const isAccessToken = tokenType === 'access';
 
@@ -36,6 +50,7 @@ function createToken(userId, tokenType) {
   return jwt.sign(
     {
       tokenType,
+      tokenVersion: version,
       jti: crypto.randomUUID(),
     },
     secret,
@@ -85,21 +100,45 @@ function verifyToken(token, expectedType) {
     );
   }
 
+  /*
+   * Older tokens may not contain tokenVersion.
+   * Treat those tokens as version 0 for compatibility.
+   */
+  const tokenVersion = payload.tokenVersion ?? 0;
+
+  if (
+    !Number.isSafeInteger(tokenVersion)
+    || tokenVersion < 0
+  ) {
+    throw new jwt.JsonWebTokenError(
+      `Invalid ${expectedType} token version.`,
+    );
+  }
+
   return {
     userId: payload.sub,
     tokenType: payload.tokenType,
     tokenId: payload.jti,
+    tokenVersion,
     issuedAt: payload.iat,
     expiresAt: payload.exp,
   };
 }
 
-export function generateAccessToken(userId) {
-  return createToken(userId, 'access');
+export function generateAccessToken(userId, tokenVersion = 0) {
+  return createToken(
+    userId,
+    'access',
+    tokenVersion,
+  );
 }
 
-export function generateRefreshToken(userId) {
-  return createToken(userId, 'refresh');
+export function generateRefreshToken(userId, tokenVersion = 0) {
+  return createToken(
+    userId,
+    'refresh',
+    tokenVersion,
+  );
 }
 
 export function verifyAccessToken(token) {
