@@ -34,10 +34,8 @@ import {
 const MAX_IMPORT_SIZE = 1024 * 1024;
 const MAX_STUDENTS_PER_IMPORT = 500;
 
-const RETRYABLE_TRANSACTION_ERROR_CODES = new Set([
-  112,
-  251,
-]);
+const IDEMPOTENCY_INDEX_NAME =
+  'uniq_mentor_section_import_idempotency';
 
 function sendImportError(res, error) {
   return res.status(400).json({
@@ -53,20 +51,37 @@ function normalizeIdentifier(value) {
     .toLowerCase();
 }
 
-function isRetryableTransactionError(error) {
-  if (typeof error?.hasErrorLabel === 'function') {
-    if (
-      error.hasErrorLabel('TransientTransactionError')
-      || error.hasErrorLabel('UnknownTransactionCommitResult')
-    ) {
-      return true;
-    }
+function isIdempotencyDuplicateKeyError(error) {
+  if (error?.code !== 11000) {
+    return false;
   }
 
-  return (
-    RETRYABLE_TRANSACTION_ERROR_CODES.has(error?.code)
-    || error?.codeName === 'WriteConflict'
+  const keyPattern = error.keyPattern || {};
+  const duplicateFields = Object.keys(keyPattern);
+
+  if (
+    duplicateFields.length === 3
+    && duplicateFields.includes('mentor')
+    && duplicateFields.includes('section')
+    && duplicateFields.includes('idempotencyKey')
+  ) {
+    return true;
+  }
+
+  return String(error.message || '').includes(
+    IDEMPOTENCY_INDEX_NAME,
   );
+}
+
+function isRetryableTransactionError(error) {
+  if (typeof error?.hasErrorLabel === 'function') {
+    return (
+      error.hasErrorLabel('TransientTransactionError')
+      || error.hasErrorLabel('UnknownTransactionCommitResult')
+    );
+  }
+
+  return false;
 }
 
 async function hashPasswordsWithLimit(rows, concurrency = 8) {
@@ -86,7 +101,9 @@ async function hashPasswordsWithLimit(rows, concurrency = 8) {
 
   await Promise.all(
     Array.from(
-      { length: Math.min(concurrency, rows.length) },
+      {
+        length: Math.min(concurrency, rows.length),
+      },
       () => worker(),
     ),
   );
@@ -94,7 +111,13 @@ async function hashPasswordsWithLimit(rows, concurrency = 8) {
   return hashes;
 }
 
-function buildImportResponse(importBatch, students) {
+async function buildImportResponse(importBatch) {
+  const students = await User.find({
+    _id: { $in: importBatch.studentIds },
+  })
+    .select('institutionalId fullName email')
+    .lean();
+
   const studentsById = new Map(
     students.map((student) => [
       String(student._id),
@@ -132,17 +155,13 @@ async function replayPreviousImport(
     });
   }
 
-  const students = await User.find({
-    _id: { $in: importBatch.studentIds },
-  })
-    .select('institutionalId fullName email')
-    .lean();
+  const data = await buildImportResponse(importBatch);
 
   return res.status(200).json({
     success: true,
     replayed: true,
     message: 'This import was already completed.',
-    data: buildImportResponse(importBatch, students),
+    data,
   });
 }
 
@@ -173,7 +192,7 @@ function sendRetryableImportResponse(res) {
   return res.status(503).json({
     success: false,
     message:
-      'The import could not be completed because of a temporary database transaction conflict. Retry the same request with the same Idempotency-Key.',
+      'A temporary database transaction conflict prevented the import from completing. Retry the same request using the same Idempotency-Key.',
     code: 'STUDENT_IMPORT_RETRY_REQUIRED',
     retryable: true,
   });
@@ -339,6 +358,12 @@ export async function importStudentsController(req, res, next) {
       });
     }
 
+    /*
+     * Fast path: return a previously completed import.
+     *
+     * The unique database index remains the final protection
+     * against concurrent requests racing past this lookup.
+     */
     const previousImport = await StudentImportBatch.findOne({
       mentor: mentor._id,
       section: sectionId,
@@ -353,6 +378,11 @@ export async function importStudentsController(req, res, next) {
       );
     }
 
+    /*
+     * Hash passwords before opening the transaction.
+     * MongoDB can retry transaction callbacks; password hashing
+     * should not need to be repeated for every callback attempt.
+     */
     const passwordHashes = await hashPasswordsWithLimit(rows);
 
     session = await mongoose.startSession();
@@ -519,6 +549,11 @@ export async function importStudentsController(req, res, next) {
         completedAt: new Date(),
       };
 
+      /*
+       * Student records and the completed import record are
+       * committed together. A failed transaction must not leave
+       * a partially completed import.
+       */
       await StudentImportBatch.create(
         [batchRecord],
         { session },
@@ -557,13 +592,14 @@ export async function importStudentsController(req, res, next) {
     }
 
     /*
-     * A competing request may have completed the same logical import
-     * first. Recover from the durable idempotency record instead of
-     * returning a duplicate-key error when that record exists.
-     *
-     * If the payload differs, replayPreviousImport returns HTTP 409.
+     * Recover only when the duplicate-key error corresponds to
+     * the idempotency index. Student ID/email uniqueness errors
+     * must remain student-conflict responses.
      */
-    if (error?.code === 11000 && idempotencyContext) {
+    if (
+      isIdempotencyDuplicateKeyError(error)
+      && idempotencyContext
+    ) {
       try {
         const recoveryResponse = await recoverConcurrentImport(
           res,
@@ -576,16 +612,21 @@ export async function importStudentsController(req, res, next) {
       } catch (recoveryError) {
         return next(recoveryError);
       }
-    }
 
-    /*
-     * MongoDB transaction helpers retry labelled transient errors
-     * automatically. If retries are exhausted, ask the client to
-     * retry with the SAME key. The transaction is atomic, so this
-     * does not intentionally expose a partial import.
-     */
-    if (isRetryableTransactionError(error)) {
-      return sendRetryableImportResponse(res);
+      /*
+       * The unique idempotency index rejected the competing write,
+       * but the winning record is not yet visible to this lookup.
+       * Do not report this as a duplicate student.
+       */
+      res.set('Retry-After', '2');
+
+      return res.status(503).json({
+        success: false,
+        message:
+          'A concurrent import is being finalized. Retry the same request using the same Idempotency-Key.',
+        code: 'STUDENT_IMPORT_RETRY_REQUIRED',
+        retryable: true,
+      });
     }
 
     if (error instanceof mongoose.Error.ValidationError) {
@@ -621,6 +662,10 @@ export async function importStudentsController(req, res, next) {
       });
     }
 
+    if (isRetryableTransactionError(error)) {
+      return sendRetryableImportResponse(res);
+    }
+
     if ([400, 403, 404, 409].includes(error.statusCode)) {
       return res.status(error.statusCode).json({
         success: false,
@@ -634,7 +679,19 @@ export async function importStudentsController(req, res, next) {
     return next(error);
   } finally {
     if (session) {
-      await session.endSession();
+      try {
+        await session.endSession();
+      } catch (cleanupError) {
+        /*
+         * Do not send a second response if the request already
+         * completed. Session cleanup failures should be logged
+         * by the application's operational error handling.
+         */
+        req.log?.error(
+          { err: cleanupError },
+          'Failed to close student import transaction session.',
+        );
+      }
     }
   }
 }
