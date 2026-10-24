@@ -245,14 +245,30 @@ export async function importStudentsController(req, res, next) {
                 })),
             },
         });
-    } catch (error) {
-        if (error instanceof mongoose.Error.ValidationError) {
-            return res.status(400).json({
-                success: false,
-                message: 'One or more student records failed database validation.',
-            });
-        }
-
-        return next(error);
+      } catch (error) {
+    if (error instanceof mongoose.Error.ValidationError) {
+      return res.status(400).json({
+        success: false,
+        message: 'One or more student records failed database validation.',
+      });
     }
+
+    if (error?.code === 11000) {
+      const duplicateFields = Object.keys(error.keyPattern || {});
+
+      const message = duplicateFields.includes('institutionalId')
+        ? 'An institutional ID already exists. Refresh the student data and retry.'
+        : duplicateFields.includes('email')
+          ? 'An email address already exists. Refresh the student data and retry.'
+          : 'A duplicate student record was detected.';
+
+      return res.status(409).json({
+        success: false,
+        message,
+        code: 'DUPLICATE_STUDENT_RECORD',
+      });
+    }
+
+    return next(error);
+  }
 }
