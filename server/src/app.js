@@ -1,21 +1,33 @@
 import express from 'express';
+
 import cors from 'cors';
+
 import helmet from 'helmet';
+
 import pinoHttp from 'pino-http';
+
 import cookieParser from 'cookie-parser';
 
 import { env } from './config/env.js';
 
 import healthRoutes from './routes/health.routes.js';
+
 import authRoutes from './routes/auth.routes.js';
+
 import departmentRoutes from './routes/department.routes.js';
+
 import hodRoutes from './routes/hod.routes.js';
 
 import facultyRoutes from './routes/faculty.routes.js';
+
 import batchRoutes from './routes/batch.routes.js';
+
 import sectionRoutes from './routes/section.routes.js';
+
 import mentorRoutes from './routes/mentor.routes.js';
+
 import studentRoutes from './routes/student.routes.js';
+
 import studentImportRoutes from './routes/student-import.routes.js';
 
 import {
@@ -50,14 +62,18 @@ app.use(cookieParser());
 app.use(
   pinoHttp({
     level: env.logLevel,
+
     redact: {
       paths: [
         'req.headers.authorization',
         'req.headers.cookie',
         'req.body.password',
+        'req.body.passwordHash',
         'req.body.otp',
         'req.body.token',
+        'req.body.csvContent',
       ],
+
       censor: '[REDACTED]',
     },
   }),
@@ -104,9 +120,8 @@ app.use('/api/v1/provisioning', mentorRoutes);
 // Student account provisioning
 app.use('/api/v1/provisioning', studentRoutes);
 
-// Import bulk student CSV
+// Bulk student import
 app.use('/api/v1/provisioning', studentImportRoutes);
-
 
 // Error handling
 app.use(studentUploadErrorMiddleware);
