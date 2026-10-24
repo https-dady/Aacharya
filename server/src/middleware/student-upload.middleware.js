@@ -1,6 +1,6 @@
 import multer from 'multer';
 
-const MAX_FILE_SIZE = 1024 * 1024; // 1 MB
+const MAX_FILE_SIZE = 1024 * 1024;
 
 const studentUpload = multer({
   storage: multer.memoryStorage(),
@@ -16,11 +16,9 @@ const studentUpload = multer({
     const originalName = file.originalname || '';
 
     if (!/\.xlsx$/i.test(originalName)) {
-      const error = new Error(
-        'Only .xlsx files are allowed.',
-      );
-
+      const error = new Error('Only .xlsx files are allowed.');
       error.statusCode = 400;
+
       return callback(error);
     }
 
