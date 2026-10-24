@@ -125,6 +125,7 @@ export async function refreshController(req, res, next) {
     return res.status(200).json({
       success: true,
       data: {
+        user: result.user,
         accessToken,
       },
     });
