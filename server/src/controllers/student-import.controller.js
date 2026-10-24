@@ -7,6 +7,24 @@ import {
   parseStudentCsv,
   StudentImportError,
 } from '../services/provisioning/student-import.service.js';
+import {
+  readStudentXlsx,
+} from '../services/provisioning/student-xlsx-reader.service.js';
+
+const MAX_IMPORT_SIZE = 1024 * 1024;
+const MAX_STUDENTS_PER_IMPORT = 500;
+
+function sendImportError(res, error) {
+  return res.status(400).json({
+    success: false,
+    message: error.message,
+    errors: error.details || [],
+  });
+}
+
+function normalizeIdentifier(value) {
+  return String(value || '').trim().toLowerCase();
+}
 
 export async function importStudentsController(req, res, next) {
   try {
@@ -24,7 +42,6 @@ export async function importStudentsController(req, res, next) {
     }
 
     const { sectionId } = req.params;
-    const { csvContent } = req.body;
 
     if (!mongoose.isValidObjectId(sectionId)) {
       return res.status(400).json({
@@ -33,13 +50,63 @@ export async function importStudentsController(req, res, next) {
       });
     }
 
-    if (
-      typeof csvContent !== 'string' ||
-      Buffer.byteLength(csvContent, 'utf8') > 1024 * 1024
-    ) {
+    const hasCsvContent =
+      typeof req.body?.csvContent === 'string' &&
+      req.body.csvContent.length > 0;
+
+    const hasXlsxFile = Boolean(req.file?.buffer);
+
+    if (hasCsvContent === hasXlsxFile) {
       return res.status(400).json({
         success: false,
-        message: 'Provide valid CSV content within the 1 MB limit.',
+        message: 'Provide either CSV content or one XLSX file, not both.',
+      });
+    }
+
+    let rows;
+
+    try {
+      if (hasXlsxFile) {
+        if (req.file.buffer.length > MAX_IMPORT_SIZE) {
+          return res.status(400).json({
+            success: false,
+            message: 'The XLSX file must not exceed 1 MB.',
+          });
+        }
+
+        rows = await readStudentXlsx(req.file.buffer);
+      } else {
+        if (
+          Buffer.byteLength(req.body.csvContent, 'utf8') >
+          MAX_IMPORT_SIZE
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: 'CSV content must not exceed 1 MB.',
+          });
+        }
+
+        rows = parseStudentCsv(req.body.csvContent);
+      }
+    } catch (error) {
+      if (error instanceof StudentImportError) {
+        return sendImportError(res, error);
+      }
+
+      throw error;
+    }
+
+    if (!rows.length) {
+      return res.status(400).json({
+        success: false,
+        message: 'The import file contains no student records.',
+      });
+    }
+
+    if (rows.length > MAX_STUDENTS_PER_IMPORT) {
+      return res.status(400).json({
+        success: false,
+        message: `A maximum of ${MAX_STUDENTS_PER_IMPORT} students can be imported at once.`,
       });
     }
 
@@ -90,29 +157,16 @@ export async function importStudentsController(req, res, next) {
       });
     }
 
-    let rows;
+    const institutionalIds = rows.map((row) =>
+      String(row.institutionalId).trim(),
+    );
 
-    try {
-      rows = parseStudentCsv(csvContent);
-    } catch (error) {
-      if (error instanceof StudentImportError) {
-        return res.status(400).json({
-          success: false,
-          message: error.message,
-          errors: error.details,
-        });
-      }
-
-      throw error;
-    }
-
-    const institutionalIds = rows.map((row) => row.institutionalId);
-    const normalizedIds = institutionalIds.map((id) => id.toLowerCase());
+    const normalizedIds = institutionalIds.map(normalizeIdentifier);
 
     if (new Set(normalizedIds).size !== normalizedIds.length) {
       return res.status(400).json({
         success: false,
-        message: 'The CSV contains duplicate institutional IDs.',
+        message: 'The import file contains duplicate institutional IDs.',
       });
     }
 
@@ -124,40 +178,44 @@ export async function importStudentsController(req, res, next) {
       return res.status(409).json({
         success: false,
         message: 'Some institutional IDs already exist.',
-        conflicts: existingStudents.map((student) => student.institutionalId),
+        conflicts: existingStudents.map(
+          (student) => student.institutionalId,
+        ),
       });
     }
 
     const emailAddresses = rows
       .filter((row) => row.email)
-      .map((row) => row.email.toLowerCase());
+      .map((row) => row.email.trim().toLowerCase());
 
     if (new Set(emailAddresses).size !== emailAddresses.length) {
       return res.status(400).json({
         success: false,
-        message: 'The CSV contains duplicate email addresses.',
+        message: 'The import file contains duplicate email addresses.',
       });
     }
 
-    const existingEmails = await User.find({
-      email: { $in: emailAddresses },
-    }).select('email');
+    if (emailAddresses.length > 0) {
+      const existingEmails = await User.find({
+        email: { $in: emailAddresses },
+      }).select('email');
 
-    if (existingEmails.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: 'Some email addresses already exist.',
-        conflicts: existingEmails.map((user) => user.email),
-      });
+      if (existingEmails.length > 0) {
+        return res.status(409).json({
+          success: false,
+          message: 'Some email addresses already exist.',
+          conflicts: existingEmails.map((user) => user.email),
+        });
+      }
     }
 
     const students = [];
 
     for (const row of rows) {
       students.push({
-        institutionalId: row.institutionalId,
-        fullName: row.fullName,
-        email: row.email?.toLowerCase(),
+        institutionalId: String(row.institutionalId).trim(),
+        fullName: String(row.fullName).trim(),
+        email: row.email?.trim().toLowerCase() || undefined,
         passwordHash: await hashPassword(row.password),
         role: USER_ROLES.STUDENT,
         status: ACCOUNT_STATUSES.ACTIVE,
@@ -189,6 +247,13 @@ export async function importStudentsController(req, res, next) {
       },
     });
   } catch (error) {
+    if (error instanceof mongoose.Error.ValidationError) {
+      return res.status(400).json({
+        success: false,
+        message: 'One or more student records failed database validation.',
+      });
+    }
+
     return next(error);
   }
 }

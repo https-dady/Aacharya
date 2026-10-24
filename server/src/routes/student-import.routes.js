@@ -4,6 +4,7 @@ import { importStudentsController } from '../controllers/student-import.controll
 import { authenticate } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
+import studentUpload from '../middleware/student-upload.middleware.js';
 
 import {
   downloadStudentImportTemplateController,
@@ -34,6 +35,7 @@ studentImportRouter.post(
   '/sections/:sectionId/students/import',
   authenticate,
   authRateLimiter,
+  studentUpload.single('file'),
   validate(importStudentsSchema),
   importStudentsController,
 );
