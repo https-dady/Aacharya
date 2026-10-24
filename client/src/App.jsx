@@ -1,81 +1,43 @@
 import { useState } from 'react';
+
 import './App.css';
 
-const API_BASE_URL = (
-  import.meta.env.VITE_API_URL || 'http://localhost:5000/api/v1'
-).replace(/\/+$/, '');
+import Login from './features/auth/pages/Login.jsx';
+import ForgotPassword from './features/auth/pages/ForgotPassword.jsx';
+import VerifyResetOtp from './features/auth/pages/VerifyResetOtp.jsx';
+import ResetPassword from './features/auth/pages/ResetPassword.jsx';
+import EmailVerification from './features/auth/pages/EmailVerification.jsx';
+
+import authService from './features/auth/services/authService.js';
 
 const INITIAL_LOGIN_FORM = {
   institutionalId: '',
   password: '',
 };
 
-const INITIAL_RESET_FORM = {
+const INITIAL_RECOVERY_STATE = {
   email: '',
-  otp: '',
-  newPassword: '',
-  confirmPassword: '',
+  challengeId: '',
+  resetToken: '',
 };
 
-async function apiRequest(path, { method = 'POST', body, token } = {}) {
-  const headers = {
-    Accept: 'application/json',
-  };
-
-  if (body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-  }
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
-
-  let response;
-
-  try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
-      method,
-      headers,
-      credentials: 'include',
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    });
-  } catch {
-    throw new Error(
-      'Unable to connect to Aacharya LMS. Please check whether the backend is running.',
-    );
-  }
-
-  let result;
-
-  try {
-    result = await response.json();
-  } catch {
-    result = {};
-  }
-
-  if (!response.ok || result.success === false) {
-    throw new Error(
-      result.error?.message ||
-        result.message ||
-        'Something went wrong. Please try again.',
-    );
-  }
-
-  return result;
+function getResponseData(response) {
+  return response?.data ?? response;
 }
 
-function getResponseData(result) {
-  return result?.data ?? result;
+function getErrorMessage(error) {
+  return (
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    'Something went wrong. Please try again.'
+  );
 }
 
 function BrandMark() {
   return (
     <div className="brand-mark" aria-hidden="true">
-      <svg
-        viewBox="0 0 40 40"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-      >
+      <svg viewBox="0 0 40 40" fill="none">
         <rect width="40" height="40" rx="13" fill="#CDB5F7" />
         <path
           d="M11 27.5V12.5H15.5L25 23.1V12.5H29V27.5H24.7L15 16.8V27.5H11Z"
@@ -93,7 +55,9 @@ function BrandHeader() {
 
       <span className="brand-copy">
         <span className="brand-name">aacharya</span>
-        <span className="brand-caption">LEARNING MANAGEMENT SYSTEM</span>
+        <span className="brand-caption">
+          LEARNING MANAGEMENT SYSTEM
+        </span>
       </span>
     </a>
   );
@@ -107,7 +71,10 @@ function DecorativeGrid() {
       <div className="grid-orbit grid-orbit-three" />
 
       <div className="grid-floating-card floating-card-one">
-        <span className="floating-icon floating-icon-lavender">A</span>
+        <span className="floating-icon floating-icon-lavender">
+          A
+        </span>
+
         <span>
           <strong>Learn with purpose</strong>
           <small>Every day is progress.</small>
@@ -115,7 +82,10 @@ function DecorativeGrid() {
       </div>
 
       <div className="grid-floating-card floating-card-two">
-        <span className="floating-icon floating-icon-butter">✓</span>
+        <span className="floating-icon floating-icon-butter">
+          ✓
+        </span>
+
         <span>
           <strong>Your journey, organized</strong>
           <small>One place for your academics.</small>
@@ -130,7 +100,6 @@ function DecorativeGrid() {
           className="symbol-book"
           viewBox="0 0 100 100"
           fill="none"
-          xmlns="http://www.w3.org/2000/svg"
         >
           <path
             d="M50 30C40 23 28 22 17 26V66C29 62 41 64 50 71V30Z"
@@ -138,18 +107,21 @@ function DecorativeGrid() {
             strokeWidth="3"
             strokeLinejoin="round"
           />
+
           <path
             d="M50 30C60 23 72 22 83 26V66C71 62 59 64 50 71V30Z"
             stroke="currentColor"
             strokeWidth="3"
             strokeLinejoin="round"
           />
+
           <path
             d="M50 30V71"
             stroke="currentColor"
             strokeWidth="3"
             strokeLinecap="round"
           />
+
           <path
             d="M26 37L39 40M26 46L39 49M61 40L74 37M61 49L74 46"
             stroke="currentColor"
@@ -162,128 +134,6 @@ function DecorativeGrid() {
         <span className="symbol-dot symbol-dot-two" />
         <span className="symbol-dot symbol-dot-three" />
       </div>
-    </div>
-  );
-}
-
-function Field({
-  label,
-  id,
-  type = 'text',
-  value,
-  onChange,
-  placeholder,
-  autoComplete,
-  required = true,
-  maxLength,
-  autoFocus = false,
-}) {
-  return (
-    <div className="form-field">
-      <label htmlFor={id}>{label}</label>
-
-      <input
-        id={id}
-        name={id}
-        type={type}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        autoComplete={autoComplete}
-        required={required}
-        maxLength={maxLength}
-        autoFocus={autoFocus}
-      />
-    </div>
-  );
-}
-
-function PasswordField({
-  label,
-  id,
-  value,
-  onChange,
-  placeholder = 'Enter your password',
-  autoComplete = 'current-password',
-}) {
-  const [visible, setVisible] = useState(false);
-
-  return (
-    <div className="form-field">
-      <label htmlFor={id}>{label}</label>
-
-      <div className="password-input-wrap">
-        <input
-          id={id}
-          name={id}
-          type={visible ? 'text' : 'password'}
-          value={value}
-          onChange={onChange}
-          placeholder={placeholder}
-          autoComplete={autoComplete}
-          required
-          maxLength={256}
-        />
-
-        <button
-          type="button"
-          className="password-toggle"
-          onClick={() => setVisible((current) => !current)}
-          aria-label={visible ? 'Hide password' : 'Show password'}
-        >
-          {visible ? 'Hide' : 'Show'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function PrimaryButton({ children, loading, disabled = false }) {
-  return (
-    <button
-      className="primary-button"
-      type="submit"
-      disabled={disabled || loading}
-    >
-      <span>{loading ? 'Please wait...' : children}</span>
-
-      {!loading && (
-        <svg
-          width="18"
-          height="18"
-          viewBox="0 0 24 24"
-          fill="none"
-          aria-hidden="true"
-        >
-          <path
-            d="M5 12H19M12 5L19 12L12 19"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      )}
-    </button>
-  );
-}
-
-function Feedback({ error, success }) {
-  if (!error && !success) {
-    return null;
-  }
-
-  return (
-    <div
-      className={`form-feedback ${error ? 'feedback-error' : 'feedback-success'}`}
-      role={error ? 'alert' : 'status'}
-      aria-live="polite"
-    >
-      <span className="feedback-indicator" aria-hidden="true">
-        {error ? '!' : '✓'}
-      </span>
-
-      <span>{error || success}</span>
     </div>
   );
 }
@@ -302,467 +152,110 @@ function AuthFooter() {
   );
 }
 
-function LoginForm({
-  onSubmit,
-  form,
-  setForm,
-  loading,
-  error,
-  success,
-  onForgotPassword,
-}) {
+function AuthenticatedView({ user, onLogout, loading, error }) {
+  const fullName = user?.fullName || 'User';
+  const role = user?.role || 'Account';
+
   return (
-    <>
-      <div className="form-heading">
-        <div className="eyebrow">
-          <span className="eyebrow-dot" />
-          YOUR CAMPUS, CONNECTED
-        </div>
+    <section className="w-full max-w-md">
+      <div className="mb-8">
+        <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-[#CDB5F7]/20 bg-[#CDB5F7]/5 px-3 py-1.5">
+          <span className="h-2 w-2 rounded-full bg-[#E5DF98]" />
 
-        <h1>
-          Welcome
-          <br />
-          <span>back.</span>
-        </h1>
-
-        <p className="form-description">
-          Sign in to continue your learning journey.
-        </p>
-      </div>
-
-      <form className="auth-form" onSubmit={onSubmit}>
-        <Feedback error={error} success={success} />
-
-        <Field
-          label="Institutional ID"
-          id="institutionalId"
-          value={form.institutionalId}
-          onChange={(event) =>
-            setForm((current) => ({
-              ...current,
-              institutionalId: event.target.value,
-            }))
-          }
-          placeholder="Enter your scholar or roll number"
-          autoComplete="username"
-          maxLength={50}
-          autoFocus
-        />
-
-        <PasswordField
-          label="Password"
-          id="password"
-          value={form.password}
-          onChange={(event) =>
-            setForm((current) => ({
-              ...current,
-              password: event.target.value,
-            }))
-          }
-        />
-
-        <div className="form-options">
-          <span className="secure-note">
-            <svg
-              viewBox="0 0 16 16"
-              width="15"
-              height="15"
-              fill="none"
-              aria-hidden="true"
-            >
-              <rect
-                x="3"
-                y="7"
-                width="10"
-                height="7"
-                rx="2"
-                stroke="currentColor"
-                strokeWidth="1.3"
-              />
-              <path
-                d="M5 7V4.8a3 3 0 0 1 6 0V7"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-              />
-            </svg>
-            Secure sign-in
+          <span className="text-[10px] font-semibold tracking-[0.18em] text-[#CDB5F7]">
+            ACCOUNT ACCESS
           </span>
-
-          <button
-            className="text-button"
-            type="button"
-            onClick={onForgotPassword}
-          >
-            Forgot password?
-          </button>
         </div>
 
-        <PrimaryButton loading={loading}>Sign in</PrimaryButton>
-
-        <p className="account-notice">
-          Accounts are provided by your institution.
+        <h1 className="text-4xl font-semibold leading-tight tracking-tight text-[#EAEAE6] sm:text-5xl">
+          Welcome,
           <br />
-          Public student registration is disabled.
-        </p>
-      </form>
-    </>
-  );
-}
-
-function ForgotPasswordForm({
-  step,
-  setStep,
-  form,
-  setForm,
-  loading,
-  error,
-  success,
-  onRequestOtp,
-  onVerifyOtp,
-  onResetPassword,
-  onBack,
-}) {
-  if (step === 'request') {
-    return (
-      <>
-        <div className="form-heading">
-          <button className="back-button" type="button" onClick={onBack}>
-            <span aria-hidden="true">←</span> Back to sign in
-          </button>
-
-          <div className="step-icon">01</div>
-
-          <h1>
-            Forgot
-            <br />
-            <span>password?</span>
-          </h1>
-
-          <p className="form-description">
-            Enter the verified email address linked to your institutional
-            account. We&apos;ll send you a one-time code.
-          </p>
-        </div>
-
-        <form className="auth-form" onSubmit={onRequestOtp}>
-          <Feedback error={error} success={success} />
-
-          <Field
-            label="Registered email address"
-            id="resetEmail"
-            type="email"
-            value={form.email}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                email: event.target.value,
-              }))
-            }
-            placeholder="you@college.edu"
-            autoComplete="email"
-            maxLength={254}
-            autoFocus
-          />
-
-          <PrimaryButton loading={loading}>Send verification code</PrimaryButton>
-
-          <p className="account-notice">
-            For your security, the response does not disclose whether an
-            account exists.
-          </p>
-        </form>
-      </>
-    );
-  }
-
-  if (step === 'verify') {
-    return (
-      <>
-        <div className="form-heading">
-          <button
-            className="back-button"
-            type="button"
-            onClick={() => setStep('request')}
-          >
-            <span aria-hidden="true">←</span> Change email
-          </button>
-
-          <div className="step-icon">02</div>
-
-          <h1>
-            Check your
-            <br />
-            <span>inbox.</span>
-          </h1>
-
-          <p className="form-description">
-            Enter the six-digit code sent to your registered email address.
-            The code expires after 10 minutes.
-          </p>
-        </div>
-
-        <form className="auth-form" onSubmit={onVerifyOtp}>
-          <Feedback error={error} success={success} />
-
-          <Field
-            label="Six-digit verification code"
-            id="resetOtp"
-            value={form.otp}
-            onChange={(event) =>
-              setForm((current) => ({
-                ...current,
-                otp: event.target.value.replace(/\D/g, '').slice(0, 6),
-              }))
-            }
-            placeholder="000000"
-            autoComplete="one-time-code"
-            maxLength={6}
-            autoFocus
-          />
-
-          <PrimaryButton
-            loading={loading}
-            disabled={!/^\d{6}$/.test(form.otp)}
-          >
-            Verify code
-          </PrimaryButton>
-
-          <p className="account-notice">
-            Never share your verification code with anyone.
-          </p>
-        </form>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <div className="form-heading">
-        <button
-          className="back-button"
-          type="button"
-          onClick={() => setStep('verify')}
-        >
-          <span aria-hidden="true">←</span> Back to verification
-        </button>
-
-        <div className="step-icon">03</div>
-
-        <h1>
-          Make it
-          <br />
-          <span>secure.</span>
+          <span className="break-words text-[#CDB5F7]">
+            {fullName}.
+          </span>
         </h1>
 
-        <p className="form-description">
-          Choose a new password for your Aacharya LMS account.
+        <p className="mt-4 text-sm leading-6 text-[#A4A4AF]">
+          You are signed in to Aacharya LMS.
         </p>
       </div>
 
-      <form className="auth-form" onSubmit={onResetPassword}>
-        <Feedback error={error} success={success} />
-
-        <PasswordField
-          label="New password"
-          id="newPassword"
-          value={form.newPassword}
-          onChange={(event) =>
-            setForm((current) => ({
-              ...current,
-              newPassword: event.target.value,
-            }))
-          }
-          placeholder="At least 8 characters"
-          autoComplete="new-password"
-        />
-
-        <PasswordField
-          label="Confirm new password"
-          id="confirmPassword"
-          value={form.confirmPassword}
-          onChange={(event) =>
-            setForm((current) => ({
-              ...current,
-              confirmPassword: event.target.value,
-            }))
-          }
-          placeholder="Enter your new password again"
-          autoComplete="new-password"
-        />
-
-        <p className="password-hint">
-          Use at least 8 characters. Choose a password you don&apos;t use
-          elsewhere.
-        </p>
-
-        <PrimaryButton
-          loading={loading}
-          disabled={
-            form.newPassword.length < 8 ||
-            form.newPassword !== form.confirmPassword
-          }
+      {error && (
+        <div
+          role="alert"
+          className="mb-5 rounded-xl border border-red-400/25 bg-red-400/10 px-4 py-3 text-sm text-red-300"
         >
-          Reset password
-        </PrimaryButton>
-      </form>
-    </>
-  );
-}
+          {error}
+        </div>
+      )}
 
-function EmailVerificationForm({
-  loading,
-  error,
-  success,
-  otp,
-  setOtp,
-  onRequestOtp,
-  onVerifyOtp,
-  onLogout,
-}) {
-  const [challengeId, setChallengeId] = useState('');
-
-  async function requestCode(event) {
-    const result = await onRequestOtp(event);
-
-    if (result?.challengeId) {
-      setChallengeId(result.challengeId);
-    }
-  }
-
-  async function verifyCode(event) {
-    event.preventDefault();
-    await onVerifyOtp(event, challengeId);
-  }
-
-  return (
-    <>
-      <div className="form-heading">
-        <div className="eyebrow">
-          <span className="eyebrow-dot" />
-          ACCOUNT SECURITY
+      <div className="space-y-4 rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
+        <div>
+          <p className="text-xs text-[#858590]">Full name</p>
+          <p className="mt-1 break-words text-sm font-medium text-[#EAEAE6]">
+            {fullName}
+          </p>
         </div>
 
-        <div className="step-icon">✓</div>
+        <div>
+          <p className="text-xs text-[#858590]">Institutional ID</p>
+          <p className="mt-1 break-words text-sm font-medium text-[#EAEAE6]">
+            {user?.institutionalId || 'Not available'}
+          </p>
+        </div>
 
-        <h1>
-          Verify your
-          <br />
-          <span>email.</span>
-        </h1>
+        <div>
+          <p className="text-xs text-[#858590]">Role</p>
+          <p className="mt-1 text-sm font-medium text-[#E5DF98]">
+            {role}
+          </p>
+        </div>
 
-        <p className="form-description">
-          Your account is signed in, but your email address still needs
-          verification before it can be used for official email delivery.
-        </p>
-      </div>
+        <div>
+          <p className="text-xs text-[#858590]">Email</p>
+          <p className="mt-1 break-all text-sm font-medium text-[#EAEAE6]">
+            {user?.email || 'Not available'}
+          </p>
+        </div>
 
-      <div className="auth-form">
-        <Feedback error={error} success={success} />
+        {!user?.isEmailVerified && (
+          <div className="rounded-xl border border-[#E5DF98]/20 bg-[#E5DF98]/5 p-4">
+            <p className="text-sm font-medium text-[#E5DF98]">
+              Email verification required
+            </p>
 
-        {!challengeId ? (
-          <form onSubmit={requestCode}>
-            <PrimaryButton loading={loading}>
-              Send verification code
-            </PrimaryButton>
-          </form>
-        ) : (
-          <form onSubmit={verifyCode}>
-            <Field
-              label="Six-digit verification code"
-              id="emailVerificationOtp"
-              value={otp}
-              onChange={(event) =>
-                setOtp(event.target.value.replace(/\D/g, '').slice(0, 6))
-              }
-              placeholder="000000"
-              autoComplete="one-time-code"
-              maxLength={6}
-              autoFocus
-            />
-
-            <PrimaryButton
-              loading={loading}
-              disabled={!/^\d{6}$/.test(otp)}
-            >
-              Verify email
-            </PrimaryButton>
-          </form>
+            <p className="mt-1 text-xs leading-5 text-[#A4A4AF]">
+              Verify your registered email address to complete this
+              account step.
+            </p>
+          </div>
         )}
 
-        <button className="secondary-button" type="button" onClick={onLogout}>
-          Sign out
+        <button
+          type="button"
+          onClick={onLogout}
+          disabled={loading}
+          className="flex w-full items-center justify-center rounded-xl border border-[#383943] px-5 py-3 text-sm font-semibold text-[#EAEAE6] transition-colors hover:border-[#CDB5F7] hover:text-[#CDB5F7] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#CDB5F7] disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {loading ? 'Signing out...' : 'Sign out'}
         </button>
       </div>
-    </>
+    </section>
   );
 }
 
-function AuthenticatedView({ user, onLogout }) {
-  const displayName = user?.fullName || user?.name || 'Aacharya member';
-  const role = user?.role?.replaceAll('_', ' ') || 'MEMBER';
-  const firstName = displayName.trim().split(/\s+/)[0];
-
-  return (
-    <div className="authenticated-view">
-      <div className="success-mark" aria-hidden="true">
-        ✓
-      </div>
-
-      <div className="eyebrow">
-        <span className="eyebrow-dot" />
-        AUTHENTICATION SUCCESSFUL
-      </div>
-
-      <h1>
-        You&apos;re in,
-        <br />
-        <span>{firstName}.</span>
-      </h1>
-
-      <p className="form-description">
-        Your account has been authenticated successfully. Your academic
-        workspace is ready for the next step.
-      </p>
-
-      <div className="account-card">
-        <div className="account-avatar" aria-hidden="true">
-          {firstName.charAt(0).toUpperCase()}
-        </div>
-
-        <div className="account-card-copy">
-          <strong>{displayName}</strong>
-          <span>{user?.institutionalId || 'Institutional account'}</span>
-        </div>
-
-        <span className="role-badge">{role}</span>
-      </div>
-
-      <button className="primary-button logout-button" onClick={onLogout}>
-        <span>Sign out securely</span>
-        <span aria-hidden="true">↗</span>
-      </button>
-
-      <p className="account-notice">
-        Authentication is connected. The role-specific dashboard will be
-        integrated in its planned phase.
-      </p>
-    </div>
-  );
-}
-
-function App() {
+export default function App() {
   const [screen, setScreen] = useState('login');
-  const [resetStep, setResetStep] = useState('request');
 
   const [loginForm, setLoginForm] = useState(INITIAL_LOGIN_FORM);
-  const [resetForm, setResetForm] = useState(INITIAL_RESET_FORM);
 
-  const [challengeId, setChallengeId] = useState('');
-  const [resetToken, setResetToken] = useState('');
+  const [recovery, setRecovery] = useState(INITIAL_RECOVERY_STATE);
+
+  const [emailVerificationChallengeId, setEmailVerificationChallengeId] =
+    useState('');
+
   const [emailVerificationOtp, setEmailVerificationOtp] = useState('');
 
-  const [accessToken, setAccessToken] = useState('');
   const [user, setUser] = useState(null);
 
   const [loading, setLoading] = useState(false);
@@ -779,201 +272,204 @@ function App() {
     setScreen(nextScreen);
   }
 
+  function updateRecovery(updates) {
+    setRecovery((current) => ({
+      ...current,
+      ...updates,
+    }));
+  }
+
   async function handleLogin(event) {
     event.preventDefault();
     clearFeedback();
     setLoading(true);
 
     try {
-      const result = await apiRequest('/auth/login', {
-        body: {
-          institutionalId: loginForm.institutionalId.trim(),
-          password: loginForm.password,
-        },
+      const response = await authService.login({
+        institutionalId: loginForm.institutionalId.trim(),
+        password: loginForm.password,
       });
 
-      const data = getResponseData(result);
-      const token = data.accessToken;
-      const authenticatedUser = data.user;
+      const data = getResponseData(response);
 
-      if (!token || !authenticatedUser) {
+      if (!data?.accessToken || !data?.user) {
         throw new Error(
           'The server response is missing the account or access token.',
         );
       }
 
-      setAccessToken(token);
-      setUser(authenticatedUser);
+      sessionStorage.setItem(
+        'aacharya_access_token',
+        data.accessToken,
+      );
+
+      setUser(data.user);
       setLoginForm(INITIAL_LOGIN_FORM);
 
-      if (authenticatedUser.isEmailVerified === false) {
+      if (data.user.isEmailVerified === false) {
+        setEmailVerificationChallengeId('');
         setEmailVerificationOtp('');
         switchScreen('email-verification');
       } else {
         switchScreen('authenticated');
       }
     } catch (requestError) {
-      setError(requestError.message);
+      setError(getErrorMessage(requestError));
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleRequestReset(event) {
+  async function handleRequestPasswordReset(event, email) {
     event.preventDefault();
     clearFeedback();
     setLoading(true);
 
     try {
-      const result = await apiRequest('/auth/password/reset/request', {
-        body: {
-          email: resetForm.email.trim(),
-        },
+      const response = await authService.requestPasswordReset({
+        email: email.trim(),
       });
 
-      const data = getResponseData(result);
+      const data = getResponseData(response);
 
-      if (!data.challengeId) {
+      if (!data?.challengeId) {
         throw new Error(
-          'The reset request was accepted, but no challenge ID was returned. Please check the API response.',
+          'The reset request did not return a verification challenge.',
         );
       }
 
-      setChallengeId(data.challengeId);
-      setResetStep('verify');
-      setSuccess('If your account is eligible, a verification code has been sent.');
+      updateRecovery({
+        email: email.trim(),
+        challengeId: data.challengeId,
+        resetToken: '',
+      });
+
+      switchScreen('verify-reset-otp');
+
+      setSuccess(
+        'If your account is eligible, a verification code has been sent.',
+      );
     } catch (requestError) {
-      setError(requestError.message);
+      setError(getErrorMessage(requestError));
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleVerifyResetOtp(event) {
-    event.preventDefault();
+  async function handleVerifyResetOtp({ challengeId, otp }) {
     clearFeedback();
     setLoading(true);
 
     try {
-      const result = await apiRequest('/auth/password/reset/verify', {
-        body: {
-          challengeId,
-          otp: resetForm.otp,
-        },
+      const response = await authService.verifyPasswordResetOtp({
+        challengeId,
+        otp,
       });
 
-      const data = getResponseData(result);
+      const data = getResponseData(response);
 
-      if (!data.resetToken) {
+      if (!data?.resetToken) {
         throw new Error(
           'The verification response did not contain a reset token.',
         );
       }
 
-      setResetToken(data.resetToken);
-      setResetForm((current) => ({
-        ...current,
-        otp: '',
-      }));
-      setResetStep('new-password');
-      setSuccess('Code verified. You can now choose a new password.');
-    } catch (requestError) {
-      setError(requestError.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleConfirmReset(event) {
-    event.preventDefault();
-    clearFeedback();
-
-    if (resetForm.newPassword.length < 8) {
-      setError('Your new password must contain at least 8 characters.');
-      return;
-    }
-
-    if (resetForm.newPassword !== resetForm.confirmPassword) {
-      setError('The passwords do not match.');
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      await apiRequest('/auth/password/reset/confirm', {
-        body: {
-          resetToken,
-          newPassword: resetForm.newPassword,
-        },
+      updateRecovery({
+        resetToken: data.resetToken,
       });
 
-      setResetForm(INITIAL_RESET_FORM);
-      setChallengeId('');
-      setResetToken('');
-      setResetStep('request');
+      switchScreen('reset-password');
 
-      setScreen('login');
-      setSuccess('Password reset successfully. Sign in with your new password.');
+      setSuccess(
+        'Code verified. You can now choose a new password.',
+      );
     } catch (requestError) {
-      setError(requestError.message);
+      setError(getErrorMessage(requestError));
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleRequestEmailVerification(event) {
-    event.preventDefault();
+  async function handleConfirmPasswordReset({ resetToken, newPassword }) {
     clearFeedback();
     setLoading(true);
 
     try {
-      const result = await apiRequest('/auth/email/verification/request', {
-        token: accessToken,
-        body: {},
+      await authService.confirmPasswordReset({
+        resetToken,
+        newPassword,
       });
 
-      const data = getResponseData(result);
+      setRecovery(INITIAL_RECOVERY_STATE);
+      setLoginForm(INITIAL_LOGIN_FORM);
 
-      return {
-        challengeId: data.challengeId,
-      };
+      switchScreen('login');
+
+      setSuccess(
+        'Password reset successfully. Sign in with your new password.',
+      );
     } catch (requestError) {
-      setError(requestError.message);
-      return null;
+      setError(getErrorMessage(requestError));
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleVerifyEmail(event, verificationChallengeId) {
-    event.preventDefault();
+  async function handleRequestEmailVerification() {
     clearFeedback();
-
-    if (!verificationChallengeId) {
-      setError('Request a verification code first.');
-      return;
-    }
-
     setLoading(true);
 
     try {
-      await apiRequest('/auth/email/verification/confirm', {
-        token: accessToken,
-        body: {
-          challengeId: verificationChallengeId,
-          otp: emailVerificationOtp,
-        },
+      const response = await authService.requestEmailVerification();
+      const data = getResponseData(response);
+
+      if (!data?.challengeId) {
+        throw new Error(
+          'The server did not return an email verification challenge.',
+        );
+      }
+
+      setEmailVerificationChallengeId(data.challengeId);
+      setEmailVerificationOtp('');
+
+      setSuccess('Verification code requested successfully.');
+
+      return data.challengeId;
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+      throw requestError;
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleVerifyEmail({ challengeId, otp }) {
+    clearFeedback();
+    setLoading(true);
+
+    try {
+      await authService.confirmEmailVerification({
+        challengeId,
+        otp,
       });
 
       setUser((current) =>
-        current ? { ...current, isEmailVerified: true } : current,
+        current
+          ? {
+              ...current,
+              isEmailVerified: true,
+            }
+          : current,
       );
 
       setEmailVerificationOtp('');
+      setEmailVerificationChallengeId('');
+
       switchScreen('authenticated');
+
+      setSuccess('Your email address has been verified.');
     } catch (requestError) {
-      setError(requestError.message);
+      setError(getErrorMessage(requestError));
     } finally {
       setLoading(false);
     }
@@ -984,35 +480,39 @@ function App() {
     setLoading(true);
 
     try {
-      await apiRequest('/auth/logout');
+      await authService.logout();
     } catch {
-      // Clear the local authenticated view even if the network is unavailable.
-      // The server-side session may still need to expire or be revoked separately.
+      // Local authentication state is cleared even if logout cannot
+      // reach the server. The server-side refresh session may remain
+      // valid until it expires or is revoked separately.
     } finally {
-      setAccessToken('');
+      sessionStorage.removeItem('aacharya_access_token');
+
       setUser(null);
       setLoginForm(INITIAL_LOGIN_FORM);
-      setResetForm(INITIAL_RESET_FORM);
-      setChallengeId('');
-      setResetToken('');
+      setRecovery(INITIAL_RECOVERY_STATE);
+      setEmailVerificationChallengeId('');
       setEmailVerificationOtp('');
-      setResetStep('request');
+
       setLoading(false);
       switchScreen('login');
+
       setSuccess('You have been signed out.');
     }
   }
 
   function openForgotPassword() {
-    setResetForm(INITIAL_RESET_FORM);
-    setChallengeId('');
-    setResetToken('');
-    setResetStep('request');
+    setRecovery(INITIAL_RECOVERY_STATE);
     switchScreen('forgot-password');
   }
 
+  function backToLogin() {
+    switchScreen('login');
+  }
+
   const isAuthenticatedScreen =
-    screen === 'authenticated' || screen === 'email-verification';
+    screen === 'authenticated' ||
+    screen === 'email-verification';
 
   return (
     <main className="auth-shell">
@@ -1054,6 +554,7 @@ function App() {
               <span className="visual-bottom-title">
                 Built around your journey.
               </span>
+
               <span className="visual-bottom-caption">
                 Learn · Collaborate · Grow
               </span>
@@ -1071,7 +572,9 @@ function App() {
 
         <div className="auth-panel-top">
           <span className="panel-context">
-            {isAuthenticatedScreen ? 'YOUR ACCOUNT' : 'ACCOUNT ACCESS'}
+            {isAuthenticatedScreen
+              ? 'YOUR ACCOUNT'
+              : 'ACCOUNT ACCESS'}
           </span>
 
           <span className="system-status">
@@ -1082,10 +585,10 @@ function App() {
 
         <div className="auth-card">
           {screen === 'login' && (
-            <LoginForm
-              onSubmit={handleLogin}
+            <Login
               form={loginForm}
               setForm={setLoginForm}
+              onSubmit={handleLogin}
               loading={loading}
               error={error}
               success={success}
@@ -1094,39 +597,59 @@ function App() {
           )}
 
           {screen === 'forgot-password' && (
-            <ForgotPasswordForm
-              step={resetStep}
-              setStep={(step) => {
-                clearFeedback();
-                setResetStep(step);
-              }}
-              form={resetForm}
-              setForm={setResetForm}
+            <ForgotPassword
+              email={recovery.email}
+              onSubmit={handleRequestPasswordReset}
+              onBackToLogin={backToLogin}
               loading={loading}
               error={error}
               success={success}
-              onRequestOtp={handleRequestReset}
-              onVerifyOtp={handleVerifyResetOtp}
-              onResetPassword={handleConfirmReset}
-              onBack={() => switchScreen('login')}
+            />
+          )}
+
+          {screen === 'verify-reset-otp' && (
+            <VerifyResetOtp
+              email={recovery.email}
+              challengeId={recovery.challengeId}
+              onSubmit={handleVerifyResetOtp}
+              onBack={() => switchScreen('forgot-password')}
+              loading={loading}
+              error={error}
+              success={success}
+            />
+          )}
+
+          {screen === 'reset-password' && (
+            <ResetPassword
+              resetToken={recovery.resetToken}
+              onSubmit={handleConfirmPasswordReset}
+              onBackToLogin={backToLogin}
+              loading={loading}
+              error={error}
+              success={success}
             />
           )}
 
           {screen === 'email-verification' && (
-            <EmailVerificationForm
+            <EmailVerification
+              email={user?.email || ''}
+              challengeId={emailVerificationChallengeId}
+              onRequestCode={handleRequestEmailVerification}
+              onSubmit={handleVerifyEmail}
               loading={loading}
               error={error}
               success={success}
-              otp={emailVerificationOtp}
-              setOtp={setEmailVerificationOtp}
-              onRequestOtp={handleRequestEmailVerification}
-              onVerifyOtp={handleVerifyEmail}
-              onLogout={handleLogout}
+              isVerified={Boolean(user?.isEmailVerified)}
             />
           )}
 
           {screen === 'authenticated' && (
-            <AuthenticatedView user={user} onLogout={handleLogout} />
+            <AuthenticatedView
+              user={user}
+              onLogout={handleLogout}
+              loading={loading}
+              error={error}
+            />
           )}
         </div>
 
@@ -1135,5 +658,3 @@ function App() {
     </main>
   );
 }
-
-export default App;
