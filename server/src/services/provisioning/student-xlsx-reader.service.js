@@ -2,10 +2,13 @@ import ExcelJS from 'exceljs';
 import {
   parseStudentWorksheet,
 } from './student-xlsx-import.service.js';
-import { StudentImportError } from './student-import.service.js';
+import {
+  StudentImportError,
+} from './student-import.service.js';
 
 const MAX_FILE_SIZE = 1024 * 1024;
 const MAX_STUDENTS = 500;
+
 const EXPECTED_HEADERS = [
   'institutionalId',
   'fullName',
@@ -28,7 +31,6 @@ export async function readStudentXlsx(buffer) {
 
   try {
     workbook = new ExcelJS.Workbook();
-
     await workbook.xlsx.load(buffer);
   } catch {
     throw new StudentImportError(
@@ -44,6 +46,12 @@ export async function readStudentXlsx(buffer) {
 
   const worksheet = workbook.worksheets[0];
 
+  if (worksheet.state !== 'visible') {
+    throw new StudentImportError(
+      'The worksheet must be visible.',
+    );
+  }
+
   if (worksheet.rowCount < 2) {
     throw new StudentImportError(
       'The worksheet must contain a header and at least one student.',
@@ -56,36 +64,123 @@ export async function readStudentXlsx(buffer) {
     );
   }
 
+  const headerRow = worksheet.getRow(1);
+
+  if (headerRow.cellCount > EXPECTED_HEADERS.length) {
+    throw new StudentImportError(
+      'The worksheet contains unsupported extra columns.',
+    );
+  }
+
+  const headers = [];
+
+  for (let column = 1; column <= EXPECTED_HEADERS.length; column += 1) {
+    const cell = headerRow.getCell(column);
+
+    if (cell.type === ExcelJS.ValueType.Formula) {
+      throw new StudentImportError(
+        'Formula cells are not allowed in the header row.',
+      );
+    }
+
+    const value = cell.value;
+
+    if (value !== null && typeof value === 'object') {
+      throw new StudentImportError(
+        'The header row contains unsupported cell values.',
+      );
+    }
+
+    headers.push(String(value ?? '').trim());
+  }
+
+  const normalizedHeaders = headers.map((header) =>
+    header.toLowerCase(),
+  );
+
+  if (
+    normalizedHeaders.length !== EXPECTED_HEADERS.length ||
+    normalizedHeaders.some(
+      (header, index) =>
+        header !== EXPECTED_HEADERS[index].toLowerCase(),
+    )
+  ) {
+    throw new StudentImportError(
+      `The XLSX header must contain these columns in order: ${EXPECTED_HEADERS.join(', ')}.`,
+    );
+  }
+
   const worksheetRows = [];
 
-  worksheet.eachRow({ includeEmpty: false }, (row) => {
+  for (let rowNumber = 2; rowNumber <= worksheet.rowCount; rowNumber += 1) {
+    const row = worksheet.getRow(rowNumber);
+
+    if (row.hidden) {
+      throw new StudentImportError(
+        `Hidden rows are not allowed (row ${rowNumber}).`,
+      );
+    }
+
     const values = [];
+    let hasValue = false;
 
     for (let column = 1; column <= EXPECTED_HEADERS.length; column += 1) {
       const cell = row.getCell(column);
 
       if (cell.type === ExcelJS.ValueType.Formula) {
         throw new StudentImportError(
-          `Formula cells are not allowed (row ${row.number}, column ${column}).`,
+          `Formula cells are not allowed (row ${rowNumber}, column ${column}).`,
         );
       }
 
       const value = cell.value;
 
-      if (
-        value !== null &&
-        typeof value === 'object'
-      ) {
+      if (value !== null && typeof value === 'object') {
         throw new StudentImportError(
-          `Unsupported cell value (row ${row.number}, column ${column}).`,
+          `Unsupported cell value (row ${rowNumber}, column ${column}).`,
         );
       }
 
-      values.push(value == null ? '' : String(value).trim());
+      const normalizedValue = value == null ? '' : String(value).trim();
+
+      if (normalizedValue) {
+        hasValue = true;
+      }
+
+      values.push(normalizedValue);
     }
 
-    worksheetRows.push(values);
-  });
+    if (row.cellCount > EXPECTED_HEADERS.length) {
+      throw new StudentImportError(
+        `Extra columns are not allowed (row ${rowNumber}).`,
+      );
+    }
 
-  return parseStudentWorksheet(worksheetRows);
+    if (!hasValue) {
+      continue;
+    }
+
+    worksheetRows.push({
+      rowNumber,
+      values,
+    });
+  }
+
+  if (worksheetRows.length === 0) {
+    throw new StudentImportError(
+      'The worksheet does not contain any student records.',
+    );
+  }
+
+  const normalizedRows = [
+    headers,
+    ...worksheetRows.map(({ values }) => values),
+  ];
+
+  const parsedRows = parseStudentWorksheet(normalizedRows);
+
+  return parsedRows.map((student, index) => ({
+    ...student,
+    rowNumber: worksheetRows[index].rowNumber,
+  }));
 }
