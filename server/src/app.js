@@ -15,7 +15,7 @@ import facultyRoutes from './routes/faculty.routes.js';
 import batchRoutes from './routes/batch.routes.js';
 import sectionRoutes from './routes/section.routes.js';
 import mentorRoutes from './routes/mentor.routes.js';
-
+import studentRoutes from './routes/student.routes.js';
 
 import { apiRateLimiter } from './middleware/rate-limit.middleware.js';
 
@@ -95,6 +95,9 @@ app.use('/api/v1/provisioning', sectionRoutes);
 
 // Mentor role and batch/section assignments
 app.use('/api/v1/provisioning', mentorRoutes);
+
+// Student account provisioning
+app.use('/api/v1/provisioning', studentRoutes);
 
 // Error handling
 app.use(notFoundHandler);
