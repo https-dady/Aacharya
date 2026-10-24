@@ -9,6 +9,7 @@ import { env } from './config/env.js';
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import departmentRoutes from './routes/department.routes.js';
+import hodRoutes from './routes/hod.routes.js';
 
 import { apiRateLimiter } from './middleware/rate-limit.middleware.js';
 
@@ -51,10 +52,10 @@ app.use(
   }),
 );
 
-// Health endpoints remain available for operational monitoring.
+// Health endpoints
 app.use('/health', healthRoutes);
 
-// Apply API-wide rate limiting.
+// API-wide rate limiting
 app.use('/api/v1', apiRateLimiter);
 
 app.get('/api/v1/meta', (_req, res) => {
@@ -68,12 +69,16 @@ app.get('/api/v1/meta', (_req, res) => {
   });
 });
 
-// Authentication routes.
+// Authentication
 app.use('/api/v1/auth', authRoutes);
 
-// Department management routes.
+// Department management
 app.use('/api/v1/departments', departmentRoutes);
 
+// Account provisioning: HOD creation
+app.use('/api/v1/provisioning', hodRoutes);
+
+// Error handling
 app.use(notFoundHandler);
 app.use(errorHandler);
 
