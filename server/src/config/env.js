@@ -16,6 +16,8 @@ const ALLOWED_LOG_LEVELS = [
   'silent',
 ];
 
+const MIN_PRODUCTION_SECRET_LENGTH = 32;
+
 function readPort(value) {
   const port = Number(value ?? 5000);
 
@@ -75,9 +77,12 @@ function readLogLevel(value) {
 function readJwtSecret(value, name, nodeEnv) {
   const secret = value?.trim() ?? '';
 
-  if (nodeEnv === 'production' && secret.length < 32) {
+  if (
+    nodeEnv === 'production'
+    && secret.length < MIN_PRODUCTION_SECRET_LENGTH
+  ) {
     throw new Error(
-      `${name} must contain at least 32 characters in production.`,
+      `${name} must contain at least ${MIN_PRODUCTION_SECRET_LENGTH} characters in production.`,
     );
   }
 
@@ -102,9 +107,27 @@ function readJwtExpiry(value, fallback, name) {
 function readPasswordResetOtpSecret(value, nodeEnv) {
   const secret = value?.trim() ?? '';
 
-  if (nodeEnv === 'production' && secret.length < 32) {
+  if (
+    nodeEnv === 'production'
+    && secret.length < MIN_PRODUCTION_SECRET_LENGTH
+  ) {
     throw new Error(
-      'PASSWORD_RESET_OTP_SECRET must contain at least 32 characters in production.',
+      `PASSWORD_RESET_OTP_SECRET must contain at least ${MIN_PRODUCTION_SECRET_LENGTH} characters in production.`,
+    );
+  }
+
+  return secret;
+}
+
+function readStudentImportIdempotencySecret(value, nodeEnv) {
+  const secret = value?.trim() ?? '';
+
+  if (
+    nodeEnv === 'production'
+    && secret.length < MIN_PRODUCTION_SECRET_LENGTH
+  ) {
+    throw new Error(
+      `STUDENT_IMPORT_IDEMPOTENCY_SECRET must contain at least ${MIN_PRODUCTION_SECRET_LENGTH} characters in production.`,
     );
   }
 
@@ -166,6 +189,25 @@ if (
   );
 }
 
+const studentImportIdempotencySecret =
+  readStudentImportIdempotencySecret(
+    process.env.STUDENT_IMPORT_IDEMPOTENCY_SECRET,
+    nodeEnv,
+  );
+
+if (
+  studentImportIdempotencySecret
+  && (
+    studentImportIdempotencySecret === jwtAccessSecret
+    || studentImportIdempotencySecret === jwtRefreshSecret
+    || studentImportIdempotencySecret === passwordResetOtpSecret
+  )
+) {
+  throw new Error(
+    'STUDENT_IMPORT_IDEMPOTENCY_SECRET must differ from JWT and password-reset OTP secrets.',
+  );
+}
+
 export const env = Object.freeze({
   nodeEnv,
   port: readPort(process.env.PORT),
@@ -193,5 +235,9 @@ export const env = Object.freeze({
     otpExpiresInMinutes: 10,
     maxAttempts: 5,
     maxResends: 3,
+  }),
+
+  studentImport: Object.freeze({
+    idempotencySecret: studentImportIdempotencySecret,
   }),
 });

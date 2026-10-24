@@ -6,13 +6,8 @@ import {
   ACCOUNT_STATUSES,
 } from '../models/user.model.js';
 
-import {
-  Batch,
-} from '../models/batch.model.js';
-
-import {
-  Section,
-} from '../models/section.model.js';
+import { Batch } from '../models/batch.model.js';
+import { Section } from '../models/section.model.js';
 
 import {
   hashPassword,
@@ -26,6 +21,15 @@ import {
 import {
   readStudentXlsx,
 } from '../services/provisioning/student-xlsx-reader.service.js';
+
+import {
+  StudentImportBatch,
+} from '../models/student-import-batch.model.js';
+
+import {
+  createStudentImportPayloadHash,
+  StudentImportIdempotencyError,
+} from '../services/provisioning/student-import-idempotency.service.js';
 
 const MAX_IMPORT_SIZE = 1024 * 1024;
 const MAX_STUDENTS_PER_IMPORT = 500;
@@ -44,24 +48,13 @@ function normalizeIdentifier(value) {
     .toLowerCase();
 }
 
-/**
- * Hash passwords before opening the transaction.
- *
- * This prevents expensive password hashing from being repeated
- * when MongoDB retries a transaction callback.
- *
- * Concurrency is limited to avoid launching 500 hashing operations
- * simultaneously.
- */
 async function hashPasswordsWithLimit(rows, concurrency = 8) {
   const hashes = new Array(rows.length);
-
   let nextIndex = 0;
 
   async function worker() {
     while (nextIndex < rows.length) {
       const index = nextIndex;
-
       nextIndex += 1;
 
       hashes[index] = await hashPassword(
@@ -72,9 +65,7 @@ async function hashPasswordsWithLimit(rows, concurrency = 8) {
 
   await Promise.all(
     Array.from(
-      {
-        length: Math.min(concurrency, rows.length),
-      },
+      { length: Math.min(concurrency, rows.length) },
       () => worker(),
     ),
   );
@@ -82,14 +73,75 @@ async function hashPasswordsWithLimit(rows, concurrency = 8) {
   return hashes;
 }
 
-export async function importStudentsController(
-  req,
+function buildImportResponse(importBatch, students) {
+  const studentsById = new Map(
+    students.map((student) => [
+      String(student._id),
+      student,
+    ]),
+  );
+
+  return {
+    sectionId: importBatch.section,
+    batchId: importBatch.batch,
+    importedCount: importBatch.importedCount,
+    students: importBatch.studentIds
+      .map((id) => studentsById.get(String(id)))
+      .filter(Boolean)
+      .map((student) => ({
+        id: student._id,
+        institutionalId: student.institutionalId,
+        fullName: student.fullName,
+        email: student.email,
+      })),
+  };
+}
+
+async function replayPreviousImport(
   res,
-  next,
+  importBatch,
+  payloadHash,
 ) {
+  if (importBatch.payloadHash !== payloadHash) {
+    return res.status(409).json({
+      success: false,
+      message:
+        'This Idempotency-Key was already used with different import data. Use a new key for a new import.',
+      code: 'IDEMPOTENCY_KEY_PAYLOAD_MISMATCH',
+    });
+  }
+
+  const students = await User.find({
+    _id: { $in: importBatch.studentIds },
+  })
+    .select('institutionalId fullName email')
+    .lean();
+
+  return res.status(200).json({
+    success: true,
+    replayed: true,
+    message: 'This import was already completed.',
+    data: buildImportResponse(importBatch, students),
+  });
+}
+
+export async function importStudentsController(req, res, next) {
   let session;
+  let idempotencyContext;
 
   try {
+    const idempotencyKey = req.idempotencyKey;
+
+    if (
+      typeof idempotencyKey !== 'string' ||
+      idempotencyKey.length < 16 ||
+      idempotencyKey.length > 128
+    ) {
+      throw new StudentImportIdempotencyError(
+        'A valid Idempotency-Key is required.',
+      );
+    }
+
     const mentor = await User.findById(req.user?.id);
 
     if (
@@ -99,16 +151,14 @@ export async function importStudentsController(
     ) {
       return res.status(403).json({
         success: false,
-        message:
-          'Only active mentors can import students.',
+        message: 'Only active mentors can import students.',
       });
     }
 
     if (!mentor.department) {
       return res.status(403).json({
         success: false,
-        message:
-          'The mentor is not assigned to a department.',
+        message: 'The mentor is not assigned to a department.',
       });
     }
 
@@ -140,16 +190,13 @@ export async function importStudentsController(
     try {
       if (hasXlsxFile) {
         if (req.file.buffer.length > MAX_IMPORT_SIZE) {
-          return res.status(400).json({
+          return res.status(413).json({
             success: false,
-            message:
-              'The XLSX file must not exceed 1 MB.',
+            message: 'The XLSX file must not exceed 1 MB.',
           });
         }
 
-        rows = await readStudentXlsx(
-          req.file.buffer,
-        );
+        rows = await readStudentXlsx(req.file.buffer);
       } else {
         const csvSize = Buffer.byteLength(
           req.body.csvContent,
@@ -157,16 +204,13 @@ export async function importStudentsController(
         );
 
         if (csvSize > MAX_IMPORT_SIZE) {
-          return res.status(400).json({
+          return res.status(413).json({
             success: false,
-            message:
-              'CSV content must not exceed 1 MB.',
+            message: 'CSV content must not exceed 1 MB.',
           });
         }
 
-        rows = parseStudentCsv(
-          req.body.csvContent,
-        );
+        rows = parseStudentCsv(req.body.csvContent);
       }
     } catch (error) {
       if (error instanceof StudentImportError) {
@@ -179,8 +223,7 @@ export async function importStudentsController(
     if (!rows.length) {
       return res.status(400).json({
         success: false,
-        message:
-          'The import file contains no student records.',
+        message: 'The import file contains no student records.',
       });
     }
 
@@ -193,19 +236,14 @@ export async function importStudentsController(
     }
 
     const institutionalIds = rows.map((row) =>
-      String(row.institutionalId)
-        .trim()
-        .toUpperCase(),
+      String(row.institutionalId).trim().toUpperCase(),
     );
 
     const normalizedIds = institutionalIds.map(
       normalizeIdentifier,
     );
 
-    if (
-      new Set(normalizedIds).size !==
-      normalizedIds.length
-    ) {
+    if (new Set(normalizedIds).size !== normalizedIds.length) {
       return res.status(400).json({
         success: false,
         message:
@@ -215,13 +253,10 @@ export async function importStudentsController(
 
     const emailAddresses = rows
       .filter((row) => row.email)
-      .map((row) =>
-        row.email.trim().toLowerCase(),
-      );
+      .map((row) => row.email.trim().toLowerCase());
 
     if (
-      new Set(emailAddresses).size !==
-      emailAddresses.length
+      new Set(emailAddresses).size !== emailAddresses.length
     ) {
       return res.status(400).json({
         success: false,
@@ -230,6 +265,15 @@ export async function importStudentsController(
       });
     }
 
+    const payloadHash = createStudentImportPayloadHash(rows);
+
+    idempotencyContext = {
+      mentorId: mentor._id,
+      sectionId: new mongoose.Types.ObjectId(sectionId),
+      idempotencyKey,
+      payloadHash,
+    };
+
     const assignedSectionIds = (
       mentor.assignedSections || []
     ).map((id) => id.toString());
@@ -237,28 +281,31 @@ export async function importStudentsController(
     if (!assignedSectionIds.includes(sectionId)) {
       return res.status(403).json({
         success: false,
-        message:
-          'You are not assigned to this section.',
+        message: 'You are not assigned to this section.',
       });
     }
 
-    /*
-     * Password hashing happens before the transaction.
-     * This reduces transaction duration and avoids re-hashing
-     * when MongoDB retries the transaction callback.
-     */
-    const passwordHashes =
-      await hashPasswordsWithLimit(rows);
+    const previousImport = await StudentImportBatch.findOne({
+      mentor: mentor._id,
+      section: sectionId,
+      idempotencyKey,
+    }).lean();
+
+    if (previousImport) {
+      return replayPreviousImport(
+        res,
+        previousImport,
+        payloadHash,
+      );
+    }
+
+    const passwordHashes = await hashPasswordsWithLimit(rows);
 
     session = await mongoose.startSession();
 
     let result;
 
     await session.withTransaction(async () => {
-      /*
-       * Recheck the mentor's account and department
-       * inside the transaction.
-       */
       const activeMentor = await User.findOne({
         _id: mentor._id,
         status: ACCOUNT_STATUSES.ACTIVE,
@@ -271,7 +318,6 @@ export async function importStudentsController(
         );
 
         error.statusCode = 403;
-
         throw error;
       }
 
@@ -286,33 +332,22 @@ export async function importStudentsController(
         );
 
         error.statusCode = 403;
-
         throw error;
       }
 
-      /*
-       * Confirm the mentor is still assigned to the section.
-       */
       const currentAssignedSections = (
         activeMentor.assignedSections || []
       ).map((id) => id.toString());
 
-      if (
-        !currentAssignedSections.includes(sectionId)
-      ) {
+      if (!currentAssignedSections.includes(sectionId)) {
         const error = new Error(
           'You are not assigned to this section.',
         );
 
         error.statusCode = 403;
-
         throw error;
       }
 
-      /*
-       * Only an active section belonging to the mentor's
-       * current department can receive student accounts.
-       */
       const section = await Section.findOne({
         _id: sectionId,
         department: activeMentor.department,
@@ -325,14 +360,9 @@ export async function importStudentsController(
         );
 
         error.statusCode = 404;
-
         throw error;
       }
 
-      /*
-       * Confirm the section belongs to an active batch
-       * in the same department.
-       */
       const batch = await Batch.findOne({
         _id: section.batch,
         department: activeMentor.department,
@@ -345,38 +375,24 @@ export async function importStudentsController(
         );
 
         error.statusCode = 400;
-
         throw error;
       }
 
-      /*
-       * Confirm the mentor is still assigned to this batch.
-       */
       const currentAssignedBatches = (
         activeMentor.assignedBatches || []
       ).map((id) => id.toString());
 
-      if (
-        !currentAssignedBatches.includes(
-          batch._id.toString(),
-        )
-      ) {
+      if (!currentAssignedBatches.includes(String(batch._id))) {
         const error = new Error(
           'You are not assigned to this batch.',
         );
 
         error.statusCode = 403;
-
         throw error;
       }
 
-      /*
-       * Check existing institutional IDs.
-       */
       const existingStudents = await User.find({
-        institutionalId: {
-          $in: institutionalIds,
-        },
+        institutionalId: { $in: institutionalIds },
       })
         .select('institutionalId')
         .session(session);
@@ -387,7 +403,6 @@ export async function importStudentsController(
         );
 
         error.statusCode = 409;
-
         error.conflicts = existingStudents.map(
           (student) => student.institutionalId,
         );
@@ -395,15 +410,9 @@ export async function importStudentsController(
         throw error;
       }
 
-      /*
-       * Email is optional, but provided email addresses
-       * must be unique.
-       */
       if (emailAddresses.length > 0) {
         const existingEmails = await User.find({
-          email: {
-            $in: emailAddresses,
-          },
+          email: { $in: emailAddresses },
         })
           .select('email')
           .session(session);
@@ -414,7 +423,6 @@ export async function importStudentsController(
           );
 
           error.statusCode = 409;
-
           error.conflicts = existingEmails.map(
             (user) => user.email,
           );
@@ -423,93 +431,108 @@ export async function importStudentsController(
         }
       }
 
-      /*
-       * Prepare student documents.
-       * Password hashes are already available.
-       */
       const students = rows.map((row, index) => ({
         institutionalId: institutionalIds[index],
-
         fullName: row.fullName.trim(),
-
-        email:
-          row.email?.trim().toLowerCase() ||
-          undefined,
-
+        email: row.email?.trim().toLowerCase() || undefined,
         passwordHash: passwordHashes[index],
-
         role: USER_ROLES.STUDENT,
-
         status: ACCOUNT_STATUSES.ACTIVE,
-
         department: section.department,
-
-        assignedBatches: [
-          batch._id,
-        ],
-
-        assignedSections: [
-          section._id,
-        ],
-
+        assignedBatches: [batch._id],
+        assignedSections: [section._id],
         createdBy: activeMentor._id,
-
         isEmailVerified: false,
       }));
 
-      /*
-       * Insert all records in one database operation.
-       * If insertion fails, the transaction is aborted.
-       */
-      const createdStudents = await User.insertMany(
-        students,
-        {
-          ordered: true,
-          session,
-        },
+      const createdStudents = await User.insertMany(students, {
+        ordered: true,
+        session,
+      });
+
+      const batchRecord = {
+        mentor: activeMentor._id,
+        department: activeMentor.department,
+        batch: batch._id,
+        section: section._id,
+        idempotencyKey,
+        payloadHash,
+        status: 'COMPLETED',
+        importedCount: createdStudents.length,
+        studentIds: createdStudents.map(
+          (student) => student._id,
+        ),
+        completedAt: new Date(),
+      };
+
+      await StudentImportBatch.create(
+        [batchRecord],
+        { session },
       );
 
       result = {
         sectionId: section._id,
         batchId: batch._id,
         importedCount: createdStudents.length,
-
-        students: createdStudents.map(
-          (student) => ({
-            id: student._id,
-            institutionalId:
-              student.institutionalId,
-            fullName: student.fullName,
-            email: student.email,
-          }),
-        ),
+        students: createdStudents.map((student) => ({
+          id: student._id,
+          institutionalId: student.institutionalId,
+          fullName: student.fullName,
+          email: student.email,
+        })),
       };
     });
 
     return res.status(201).json({
       success: true,
+      replayed: false,
       message: 'Students imported successfully.',
       data: result,
     });
   } catch (error) {
+    if (error instanceof StudentImportIdempotencyError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+        code: error.code,
+      });
+    }
+
     if (error instanceof StudentImportError) {
       return sendImportError(res, error);
     }
 
-    if (
-      error instanceof mongoose.Error.ValidationError
-    ) {
+    if (error?.code === 11000 && idempotencyContext) {
+      try {
+        const racedImport = await StudentImportBatch.findOne({
+          mentor: idempotencyContext.mentorId,
+          section: idempotencyContext.sectionId,
+          idempotencyKey: idempotencyContext.idempotencyKey,
+        }).lean();
+
+        if (racedImport) {
+          return replayPreviousImport(
+            res,
+            racedImport,
+            idempotencyContext.payloadHash,
+          );
+        }
+      } catch (replayError) {
+        return next(replayError);
+      }
+    }
+
+    if (error instanceof mongoose.Error.ValidationError) {
       return res.status(400).json({
         success: false,
         message:
           'One or more student records failed database validation.',
-
-        errors: Object.entries(
-          error.errors || {},
-        ).map(([field, detail]) => ({
-          field,
-          message: detail.message,
-        })),
+        errors: Object.entries(error.errors || {}).map(
+          ([field, detail]) => ({
+            field,
+            message: detail.message,
+          }),
+        ),
       });
     }
 
@@ -532,19 +555,12 @@ export async function importStudentsController(
       });
     }
 
-    if (
-      [400, 403, 404, 409].includes(
-        error.statusCode,
-      )
-    ) {
+    if ([400, 403, 404, 409].includes(error.statusCode)) {
       return res.status(error.statusCode).json({
         success: false,
         message: error.message,
-
         ...(error.conflicts
-          ? {
-              conflicts: error.conflicts,
-            }
+          ? { conflicts: error.conflicts }
           : {}),
       });
     }

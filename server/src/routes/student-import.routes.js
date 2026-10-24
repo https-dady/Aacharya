@@ -27,6 +27,10 @@ import {
 
 import studentUpload from '../middleware/student-upload.middleware.js';
 
+import {
+  studentImportIdempotencyMiddleware,
+} from '../middleware/student-import-idempotency.middleware.js';
+
 const studentImportRouter = Router();
 
 const MAX_IMPORT_SIZE = 1024 * 1024;
@@ -79,8 +83,8 @@ studentImportRouter.get(
  * XLSX:
  *   Send one .xlsx file using multipart field "file".
  *
- * The controller returns row-level duplicate information
- * without creating or modifying student accounts.
+ * Preview does not require an Idempotency-Key because it
+ * does not create student accounts.
  */
 studentImportRouter.post(
   '/sections/:sectionId/students/import-preview',
@@ -94,12 +98,19 @@ studentImportRouter.post(
 /*
  * Perform the actual student import.
  *
- * This remains a separate endpoint from preview.
+ * Middleware order:
+ * 1. Authenticate the caller.
+ * 2. Apply rate limiting.
+ * 3. Validate the Idempotency-Key.
+ * 4. Parse the uploaded file.
+ * 5. Validate request parameters and body.
+ * 6. Execute the import controller.
  */
 studentImportRouter.post(
   '/sections/:sectionId/students/import',
   authenticate,
   authRateLimiter,
+  studentImportIdempotencyMiddleware,
   studentUpload.single('file'),
   validate(importStudentsSchema),
   importStudentsController,
