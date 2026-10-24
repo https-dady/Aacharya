@@ -109,10 +109,9 @@ app.use('/api/v1/provisioning', studentImportRoutes);
 
 
 // Error handling
+app.use(studentUploadErrorMiddleware);
 
 app.use(notFoundHandler);
-
-app.use(studentUploadErrorMiddleware);
 
 app.use(errorHandler);
 
