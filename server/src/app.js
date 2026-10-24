@@ -18,6 +18,9 @@ import mentorRoutes from './routes/mentor.routes.js';
 import studentRoutes from './routes/student.routes.js';
 import studentImportRoutes from './routes/student-import.routes.js';
 
+import {
+  studentUploadErrorMiddleware,
+} from './middleware/student-upload-error.middleware.js';
 
 import { apiRateLimiter } from './middleware/rate-limit.middleware.js';
 
@@ -106,7 +109,11 @@ app.use('/api/v1/provisioning', studentImportRoutes);
 
 
 // Error handling
+
 app.use(notFoundHandler);
+
+app.use(studentUploadErrorMiddleware);
+
 app.use(errorHandler);
 
 export default app;
