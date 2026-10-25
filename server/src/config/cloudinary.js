@@ -4,32 +4,56 @@ import { env } from './env.js';
 
 let configured = false;
 
-export function configureCloudinary() {
-  const configuration = env.cloudinary;
+const REQUIRED_ENVIRONMENT_VARIABLES = Object.freeze([
+  ['cloudName', 'CLOUDINARY_CLOUD_NAME'],
+  ['apiKey', 'CLOUDINARY_API_KEY'],
+  ['apiSecret', 'CLOUDINARY_API_SECRET'],
+]);
 
-  if (!configuration?.enabled) {
+/**
+ * Configure Cloudinary using validated application configuration.
+ * An entirely absent configuration is supported for local development;
+ * storage operations remain unavailable until credentials are configured.
+ * Partial credentials are rejected rather than silently disabling storage.
+ */
+export function configureCloudinary(configuration = env.cloudinary) {
+  configured = false;
+
+  const normalized = Object.fromEntries(
+    REQUIRED_ENVIRONMENT_VARIABLES.map(([key]) => [
+      key,
+      typeof configuration?.[key] === 'string'
+        ? configuration[key].trim()
+        : '',
+    ]),
+  );
+
+  const configuredCount = Object.values(normalized).filter(Boolean).length;
+
+  if (configuredCount === 0) {
     configured = false;
     return false;
   }
 
-  const { cloudName, apiKey, apiSecret } = configuration;
+  if (configuredCount !== REQUIRED_ENVIRONMENT_VARIABLES.length) {
+    const missing = REQUIRED_ENVIRONMENT_VARIABLES
+      .filter(([key]) => !normalized[key])
+      .map(([, environmentName]) => environmentName);
 
-  if (!cloudName || !apiKey || !apiSecret) {
     throw new Error(
-      'Cloudinary is enabled, but its configuration is incomplete.',
+      `Cloudinary configuration is incomplete. Missing: ${missing.join(', ')}.`,
     );
   }
 
   cloudinary.config({
-    cloud_name: cloudName,
-    api_key: apiKey,
-    api_secret: apiSecret,
+    cloud_name: normalized.cloudName,
+    api_key: normalized.apiKey,
+    api_secret: normalized.apiSecret,
     secure: true,
   });
 
   configured = true;
-
-  return true;
+  return cloudinary;
 }
 
 export function isCloudinaryConfigured() {

@@ -1,94 +1,77 @@
 import { recordAuditEvent } from '../services/audit/audit.service.js';
 
-import { AUDIT_OUTCOMES } from '../models/audit-event.model.js';
-
-const VALID_OUTCOMES = new Set(AUDIT_OUTCOMES);
-
 /**
- * Records an audit event before allowing the request to continue.
+ * Attach an audit record to the completed HTTP response.
+ * The final status determines SUCCESS/FAILURE, so a controller failure
+ * cannot be recorded as a successful operation merely because the
+ * middleware ran before the controller.
  *
- * IMPORTANT:
- * The configured outcome describes the event being recorded.
- * Since this middleware executes before the route handler, use it
- * only when the outcome is already known. Do not use it to claim
- * that a future controller operation has succeeded.
- *
- * Audit persistence failures are forwarded to centralized error
- * handling, preventing the protected operation from continuing.
+ * For operations that require audit persistence to be transactional with
+ * the business operation, call recordAuditEvent from the service layer
+ * instead; response-finish auditing is necessarily post-response/best-effort.
  */
 export function auditEvent({
   action,
   resourceType,
-  outcome = 'SUCCESS',
   getResourceId,
   getMetadata,
 } = {}) {
-  if (typeof action !== 'string' || !action.trim()) {
+  if (typeof action !== 'string' || action.trim().length < 2) {
     throw new TypeError('Audit action is required.');
   }
 
-  if (typeof resourceType !== 'string' || !resourceType.trim()) {
+  if (
+    typeof resourceType !== 'string'
+    || resourceType.trim().length < 2
+  ) {
     throw new TypeError('Audit resourceType is required.');
   }
 
-  if (!VALID_OUTCOMES.has(outcome)) {
-    throw new TypeError(
-      `Audit outcome must be one of: ${[...VALID_OUTCOMES].join(', ')}.`,
-    );
-  }
-
-  if (
-    getResourceId !== undefined
-    && typeof getResourceId !== 'function'
-  ) {
+  if (getResourceId !== undefined && typeof getResourceId !== 'function') {
     throw new TypeError('getResourceId must be a function.');
   }
 
-  if (
-    getMetadata !== undefined
-    && typeof getMetadata !== 'function'
-  ) {
+  if (getMetadata !== undefined && typeof getMetadata !== 'function') {
     throw new TypeError('getMetadata must be a function.');
   }
 
-  return async function auditEventMiddleware(req, res, next) {
+  return function auditEventMiddleware(req, res, next) {
+    let resourceId;
+    let metadata;
+
     try {
-      const actor = req.user;
-
-      if (!actor?._id || !actor?.role) {
-        const error = new Error(
-          'Authenticated actor context is required for this audit event.',
-        );
-
-        error.statusCode = 401;
-        error.code = 'AUDIT_ACTOR_REQUIRED';
-
-        return next(error);
-      }
-
-      const resourceId = getResourceId
+      resourceId = getResourceId
         ? getResourceId(req, res)
         : req.params?.id ?? null;
+      metadata = getMetadata ? getMetadata(req, res) : undefined;
+    } catch (error) {
+      return next(error);
+    }
 
-      const metadata = getMetadata
-        ? getMetadata(req, res)
-        : undefined;
+    res.once('finish', () => {
+      const actor = req.user;
+      const outcome = res.statusCode >= 400
+        ? 'FAILURE'
+        : 'SUCCESS';
 
-      await recordAuditEvent({
-        actorId: actor._id,
-        actorRole: actor.role,
+      void recordAuditEvent({
+        actorId: actor?._id ?? actor?.id ?? null,
+        actorRole: actor?.role ?? 'SYSTEM',
         action: action.trim(),
         resourceType: resourceType.trim(),
         resourceId: resourceId ?? null,
         outcome,
         requestId: req.id ?? req.requestId ?? null,
         metadata,
+      }).catch((error) => {
+        req.log?.error?.(
+          { err: error, action, resourceType },
+          'Failed to persist audit event after response completion',
+        );
       });
+    });
 
-      return next();
-    } catch (error) {
-      return next(error);
-    }
+    return next();
   };
 }
 

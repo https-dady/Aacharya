@@ -24,6 +24,10 @@ function createMockQuery(result) {
       return this;
     },
 
+    exec() {
+      return Promise.resolve(result);
+    },
+
     then(resolve, reject) {
       return Promise.resolve(result).then(resolve, reject);
     },
@@ -74,8 +78,9 @@ test('allows a request with a valid access token', async () => {
   assert.equal(response.status, 200);
   assert.equal(response.body.success, true);
   assert.deepEqual(response.body.user, {
-    id: userId,
-  });
+  id: userId,
+  _id: userId,
+});
 });
 
 test('rejects a request without an authorization header', async () => {

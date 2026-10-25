@@ -34,6 +34,10 @@ function createMockQuery(result) {
       return this;
     },
 
+    exec() {
+      return Promise.resolve(result);
+    },
+
     then(resolve, reject) {
       return Promise.resolve(result).then(resolve, reject);
     },

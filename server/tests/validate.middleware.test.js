@@ -1,48 +1,59 @@
-export function validateRequest(schema) {
-  return function requestValidationMiddleware(req, res, next) {
-    const result = schema.safeParse({
-      body: req.body,
-      params: req.params,
-      query: req.query,
-    });
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { z } from 'zod';
 
-    if (!result.success) {
-      const error = new Error('The request contains invalid data.');
+import { validate } from '../src/middleware/validate.middleware.js';
 
-      error.statusCode = 422;
-      error.code = 'VALIDATION_ERROR';
-      error.expose = true;
-
-      return next(error);
-    }
-
-    res.locals.validatedRequest = result.data;
-
-    return next();
-  };
+function runMiddleware(middleware, req) {
+  return new Promise((resolve) => {
+    middleware(req, {}, (error) => resolve(error ?? null));
+  });
 }
 
-// Backward-compatible alias for existing routes.
-export const validate = (schema) => {
-  return function validateRequestMiddleware(req, res, next) {
-    const result = schema.safeParse({
-      body: req.body,
-      params: req.params,
-      query: req.query,
-    });
+test('rejects a non-Zod-compatible schema at configuration time', () => {
+  assert.throws(
+    () => validate({}),
+    /Zod-compatible schema/,
+  );
+});
 
-    if (!result.success) {
-      const error = new Error('The request contains invalid data.');
-
-      error.statusCode = 422;
-      error.code = 'VALIDATION_ERROR';
-      error.expose = true;
-
-      return next(error);
-    }
-
-    req.body = result.data.body ?? req.body;
-
-    return next();
+test('stores parsed body, params and transformed query in req.validated', async () => {
+  const schema = z.object({
+    body: z.object({ name: z.string().trim() }),
+    params: z.object({ id: z.string() }),
+    query: z.object({ page: z.string().transform(Number) }),
+  });
+  const req = {
+    body: { name: '  Tarun  ' },
+    params: { id: 'abc' },
+    query: { page: '2' },
   };
-}
+
+  const error = await runMiddleware(validate(schema), req);
+
+  assert.equal(error, null);
+  assert.equal(req.validated.body.name, 'Tarun');
+  assert.equal(req.validated.params.id, 'abc');
+  assert.equal(req.validated.query.page, 2);
+  assert.equal(req.body.name, 'Tarun');
+  assert.equal(Object.isFrozen(req.validated), true);
+  assert.equal(req.query.page, '2');
+});
+
+test('forwards structured validation errors to centralized handling', async () => {
+  const schema = z.object({
+    body: z.object({ name: z.string().min(1) }),
+    params: z.object({}),
+    query: z.object({}),
+  });
+  const req = { body: { name: '' }, params: {}, query: {} };
+
+  const error = await runMiddleware(validate(schema), req);
+
+  assert.ok(error instanceof Error);
+  assert.equal(error.statusCode, 422);
+  assert.equal(error.code, 'VALIDATION_ERROR');
+  assert.equal(error.expose, true);
+  assert.ok(Array.isArray(error.details));
+  assert.equal(error.details[0].path, 'body.name');
+});

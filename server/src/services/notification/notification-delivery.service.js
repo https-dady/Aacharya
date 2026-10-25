@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { User } from '../../models/user.model.js';
 import { createNotification } from './notification.service.js';
 import { sendTransactionalEmail } from '../email/email.service.js';
@@ -40,17 +41,18 @@ export async function deliverUserEmail({
   subject,
   textContent,
 }) {
-  if (
-    typeof recipientId !== 'string' ||
-    !/^[a-f\d]{24}$/i.test(recipientId)
-  ) {
+  if (!mongoose.isValidObjectId(recipientId)) {
     throw createDeliveryError(
       'A valid recipient ID is required.',
       'INVALID_RECIPIENT_ID',
     );
   }
 
-  if (typeof subject !== 'string' || !subject.trim()) {
+  if (
+    typeof subject !== 'string'
+    || !subject.trim()
+    || /[\u0000-\u001F\u007F]/.test(subject)
+  ) {
     throw createDeliveryError(
       'An email subject is required.',
       'INVALID_EMAIL_SUBJECT',

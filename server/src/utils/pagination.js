@@ -16,12 +16,20 @@ function parsePositiveInteger(value, field, defaultValue) {
     return defaultValue;
   }
 
-  const parsed = Number(value);
+  let parsed;
 
-  if (
-    !Number.isSafeInteger(parsed) ||
-    parsed < 1
-  ) {
+  if (typeof value === 'number') {
+    parsed = value;
+  } else if (typeof value === 'string' && /^[1-9]\d*$/.test(value)) {
+    parsed = Number(value);
+  } else {
+    throw createValidationError(
+      `${field} must be a positive integer.`,
+      field,
+    );
+  }
+
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
     throw createValidationError(
       `${field} must be a positive integer.`,
       field,
