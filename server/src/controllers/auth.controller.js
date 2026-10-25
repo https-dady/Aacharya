@@ -28,10 +28,10 @@ const REFRESH_COOKIE_NAME = 'aacharya_refresh_token';
 
 const REFRESH_COOKIE_OPTIONS = Object.freeze({
   httpOnly: true,
-  secure: env.nodeEnv === 'production',
-  sameSite: 'strict',
+  secure: env.refreshCookie.secure,
+  sameSite: env.refreshCookie.sameSite,
   path: '/api/v1/auth',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
+  maxAge: env.refreshCookie.maxAgeMs,
 });
 
 const REFRESH_COOKIE_CLEAR_OPTIONS = Object.freeze({

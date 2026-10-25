@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { createDepartmentController } from '../controllers/department.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
+import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
@@ -27,6 +28,7 @@ const createDepartmentSchema = z.object({
 departmentRouter.post(
   '/',
   authenticate,
+  authorize('SUPER_ADMIN'),
   authRateLimiter,
   validate(createDepartmentSchema),
   createDepartmentController,

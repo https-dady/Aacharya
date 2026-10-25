@@ -7,6 +7,7 @@ import {
 } from '../controllers/faculty.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
+import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
@@ -56,6 +57,7 @@ const listFacultySchema = z.object({
 facultyRouter.get(
   '/',
   authenticate,
+  authorize('HOD'),
   authRateLimiter,
   validate(listFacultySchema),
   listFacultyController,
@@ -64,6 +66,7 @@ facultyRouter.get(
 facultyRouter.post(
   '/',
   authenticate,
+  authorize('HOD'),
   authRateLimiter,
   validate(createFacultySchema),
   createFacultyController,

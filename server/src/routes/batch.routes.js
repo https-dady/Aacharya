@@ -7,6 +7,7 @@ import {
 } from '../controllers/batch.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
+import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
@@ -83,6 +84,7 @@ const listBatchesSchema = z.object({
 batchRouter.get(
   '/',
   authenticate,
+  authorize('HOD'),
   authRateLimiter,
   validate(listBatchesSchema),
   listBatchesController,
@@ -91,6 +93,7 @@ batchRouter.get(
 batchRouter.post(
   '/',
   authenticate,
+  authorize('HOD'),
   authRateLimiter,
   validate(createBatchSchema),
   createBatchController,

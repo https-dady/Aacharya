@@ -8,6 +8,7 @@ const USER_ROLES = Object.freeze({
   FACULTY: 'FACULTY',
   MENTOR: 'MENTOR',
   STUDENT: 'STUDENT',
+  ALUMNI: 'ALUMNI',
 });
 
 const ACCOUNT_STATUSES = Object.freeze({

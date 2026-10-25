@@ -17,6 +17,8 @@ import {
   authenticate,
 } from '../middleware/auth.middleware.js';
 
+import { authorize } from '../middleware/authorize.middleware.js';
+
 import {
   validate,
 } from '../middleware/validate.middleware.js';
@@ -70,6 +72,7 @@ const previewStudentsSchema = z.object({
 studentImportRouter.get(
   '/students/import-template',
   authenticate,
+  authorize('MENTOR'),
   authRateLimiter,
   downloadStudentImportTemplateController,
 );
@@ -89,6 +92,7 @@ studentImportRouter.get(
 studentImportRouter.post(
   '/sections/:sectionId/students/import-preview',
   authenticate,
+  authorize('MENTOR'),
   authRateLimiter,
   studentUpload.single('file'),
   validate(previewStudentsSchema),
@@ -109,6 +113,7 @@ studentImportRouter.post(
 studentImportRouter.post(
   '/sections/:sectionId/students/import',
   authenticate,
+  authorize('MENTOR'),
   authRateLimiter,
   studentImportIdempotencyMiddleware,
   studentUpload.single('file'),

@@ -10,6 +10,7 @@ import {
 } from '../controllers/student.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
+import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
@@ -96,6 +97,7 @@ const updateStudentStatusSchema = z.object({
 studentRouter.post(
   '/sections/:sectionId/students',
   authenticate,
+  authorize('MENTOR'),
   authRateLimiter,
   validate(createStudentSchema),
   createStudentController,
@@ -108,6 +110,7 @@ studentRouter.post(
 studentRouter.get(
   '/sections/:sectionId/students',
   authenticate,
+  authorize('MENTOR'),
   authRateLimiter,
   validate(listStudentsSchema),
   listStudentsController,
@@ -120,6 +123,7 @@ studentRouter.get(
 studentRouter.get(
   '/sections/:sectionId/students/:studentId',
   authenticate,
+  authorize('MENTOR'),
   authRateLimiter,
   validate(studentDetailsSchema),
   getStudentDetailsController,
@@ -132,6 +136,7 @@ studentRouter.get(
 studentRouter.patch(
   '/sections/:sectionId/students/:studentId',
   authenticate,
+  authorize('MENTOR'),
   authRateLimiter,
   validate(updateStudentSchema),
   updateStudentController,
@@ -144,6 +149,7 @@ studentRouter.patch(
 studentRouter.patch(
   '/sections/:sectionId/students/:studentId/status',
   authenticate,
+  authorize('MENTOR'),
   authRateLimiter,
   validate(updateStudentStatusSchema),
   updateStudentStatusController,

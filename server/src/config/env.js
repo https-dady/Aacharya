@@ -134,6 +134,19 @@ function readStudentImportIdempotencySecret(value, nodeEnv) {
   return secret;
 }
 
+
+function readCookieSameSite(value, nodeEnv) {
+  const sameSite = (value ?? (nodeEnv === 'production' ? 'none' : 'strict'))
+    .trim()
+    .toLowerCase();
+
+  if (!['strict', 'lax', 'none'].includes(sameSite)) {
+    throw new Error('COOKIE_SAME_SITE must be strict, lax, or none.');
+  }
+
+  return sameSite;
+}
+
 function readCloudinaryConfiguration() {
   const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim() ?? '';
   const apiKey = process.env.CLOUDINARY_API_KEY?.trim() ?? '';
@@ -160,6 +173,7 @@ function readCloudinaryConfiguration() {
 }
 
 const nodeEnv = readNodeEnvironment(process.env.NODE_ENV);
+const cookieSameSite = readCookieSameSite(process.env.COOKIE_SAME_SITE, nodeEnv);
 const mongodbUri = process.env.MONGODB_URI ?? '';
 
 if (nodeEnv === 'production' && !mongodbUri.trim()) {
@@ -241,6 +255,12 @@ export const env = Object.freeze({
   logLevel: readLogLevel(process.env.LOG_LEVEL),
 
   cloudinary: readCloudinaryConfiguration(),
+
+  refreshCookie: Object.freeze({
+    sameSite: cookieSameSite,
+    secure: nodeEnv === 'production' || cookieSameSite === 'none',
+    maxAgeMs: 7 * 24 * 60 * 60 * 1000,
+  }),
 
   jwt: Object.freeze({
     accessSecret: jwtAccessSecret,

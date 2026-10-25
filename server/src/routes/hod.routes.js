@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { createHodController } from '../controllers/hod.controller.js';
 import { authenticate } from '../middleware/auth.middleware.js';
+import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
@@ -27,6 +28,7 @@ const createHodSchema = z.object({
 hodRouter.post(
   '/departments/:departmentId/hod',
   authenticate,
+  authorize('SUPER_ADMIN'),
   authRateLimiter,
   validate(createHodSchema),
   createHodController,

@@ -7,6 +7,7 @@ import {
 } from '../controllers/mentor.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
+import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
@@ -68,6 +69,7 @@ const listMentorsSchema = z.object({
 mentorRouter.get(
   '/mentors',
   authenticate,
+  authorize('HOD'),
   authRateLimiter,
   validate(listMentorsSchema),
   listMentorsController,
@@ -76,6 +78,7 @@ mentorRouter.get(
 mentorRouter.patch(
   '/faculty/:facultyId/mentor',
   authenticate,
+  authorize('HOD'),
   authRateLimiter,
   validate(assignMentorSchema),
   assignMentorController,

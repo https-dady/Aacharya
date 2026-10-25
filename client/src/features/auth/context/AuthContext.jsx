@@ -9,11 +9,10 @@ import AuthContext from './auth-context.js';
 import authService from '../services/authService.js';
 
 const ACCESS_TOKEN_KEY = 'aacharya_access_token';
-
 let initializationPromise = null;
 
 function getAuthData(response) {
-  return response?.data ?? response;
+  return response?.data?.data ?? response?.data ?? response;
 }
 
 function saveAccessToken(token) {
@@ -33,14 +32,11 @@ function AuthProvider({ children }) {
     const data = getAuthData(response);
 
     if (!data?.accessToken || !data?.user) {
-      throw new Error(
-        'Invalid authentication response from the server.',
-      );
+      throw new Error('Invalid authentication response from the server.');
     }
 
     saveAccessToken(data.accessToken);
     setUser(data.user);
-
     return data.user;
   }, []);
 
@@ -66,13 +62,25 @@ function AuthProvider({ children }) {
 
       saveAccessToken(data.accessToken);
       setUser(data.user);
-
       return true;
     } catch {
       saveAccessToken(null);
       setUser(null);
       return false;
     }
+  }, []);
+
+  useEffect(() => {
+    const handleAuthenticationExpired = () => {
+      saveAccessToken(null);
+      setUser(null);
+      setLoading(false);
+    };
+
+    window.addEventListener('aacharya:auth-expired', handleAuthenticationExpired);
+    return () => {
+      window.removeEventListener('aacharya:auth-expired', handleAuthenticationExpired);
+    };
   }, []);
 
   useEffect(() => {
@@ -90,10 +98,7 @@ function AuthProvider({ children }) {
         }
 
         const data = await initializationPromise;
-
-        if (!active) {
-          return;
-        }
+        if (!active) return;
 
         if (data?.accessToken && data?.user) {
           saveAccessToken(data.accessToken);
@@ -108,17 +113,12 @@ function AuthProvider({ children }) {
           setUser(null);
         }
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     }
 
     initializeAuth();
-
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, []);
 
   const value = useMemo(

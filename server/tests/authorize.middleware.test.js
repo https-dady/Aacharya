@@ -89,3 +89,18 @@ test('rejects an empty allowed-role list', () => {
     { name: 'TypeError' },
   );
 });
+
+test('accepts ALUMNI as a canonical role', async () => {
+  const app = createTestApp({
+    id: 'user-alumni',
+    role: 'ALUMNI',
+  });
+
+  const response = await request(app).get('/protected');
+
+  // The route in createTestApp allows HOD and SUPER_ADMIN only, so an
+  // ALUMNI account must be denied rather than treated as an invalid role.
+  assert.equal(response.status, 403);
+  assert.equal(response.body.error.code, 'FORBIDDEN');
+  assert.doesNotThrow(() => authorize('ALUMNI'));
+});

@@ -7,6 +7,7 @@ import {
 } from '../controllers/section.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
+import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
@@ -76,6 +77,7 @@ const listSectionsSchema = z.object({
 sectionRouter.get(
   '/batches/:batchId/sections',
   authenticate,
+  authorize('HOD'),
   authRateLimiter,
   validate(listSectionsSchema),
   listSectionsController,
@@ -84,6 +86,7 @@ sectionRouter.get(
 sectionRouter.post(
   '/batches/:batchId/sections',
   authenticate,
+  authorize('HOD'),
   authRateLimiter,
   validate(createSectionSchema),
   createSectionController,

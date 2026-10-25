@@ -18,6 +18,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
+import { requireTrustedOrigin } from '../middleware/csrf.middleware.js';
 
 const authRouter = Router();
 
@@ -68,12 +69,14 @@ authRouter.post(
 
 authRouter.post(
   '/refresh',
+  requireTrustedOrigin,
   authRateLimiter,
   refreshController,
 );
 
 authRouter.post(
   '/logout',
+  requireTrustedOrigin,
   logoutController,
 );
 
