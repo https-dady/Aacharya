@@ -1,21 +1,25 @@
 import { recordAuditEvent } from '../services/audit/audit.service.js';
 
-const VALID_OUTCOMES = new Set([
-  'success',
-  'failure',
-]);
+import { AUDIT_OUTCOMES } from '../models/audit-event.model.js';
+
+const VALID_OUTCOMES = new Set(AUDIT_OUTCOMES);
 
 /**
- * Record an audit event without allowing audit failures to disappear silently.
+ * Records an audit event before allowing the request to continue.
  *
- * Use this middleware only on routes where the audit event's meaning and
- * outcome are known. Authentication and authorization must happen before
- * recording an event that depends on the authenticated actor.
+ * IMPORTANT:
+ * The configured outcome describes the event being recorded.
+ * Since this middleware executes before the route handler, use it
+ * only when the outcome is already known. Do not use it to claim
+ * that a future controller operation has succeeded.
+ *
+ * Audit persistence failures are forwarded to centralized error
+ * handling, preventing the protected operation from continuing.
  */
 export function auditEvent({
   action,
   resourceType,
-  outcome = 'success',
+  outcome = 'SUCCESS',
   getResourceId,
   getMetadata,
 } = {}) {
@@ -28,7 +32,9 @@ export function auditEvent({
   }
 
   if (!VALID_OUTCOMES.has(outcome)) {
-    throw new TypeError('Audit outcome must be success or failure.');
+    throw new TypeError(
+      `Audit outcome must be one of: ${[...VALID_OUTCOMES].join(', ')}.`,
+    );
   }
 
   if (
@@ -53,10 +59,11 @@ export function auditEvent({
         const error = new Error(
           'Authenticated actor context is required for this audit event.',
         );
+
         error.statusCode = 401;
         error.code = 'AUDIT_ACTOR_REQUIRED';
 
-        throw error;
+        return next(error);
       }
 
       const resourceId = getResourceId
@@ -80,8 +87,6 @@ export function auditEvent({
 
       return next();
     } catch (error) {
-      // Fail closed: if this route requires an audit record, do not
-      // continue the operation when the audit event cannot be persisted.
       return next(error);
     }
   };
