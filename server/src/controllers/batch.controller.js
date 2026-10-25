@@ -7,7 +7,7 @@ import {
 } from '../models/user.model.js';
 
 import { Department } from '../models/department.model.js';
-import { Batch, BATCH_STATUSES } from '../models/batch.model.js';
+import { Batch } from '../models/batch.model.js';
 
 function createError(statusCode, code, message) {
   const error = new Error(message);
