@@ -3,7 +3,7 @@ import {
   getUnreadNotificationCount,
   markNotificationAsRead,
   markAllNotificationsAsRead,
-} from '../services/notifications/notification.service.js';
+} from '../services/notification/notification.service.js';
 
 function createControllerError(message, code, statusCode = 400) {
   const error = new Error(message);
