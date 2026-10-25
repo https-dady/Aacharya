@@ -64,8 +64,9 @@ export async function authenticate(req, res, next) {
 
   try {
     const user = await User.findById(payload.userId)
-      .select('_id status +tokenVersion')
-      .lean();
+      .select('_id role status +tokenVersion')
+      .lean()
+      .exec();
 
     if (!user) {
       return next(
@@ -102,6 +103,8 @@ export async function authenticate(req, res, next) {
 
     req.user = {
       id: user._id.toString(),
+      _id: user._id.toString(),
+      role: user.role,
     };
 
     return next();

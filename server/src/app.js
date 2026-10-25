@@ -1,40 +1,30 @@
 import express from 'express';
-
 import cors from 'cors';
-
 import helmet from 'helmet';
-
 import pinoHttp from 'pino-http';
-
 import cookieParser from 'cookie-parser';
 
 import { env } from './config/env.js';
 
 import healthRoutes from './routes/health.routes.js';
-
 import authRoutes from './routes/auth.routes.js';
-
 import departmentRoutes from './routes/department.routes.js';
-
 import hodRoutes from './routes/hod.routes.js';
-
 import facultyRoutes from './routes/faculty.routes.js';
-
 import batchRoutes from './routes/batch.routes.js';
-
 import sectionRoutes from './routes/section.routes.js';
-
 import mentorRoutes from './routes/mentor.routes.js';
-
 import studentRoutes from './routes/student.routes.js';
-
 import studentImportRoutes from './routes/student-import.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 
 import {
   studentUploadErrorMiddleware,
 } from './middleware/student-upload-error.middleware.js';
 
-import { apiRateLimiter } from './middleware/rate-limit.middleware.js';
+import {
+  apiRateLimiter,
+} from './middleware/rate-limit.middleware.js';
 
 import {
   errorHandler,
@@ -79,10 +69,10 @@ app.use(
   }),
 );
 
-// Health endpoints
+// Health endpoints remain outside API rate limiting.
 app.use('/health', healthRoutes);
 
-// API-wide rate limiting
+// API-wide rate limiting.
 app.use('/api/v1', apiRateLimiter);
 
 app.get('/api/v1/meta', (_req, res) => {
@@ -96,34 +86,37 @@ app.get('/api/v1/meta', (_req, res) => {
   });
 });
 
-// Authentication
+// Authentication.
 app.use('/api/v1/auth', authRoutes);
 
-// Department management
+// Notifications.
+app.use('/api/v1/notifications', notificationRoutes);
+
+// Department management.
 app.use('/api/v1/departments', departmentRoutes);
 
-// Account provisioning: HOD creation
+// Account provisioning: HOD creation.
 app.use('/api/v1/provisioning', hodRoutes);
 
-// Faculty account provisioning
+// Faculty account provisioning.
 app.use('/api/v1/provisioning/faculty', facultyRoutes);
 
-// Batch management
+// Batch management.
 app.use('/api/v1/provisioning/batches', batchRoutes);
 
-// Section management
+// Section management.
 app.use('/api/v1/provisioning', sectionRoutes);
 
-// Mentor role and batch/section assignments
+// Mentor role and batch/section assignments.
 app.use('/api/v1/provisioning', mentorRoutes);
 
-// Student account provisioning
+// Student account provisioning.
 app.use('/api/v1/provisioning', studentRoutes);
 
-// Bulk student import
+// Bulk student import.
 app.use('/api/v1/provisioning', studentImportRoutes);
 
-// Error handling
+// Error handling.
 app.use(studentUploadErrorMiddleware);
 
 app.use(notFoundHandler);
