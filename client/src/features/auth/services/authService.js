@@ -1,4 +1,4 @@
-import api from '../../../services/api/axios.js';
+import api from './api/axios.js';
 
 const AUTH_BASE_URL = '/v1/auth';
 

@@ -62,6 +62,7 @@ const confirmPasswordResetSchema = z.object({
 
 authRouter.post(
   '/login',
+  requireTrustedOrigin,
   authRateLimiter,
   validate(loginSchema),
   loginController,

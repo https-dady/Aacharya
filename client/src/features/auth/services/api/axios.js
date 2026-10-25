@@ -1,31 +1,9 @@
-import axios from 'axios';
-
 const API_BASE_URL = (
   import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 ).replace(/\/+$/, '');
 
 const ACCESS_TOKEN_KEY = 'aacharya_access_token';
-
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  },
-  timeout: 15000,
-});
-
-const refreshClient = axios.create({
-  baseURL: API_BASE_URL,
-  withCredentials: true,
-  headers: {
-    'Content-Type': 'application/json',
-    Accept: 'application/json',
-  },
-  timeout: 15000,
-});
-
+const REQUEST_TIMEOUT_MS = 15000;
 let refreshPromise = null;
 
 function getAccessToken() {
@@ -40,50 +18,102 @@ function setAccessToken(token) {
   }
 }
 
-function clearAccessToken() {
-  sessionStorage.removeItem(ACCESS_TOKEN_KEY);
+function notifyAuthenticationExpired() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('aacharya:auth-expired'));
+  }
 }
 
-function extractAccessToken(response) {
-  const body = response?.data;
+async function parseResponse(response) {
+  const contentType = response.headers.get('content-type') || '';
+  const data = contentType.includes('application/json')
+    ? await response.json()
+    : (await response.text()) || null;
 
-  const token =
-    body?.data?.accessToken ??
-    body?.accessToken ??
-    body?.data?.token ??
-    body?.token;
+  if (!response.ok) {
+    const message =
+      data?.message ||
+      data?.error?.message ||
+      `Request failed with status ${response.status}.`;
+    const error = new Error(message);
+    error.response = { status: response.status, data };
+    error.status = response.status;
+    throw error;
+  }
 
-  return typeof token === 'string' && token.trim()
-    ? token
-    : null;
+  return { data, status: response.status, headers: response.headers };
 }
 
-function createRefreshError(message, cause) {
-  return new Error(message, { cause });
+async function performRequest(path, options = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const headers = new Headers(options.headers || {});
+  headers.set('Accept', 'application/json');
+
+  if (options.body !== undefined) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const token = getAccessToken();
+  if (token && !options.skipAuthorization) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  try {
+    const requestOptions = { ...options };
+    delete requestOptions.skipAuthorization;
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      ...requestOptions,
+      headers,
+      credentials: 'include',
+      signal: controller.signal,
+    });
+    return await parseResponse(response);
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(
+        'The server took too long to respond. Please try again.',
+        { cause: error },
+      );
+    }
+
+    if (!error?.response) {
+      throw new Error(
+        'Unable to connect to the server. Please check your connection.',
+        { cause: error },
+      );
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function refreshAccessToken() {
   if (!refreshPromise) {
-    refreshPromise = refreshClient
-      .post('/auth/refresh')
+    refreshPromise = performRequest('/v1/auth/refresh', {
+      method: 'POST',
+      skipAuthorization: true,
+    })
       .then((response) => {
-        const token = extractAccessToken(response);
+        const body = response?.data;
+        const tokenData = body?.data ?? body;
+        const token = tokenData?.accessToken ?? tokenData?.token;
 
-        if (!token) {
-          throw new Error(
-            'The refresh endpoint did not return an access token.'
-          );
+        if (typeof token !== 'string' || !token.trim()) {
+          throw new Error('The refresh endpoint did not return an access token.');
         }
 
         setAccessToken(token);
         return token;
       })
       .catch((error) => {
-        clearAccessToken();
-
-        throw createRefreshError(
+        setAccessToken(null);
+        notifyAuthenticationExpired();
+        throw new Error(
           'Your session has expired. Please sign in again.',
-          error
+          { cause: error },
         );
       })
       .finally(() => {
@@ -94,76 +124,40 @@ async function refreshAccessToken() {
   return refreshPromise;
 }
 
-api.interceptors.request.use(
-  (config) => {
-    const accessToken = getAccessToken();
+async function post(path, body) {
+  const options = {
+    method: 'POST',
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  };
 
-    if (accessToken) {
-      config.headers.Authorization = `Bearer ${accessToken}`;
+  try {
+    return await performRequest(path, options);
+  } catch (error) {
+    const isUnauthorized = error?.response?.status === 401;
+    const isAuthEntryPoint = /\/v1\/auth\/(login|refresh)$/.test(path);
+
+    if (!isUnauthorized || isAuthEntryPoint) {
+      throw error;
     }
-
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
-    const originalRequest = error.config;
-
-    if (error.code === 'ECONNABORTED') {
-      error.message =
-        'The server took too long to respond. Please try again.';
-
-      return Promise.reject(error);
-    }
-
-    if (!error.response) {
-      error.message =
-        'Unable to connect to the server. Please check your connection.';
-
-      return Promise.reject(error);
-    }
-
-    const isUnauthorized = error.response.status === 401;
-
-    const isRefreshRequest =
-      originalRequest?.url?.includes('/auth/refresh');
-
-    const isLoginRequest =
-      originalRequest?.url?.includes('/auth/login');
-
-    if (
-      !isUnauthorized ||
-      !originalRequest ||
-      originalRequest._retry ||
-      isRefreshRequest ||
-      isLoginRequest
-    ) {
-      return Promise.reject(error);
-    }
-
-    originalRequest._retry = true;
 
     try {
-      const accessToken = await refreshAccessToken();
-
-      originalRequest.headers = originalRequest.headers ?? {};
-      originalRequest.headers.Authorization = `Bearer ${accessToken}`;
-
-      return api(originalRequest);
+      const token = await refreshAccessToken();
+      return await performRequest(path, {
+        ...options,
+        headers: { Authorization: `Bearer ${token}` },
+      });
     } catch (refreshError) {
-      clearAccessToken();
-
-      return Promise.reject(
-        createRefreshError(
-          'Authentication failed. Please sign in again.',
-          refreshError
-        )
+      setAccessToken(null);
+      notifyAuthenticationExpired();
+      throw new Error(
+        'Authentication failed. Please sign in again.',
+        { cause: refreshError },
       );
     }
   }
-);
+}
 
+const api = { post };
+
+export { getAccessToken, setAccessToken };
 export default api;
