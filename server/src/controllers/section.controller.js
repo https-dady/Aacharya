@@ -10,7 +10,6 @@ import { Department } from '../models/department.model.js';
 import { Batch } from '../models/batch.model.js';
 import {
   Section,
-  SECTION_STATUSES,
 } from '../models/section.model.js';
 
 function createError(statusCode, code, message) {

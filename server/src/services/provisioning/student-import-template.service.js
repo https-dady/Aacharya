@@ -5,15 +5,6 @@ const TEMPLATE_HEADERS = [
   'email',
 ];
 
-function escapeCsvValue(value) {
-  const stringValue = String(value ?? '');
-
-  if (/[",\r\n]/.test(stringValue)) {
-    return `"${stringValue.replace(/"/g, '""')}"`;
-  }
-
-  return stringValue;
-}
 
 /**
  * Generates a blank CSV template for student account provisioning.

@@ -112,7 +112,7 @@ function normalizeMentor(mentor, department, batches, sections) {
 
 export async function assignMentorController(req, res, next) {
   try {
-    const { hod, department } = await getActiveHodDepartment(
+    const { department } = await getActiveHodDepartment(
       req.user?.id,
     );
 

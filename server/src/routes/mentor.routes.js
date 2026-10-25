@@ -11,7 +11,6 @@ import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 
 import {
-  USER_ROLES,
   ACCOUNT_STATUSES,
 } from '../models/user.model.js';
 
