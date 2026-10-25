@@ -134,6 +134,31 @@ function readStudentImportIdempotencySecret(value, nodeEnv) {
   return secret;
 }
 
+function readCloudinaryConfiguration() {
+  const cloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim() ?? '';
+  const apiKey = process.env.CLOUDINARY_API_KEY?.trim() ?? '';
+  const apiSecret = process.env.CLOUDINARY_API_SECRET?.trim() ?? '';
+
+  const configuredCount = [
+    cloudName,
+    apiKey,
+    apiSecret,
+  ].filter(Boolean).length;
+
+  if (configuredCount !== 0 && configuredCount !== 3) {
+    throw new Error(
+      'Cloudinary configuration is incomplete. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET together.',
+    );
+  }
+
+  return Object.freeze({
+    enabled: configuredCount === 3,
+    cloudName,
+    apiKey,
+    apiSecret,
+  });
+}
+
 const nodeEnv = readNodeEnvironment(process.env.NODE_ENV);
 const mongodbUri = process.env.MONGODB_URI ?? '';
 
@@ -215,14 +240,18 @@ export const env = Object.freeze({
   mongodbUri,
   logLevel: readLogLevel(process.env.LOG_LEVEL),
 
+  cloudinary: readCloudinaryConfiguration(),
+
   jwt: Object.freeze({
     accessSecret: jwtAccessSecret,
     refreshSecret: jwtRefreshSecret,
+
     accessExpiresIn: readJwtExpiry(
       process.env.JWT_ACCESS_EXPIRES_IN,
       '15m',
       'JWT_ACCESS_EXPIRES_IN',
     ),
+
     refreshExpiresIn: readJwtExpiry(
       process.env.JWT_REFRESH_EXPIRES_IN,
       '7d',
