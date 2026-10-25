@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import mongoose from 'mongoose';
+
 import {
   afterEach,
   describe,
@@ -9,6 +10,7 @@ import {
 } from 'node:test';
 
 import { RefreshSession } from '../src/models/refresh-session.model.js';
+
 import {
   User,
   ACCOUNT_STATUSES,
@@ -20,9 +22,7 @@ import {
   revokeRefreshSession,
 } from '../src/services/auth/session.service.js';
 
-import {
-  generateRefreshToken,
-} from '../src/services/auth/token.service.js';
+import { generateRefreshToken } from '../src/services/auth/token.service.js';
 
 const TEST_USER_ID = new mongoose.Types.ObjectId();
 
@@ -139,11 +139,21 @@ describe('Refresh session service', () => {
       modifiedCount: 0,
     }));
 
-    mock.method(User, 'findById', async () => ({
-      id: TEST_USER_ID.toString(),
-      _id: TEST_USER_ID,
-      status: ACCOUNT_STATUSES.ACTIVE,
-    }));
+    /*
+     * Mongoose findById() returns a query, not a plain Promise
+     * resolving directly to a user object.
+     *
+     * Match the production query interface with a mock that
+     * supports .select() and awaiting the result.
+     */
+    mock.method(User, 'findById', () =>
+      createMockQuery({
+        id: TEST_USER_ID.toString(),
+        _id: TEST_USER_ID,
+        status: ACCOUNT_STATUSES.ACTIVE,
+        tokenVersion: 0,
+      }),
+    );
 
     const result = await rotateRefreshSession(oldToken);
 
@@ -154,6 +164,7 @@ describe('Refresh session service', () => {
       claimFilter._id.toString(),
       session._id.toString(),
     );
+
     assert.equal(claimFilter.revokedAt, null);
     assert.ok(claimFilter.expiresAt.$gt instanceof Date);
 
@@ -162,6 +173,7 @@ describe('Refresh session service', () => {
         revokedAt: session.revokedAt,
       },
     });
+
     assert.equal(claimOptions.new, false);
 
     assert.ok(session.revokedAt instanceof Date);
@@ -171,21 +183,26 @@ describe('Refresh session service', () => {
       createdReplacement.user.toString(),
       TEST_USER_ID.toString(),
     );
+
     assert.equal(createdReplacement.familyId, familyId);
+
     assert.equal(
       createdReplacement.tokenHash,
       hashToken(result.refreshToken),
     );
+
     assert.ok(createdReplacement.expiresAt instanceof Date);
 
     assert.notEqual(result.refreshToken, oldToken);
     assert.equal(result.userId, TEST_USER_ID.toString());
 
     assert.ok(updateArguments);
+
     assert.equal(
       updateArguments[0]._id.toString(),
       session._id.toString(),
     );
+
     assert.equal(
       updateArguments[1].$set.replacedByTokenHash,
       hashToken(result.refreshToken),
@@ -215,15 +232,19 @@ describe('Refresh session service', () => {
     await revokeRefreshSession(refreshToken);
 
     assert.ok(updateArguments);
+
     assert.equal(
       updateArguments[0].tokenHash,
       hashToken(refreshToken),
     );
+
     assert.equal(
       updateArguments[0].user,
       TEST_USER_ID.toString(),
     );
+
     assert.equal(updateArguments[0].revokedAt, null);
+
     assert.ok(updateArguments[1].$set.revokedAt instanceof Date);
   });
 

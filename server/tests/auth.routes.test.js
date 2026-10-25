@@ -2,7 +2,8 @@ process.env.JWT_ACCESS_SECRET = '';
 process.env.JWT_REFRESH_SECRET = '';
 
 import assert from 'node:assert/strict';
-import test, { beforeEach } from 'node:test';
+import test, { afterEach, beforeEach, mock } from 'node:test';
+
 import request from 'supertest';
 
 import app from '../src/app.js';
@@ -11,23 +12,58 @@ import { generateAccessToken } from '../src/services/auth/token.service.js';
 
 import { authRateLimiter } from '../src/middleware/rate-limit.middleware.js';
 
+import {
+  User,
+  ACCOUNT_STATUSES,
+} from '../src/models/user.model.js';
+
 const TEST_USER_ID = 'user-123456';
 
 const validAccessToken = generateAccessToken(TEST_USER_ID);
-
 const validAuthorization = `Bearer ${validAccessToken}`;
 
 const VALID_CHALLENGE_ID = '0123456789abcdef01234567';
 
+function createMockQuery(result) {
+  return {
+    select() {
+      return this;
+    },
+
+    lean() {
+      return this;
+    },
+
+    then(resolve, reject) {
+      return Promise.resolve(result).then(resolve, reject);
+    },
+  };
+}
+
 /*
  * Reset only the in-memory authentication rate-limit counter
  * used by the local Supertest client.
+ *
+ * Mock the authenticated user's database lookup so these tests
+ * do not require a real database connection.
  *
  * Production rate-limit settings remain unchanged.
  */
 beforeEach(() => {
   authRateLimiter.resetKey('127.0.0.1');
   authRateLimiter.resetKey('::ffff:127.0.0.1');
+
+  mock.method(User, 'findById', () =>
+    createMockQuery({
+      _id: TEST_USER_ID,
+      status: ACCOUNT_STATUSES.ACTIVE,
+      tokenVersion: 0,
+    }),
+  );
+});
+
+afterEach(() => {
+  mock.restoreAll();
 });
 
 /*
