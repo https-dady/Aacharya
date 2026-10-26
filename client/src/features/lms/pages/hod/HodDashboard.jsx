@@ -43,7 +43,7 @@ const dashboardSections = [
   {
     title: 'Courses',
     description:
-      'Access the course management workspace.',
+      'Access course details and departmental course management.',
     path: '/hod/courses',
     label: 'Open courses',
     icon: 'courses',
@@ -52,11 +52,38 @@ const dashboardSections = [
   {
     title: 'Attendance',
     description:
-      'Access departmental attendance-related workflows.',
+      'Review departmental attendance and attendance reports.',
     path: '/hod/attendance',
     label: 'Open attendance',
     icon: 'attendance',
     category: 'ACADEMICS',
+  },
+  {
+    title: 'Assignments',
+    description:
+      'Review assignments and access their academic details.',
+    path: '/hod/assignments',
+    label: 'Open assignments',
+    icon: 'assignments',
+    category: 'ASSESSMENTS',
+  },
+  {
+    title: 'Quizzes',
+    description:
+      'Access quiz management and review quiz details.',
+    path: '/hod/quizzes',
+    label: 'Open quizzes',
+    icon: 'quizzes',
+    category: 'ASSESSMENTS',
+  },
+  {
+    title: 'Results',
+    description:
+      'Review academic results and departmental assessment records.',
+    path: '/hod/results',
+    label: 'Open results',
+    icon: 'results',
+    category: 'ASSESSMENTS',
   },
 ];
 
@@ -124,6 +151,33 @@ function SectionIcon({ type }) {
         </svg>
       );
 
+    case 'assignments':
+      return (
+        <svg {...iconProps}>
+          <path d="M8 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3" />
+          <rect x="8" y="2" width="8" height="4" rx="1.5" />
+          <path d="m8 12 2 2 5-5M8 17h8" />
+        </svg>
+      );
+
+    case 'quizzes':
+      return (
+        <svg {...iconProps}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M9.5 9a2.5 2.5 0 1 1 4.1 1.9c-1.1.9-1.6 1.2-1.6 2.6M12 17h.01" />
+        </svg>
+      );
+
+    case 'results':
+      return (
+        <svg {...iconProps}>
+          <path d="M4 19V5M4 19h17" />
+          <rect x="7" y="11" width="3" height="5" rx=".5" />
+          <rect x="13" y="8" width="3" height="8" rx=".5" />
+          <rect x="19" y="4" width="2" height="12" rx=".5" />
+        </svg>
+      );
+
     default:
       return null;
   }
@@ -140,6 +194,7 @@ function WorkspaceCard({ section }) {
         'hover:border-[#CDB5F7]/50 hover:bg-[#22232C]',
         'focus-visible:outline-none focus-visible:ring-2',
         'focus-visible:ring-[#CDB5F7]',
+        'motion-reduce:transform-none motion-reduce:transition-none',
       ].join(' ')}
     >
       <div className="flex items-start justify-between gap-4">
@@ -164,7 +219,7 @@ function WorkspaceCard({ section }) {
         {section.label}
         <span
           aria-hidden="true"
-          className="transition-transform group-hover:translate-x-1"
+          className="transition-transform group-hover:translate-x-1 motion-reduce:transition-none"
         >
           →
         </span>
@@ -195,8 +250,9 @@ export default function HodDashboard() {
           </h2>
 
           <p className="mt-2 max-w-2xl text-sm leading-6 text-[#A5A6B0]">
-            Use the workspaces below to manage faculty, coordinate mentors,
-            organize batches and sections, and access academic operations.
+            Use these workspaces to manage faculty, coordinate mentors,
+            organize batches and sections, and oversee academic operations
+            and assessments.
           </p>
 
           <div className="mt-5 flex flex-wrap gap-3">
