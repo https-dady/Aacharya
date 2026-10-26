@@ -51,6 +51,12 @@ export const ROLE_NAVIGATION = Object.freeze({
       group: 'administration',
     },
     {
+      id: 'notifications',
+      label: 'Notifications',
+      path: '/super-admin/notifications',
+      group: 'account',
+    },
+    {
       id: 'profile',
       label: 'My Profile',
       path: '/super-admin/profile',

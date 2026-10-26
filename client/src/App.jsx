@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import './App.css';
 
@@ -288,6 +289,8 @@ export default function App() {
     setUser,
   } = useAuth();
 
+  const navigate = useNavigate();
+
   const [screen, setScreen] = useState('login');
 
   const [loginForm, setLoginForm] = useState(INITIAL_LOGIN_FORM);
@@ -302,6 +305,27 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    if (authInitializing || !user) {
+      return;
+    }
+
+    const role =
+      typeof user.role === 'string'
+        ? user.role.trim().toUpperCase()
+        : '';
+
+    if (
+      role === 'SUPER_ADMIN' &&
+      user.isEmailVerified !== false &&
+      (screen === 'login' || screen === 'authenticated')
+    ) {
+      navigate('/super-admin/dashboard', {
+        replace: true,
+      });
+    }
+  }, [authInitializing, user, screen, navigate]);
 
   function clearFeedback() {
     setError('');
@@ -539,10 +563,6 @@ export default function App() {
     switchScreen('login');
   }
 
-  /*
-   * Wait for AuthProvider to finish checking the existing session.
-   * This prevents the login form from flashing while initialization runs.
-   */
   if (authInitializing) {
     return (
       <main className="auth-shell">
@@ -561,20 +581,12 @@ export default function App() {
     );
   }
 
-  /*
-   * If the context has restored a user after refresh, show the
-   * authenticated screen rather than leaving the app on the login form.
-   */
   const effectiveScreen =
     user && screen === 'login'
       ? user.isEmailVerified === false
         ? 'email-verification'
         : 'authenticated'
       : screen;
-
-  const isAuthenticatedScreen =
-    effectiveScreen === 'authenticated' ||
-    effectiveScreen === 'email-verification';
 
   if (effectiveScreen === 'authenticated') {
     return (
@@ -655,9 +667,7 @@ export default function App() {
 
         <div className="auth-panel-top">
           <span className="panel-context">
-            {isAuthenticatedScreen
-              ? 'YOUR ACCOUNT'
-              : 'ACCOUNT ACCESS'}
+            ACCOUNT ACCESS
           </span>
 
           <span className="system-status">
