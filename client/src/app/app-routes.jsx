@@ -61,6 +61,8 @@ import FacultyDashboard from "../features/lms/pages/faculty/FacultyDashboard.jsx
 import FacultyProfile from "../features/lms/pages/faculty/FacultyProfile.jsx";
 import FacultyNotifications from "../features/lms/pages/faculty/FacultyNotifications.jsx";
 import FacultyCourses from "../features/lms/pages/faculty/FacultyCourses.jsx";
+import FacultyTimetable from "../features/lms/pages/faculty/FacultyTimetable.jsx";
+import FacultyAttendance from "../features/lms/pages/faculty/FacultyAttendance.jsx";
 
 
 export const applicationRoutes = [
@@ -331,6 +333,16 @@ export const applicationRoutes = [
         path: "courses",
         element: <FacultyCourses />,
       },
+      {
+  id: "faculty-timetable",
+  path: "timetable",
+  element: <FacultyTimetable />,
+},
+{
+  id: "faculty-attendance",
+  path: "attendance",
+  element: <FacultyAttendance />,
+},
     ],
   },
 ];
