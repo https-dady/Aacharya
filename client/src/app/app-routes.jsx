@@ -60,6 +60,8 @@ import ResultEdit from "../features/lms/pages/hod/ResultEdit.jsx";
 import FacultyDashboard from "../features/lms/pages/faculty/FacultyDashboard.jsx";
 import FacultyProfile from "../features/lms/pages/faculty/FacultyProfile.jsx";
 import FacultyNotifications from "../features/lms/pages/faculty/FacultyNotifications.jsx";
+import FacultyCourses from "../features/lms/pages/faculty/FacultyCourses.jsx";
+
 
 export const applicationRoutes = [
   // Super Admin
@@ -323,6 +325,11 @@ export const applicationRoutes = [
         id: "faculty-notifications",
         path: "notifications",
         element: <FacultyNotifications />,
+      },
+      {
+        id: "faculty-courses",
+        path: "courses",
+        element: <FacultyCourses />,
       },
     ],
   },
