@@ -80,6 +80,9 @@ import FacultyCourseMaterialDetails from "../features/lms/pages/faculty/FacultyC
 import FacultyCourseMaterialUpload from "../features/lms/pages/faculty/FacultyCourseMaterialUpload.jsx";
 
 import MentorDashboard from "../features/lms/pages/mentor/MentorDashboard.jsx";
+import MentorStudents from "../features/lms/pages/mentor/MentorStudents.jsx";
+import MentorStudentDetails from "../features/lms/pages/mentor/MentorStudentDetails.jsx";
+import MentorStudentForm from "../features/lms/pages/mentor/MentorStudentForm.jsx";
 
 export const applicationRoutes = [
   // Super Admin
@@ -434,6 +437,26 @@ export const applicationRoutes = [
         path: "dashboard",
         element: <MentorDashboard />,
       },
+          {
+      id: "mentor-students",
+      path: "students",
+      element: <MentorStudents />,
+    },
+    {
+      id: "mentor-student-details",
+      path: "students/:studentId",
+      element: <MentorStudentDetails />,
+    },
+    {
+  id: "mentor-student-create",
+  path: "students/create",
+  element: <MentorStudentForm />,
+},
+{
+  id: "mentor-student-edit",
+  path: "students/:studentId/edit",
+  element: <MentorStudentForm />,
+},
     ],
   },
 ];
