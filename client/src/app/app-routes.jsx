@@ -87,6 +87,7 @@ import MentorStudentForm from "../features/lms/pages/mentor/MentorStudentForm.js
 import MentorStudentImport from "../features/lms/pages/mentor/MentorStudentImport.jsx";
 import MentorStudentMentoring from "../features/lms/pages/mentor/MentorStudentMentoring.jsx";
 import MentorAttendance from "../features/lms/pages/mentor/MentorAttendance.jsx";
+import MentorBatches from "../features/lms/pages/mentor/MentorBatches.jsx";
 
 // Student pages
 import StudentDashboard from "../features/lms/pages/student/StudentDashboard.jsx";
@@ -494,6 +495,11 @@ export const applicationRoutes = [
   id: "mentor-attendance",
   path: "attendance",
   element: <MentorAttendance />,
+},
+{
+  id: "mentor-batches",
+  path: "batches",
+  element: <MentorBatches />,
 },
     ],
   },
