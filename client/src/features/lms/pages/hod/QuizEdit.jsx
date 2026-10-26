@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import PageHeader from "../../../../components/common/PageHeader";
-import SectionCard from "../../../../components/common/SectionCard";
-import FormField from "../../../../components/common/FormField";
-import ActionButton from "../../../../components/common/ActionButton";
+
+import ActionButton from "../../components/ActionButton.jsx";
+import FormField from "../../components/FormField.jsx";
+import PageHeader from "../../components/PageHeader.jsx";
+import SectionCard from "../../components/SectionCard.jsx";
 
 const initialForm = {
   title: "",
@@ -27,6 +28,11 @@ export default function QuizEdit() {
     ...initialForm,
     ...(quiz || {}),
     title: quiz?.title || quiz?.name || "",
+    course: quiz?.course || "",
+    courseCode: quiz?.courseCode || "",
+    faculty: quiz?.faculty || "",
+    batch: quiz?.batch || "",
+    section: quiz?.section || "",
     scheduledAt: quiz?.scheduledAt || "",
     duration: quiz?.duration ?? "",
     totalMarks: quiz?.totalMarks ?? "",
@@ -112,7 +118,7 @@ export default function QuizEdit() {
           title="Edit Quiz"
           description="Update quiz information and assessment settings."
           breadcrumbs={[
-            { label: "HOD Dashboard", to: "/hod" },
+            { label: "HOD Dashboard", to: "/hod/dashboard" },
             { label: "Quizzes", to: "/hod/quizzes" },
             { label: "Edit" },
           ]}
@@ -120,11 +126,11 @@ export default function QuizEdit() {
 
         <SectionCard>
           <div className="px-5 py-10 text-center">
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-[#EAEAE6]">
               Quiz not selected
             </h2>
 
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">
+            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#A7A7B0]">
               Open this page from a selected quiz record. No quiz information
               has been supplied.
             </p>
@@ -149,7 +155,7 @@ export default function QuizEdit() {
         title="Edit Quiz"
         description="Review and update the selected quiz information."
         breadcrumbs={[
-          { label: "HOD Dashboard", to: "/hod" },
+          { label: "HOD Dashboard", to: "/hod/dashboard" },
           { label: "Quizzes", to: "/hod/quizzes" },
           { label: "Edit" },
         ]}
@@ -179,7 +185,7 @@ export default function QuizEdit() {
             <FormField
               label="Course"
               name="course"
-              value={form.course || ""}
+              value={form.course}
               onChange={handleChange}
               placeholder="Enter course name"
               required
@@ -189,7 +195,7 @@ export default function QuizEdit() {
             <FormField
               label="Course Code"
               name="courseCode"
-              value={form.courseCode || ""}
+              value={form.courseCode}
               onChange={handleChange}
               placeholder="Enter course code"
             />
@@ -197,7 +203,7 @@ export default function QuizEdit() {
             <FormField
               label="Faculty"
               name="faculty"
-              value={form.faculty || ""}
+              value={form.faculty}
               onChange={handleChange}
               placeholder="Enter faculty name"
             />
@@ -205,7 +211,7 @@ export default function QuizEdit() {
             <FormField
               label="Batch"
               name="batch"
-              value={form.batch || ""}
+              value={form.batch}
               onChange={handleChange}
               placeholder="Enter batch"
             />
@@ -213,7 +219,7 @@ export default function QuizEdit() {
             <FormField
               label="Section"
               name="section"
-              value={form.section || ""}
+              value={form.section}
               onChange={handleChange}
               placeholder="Enter section"
             />
@@ -221,7 +227,7 @@ export default function QuizEdit() {
             <FormField
               label="Scheduled At"
               name="scheduledAt"
-              value={form.scheduledAt || ""}
+              value={form.scheduledAt}
               onChange={handleChange}
               placeholder="Enter schedule"
               helperText="Use the schedule format supplied by your quiz data."
@@ -234,8 +240,8 @@ export default function QuizEdit() {
               value={form.duration}
               onChange={handleChange}
               placeholder="Enter duration"
+              min="1"
               error={errors.duration}
-              inputProps={{ min: 1 }}
             />
 
             <FormField
@@ -245,8 +251,8 @@ export default function QuizEdit() {
               value={form.totalMarks}
               onChange={handleChange}
               placeholder="Enter total marks"
+              min="1"
               error={errors.totalMarks}
-              inputProps={{ min: 1 }}
             />
 
             <FormField
@@ -256,15 +262,15 @@ export default function QuizEdit() {
               value={form.passingMarks}
               onChange={handleChange}
               placeholder="Enter passing marks"
+              min="1"
               error={errors.passingMarks}
-              inputProps={{ min: 1 }}
             />
           </div>
 
-          <div>
+          <div className="space-y-2">
             <label
               htmlFor="quiz-instructions"
-              className="mb-2 block text-sm font-medium text-slate-300"
+              className="block text-sm font-semibold text-[#EAEAE6]"
             >
               Instructions
             </label>
@@ -272,24 +278,24 @@ export default function QuizEdit() {
             <textarea
               id="quiz-instructions"
               name="instructions"
-              value={form.instructions || ""}
+              value={form.instructions}
               onChange={handleChange}
               rows={5}
               placeholder="Enter quiz instructions"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-indigo-400/60 focus:ring-2 focus:ring-indigo-400/10"
+              className="w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-4 py-3 text-sm text-[#EAEAE6] outline-none transition placeholder:text-[#858590] focus-visible:ring-2 focus-visible:ring-[#CDB5F7] focus-visible:ring-offset-2 focus-visible:ring-offset-[#14161C]"
             />
           </div>
 
           {notice && (
             <div
               role="status"
-              className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-4 text-sm leading-6 text-amber-200"
+              className="rounded-xl border border-[#E5DF98]/25 bg-[#E5DF98]/5 p-4 text-sm leading-6 text-[#E5DF98]"
             >
               {notice}
             </div>
           )}
 
-          <div className="flex flex-wrap justify-end gap-3 border-t border-white/10 pt-5">
+          <div className="flex flex-wrap justify-end gap-3 border-t border-[#343640] pt-5">
             <Link to="/hod/quizzes">
               <ActionButton type="button" variant="secondary">
                 Cancel
@@ -303,12 +309,12 @@ export default function QuizEdit() {
         </form>
       </SectionCard>
 
-      <div className="rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-4">
-        <p className="text-sm font-medium text-amber-200">
+      <div className="rounded-xl border border-[#E5DF98]/20 bg-[#E5DF98]/5 p-4">
+        <p className="text-sm font-semibold text-[#E5DF98]">
           Saving is not connected yet
         </p>
 
-        <p className="mt-1 text-sm leading-6 text-slate-400">
+        <p className="mt-1 text-sm leading-6 text-[#A7A7B0]">
           This form validates values locally. It does not update a quiz or
           persist changes to the backend.
         </p>
