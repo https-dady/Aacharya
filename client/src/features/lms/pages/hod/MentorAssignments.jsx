@@ -31,6 +31,7 @@ const ASSIGNMENT_COLUMNS = [
   {
     key: 'status',
     header: 'Assignment Status',
+    accessor: 'status',
     render: (value) => {
       const styles = {
         ACTIVE:
@@ -60,7 +61,7 @@ export default function MentorAssignments() {
 
   /*
    * Frontend-only phase:
-   * Connect actual mentor assignment records during integration.
+   * Actual mentor assignment records will be connected during integration.
    * Do not populate this list with fabricated records.
    */
   const assignments = [];
@@ -74,6 +75,7 @@ export default function MentorAssignments() {
       assignment.institutionalId,
       assignment.batch,
       assignment.section,
+      assignment.status,
     ];
 
     return searchableValues.some((value) =>
@@ -82,6 +84,10 @@ export default function MentorAssignments() {
         .includes(normalizedSearch),
     );
   });
+
+  function clearSearch() {
+    setSearch('');
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1200px]">
@@ -94,7 +100,7 @@ export default function MentorAssignments() {
           { label: 'Mentor Assignments' },
         ]}
         actions={
-          <Link to="/hod/mentors/grant-role">
+          <Link to="/hod/faculty/grant-mentor">
             <ActionButton
               leadingIcon={
                 <svg
@@ -135,7 +141,7 @@ export default function MentorAssignments() {
 
         <div className="rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
           <p className="text-sm text-[#A5A6B0]">
-            Batch & Section Coverage
+            Batch &amp; Section Coverage
           </p>
 
           <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
@@ -173,7 +179,7 @@ export default function MentorAssignments() {
               <ActionButton
                 variant="secondary"
                 size="sm"
-                onClick={() => setSearch('')}
+                onClick={clearSearch}
               >
                 Clear search
               </ActionButton>
@@ -183,11 +189,33 @@ export default function MentorAssignments() {
           <DataTable
             columns={ASSIGNMENT_COLUMNS}
             data={filteredAssignments}
-            rowKey="id"
+            rowKey={(assignment) =>
+              assignment.id ||
+              assignment._id ||
+              `${assignment.institutionalId}-${assignment.batch}-${assignment.section}`
+            }
             loading={isLoading}
             ariaLabel="Mentor assignments"
-            emptyTitle="No mentor assignments loaded"
-            emptyDescription="Mentor assignments will appear here when actual departmental records are connected. No sample assignments are being displayed."
+            emptyTitle={
+              normalizedSearch
+                ? 'No matching mentor assignments'
+                : 'No mentor assignments loaded'
+            }
+            emptyDescription={
+              normalizedSearch
+                ? 'No loaded assignments match your search. Try another search term or clear the search.'
+                : 'Mentor assignments will appear here when actual departmental records are connected. No sample assignments are being displayed.'
+            }
+            emptyAction={
+              normalizedSearch ? (
+                <ActionButton
+                  variant="secondary"
+                  onClick={clearSearch}
+                >
+                  Clear search
+                </ActionButton>
+              ) : null
+            }
           />
         </div>
       </SectionCard>
@@ -199,9 +227,19 @@ export default function MentorAssignments() {
 
         <p className="mt-1 text-sm leading-6 text-[#A5A6B0]">
           Mentor assignments must remain within the authenticated HOD's
-          department. Available batches, sections, and faculty records will
-          be connected during the backend integration phase.
+          department. Available faculty, batches, and sections will be
+          connected through the authorized backend contracts during the
+          integration phase.
         </p>
+
+        <div className="mt-4">
+          <Link
+            to="/hod/faculty/grant-mentor"
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-3.5 py-2 text-sm font-semibold text-[#EAEAE6] transition-colors hover:border-[#CDB5F7]/50 hover:bg-[#CDB5F7]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+          >
+            Open mentor designation form
+          </Link>
+        </div>
       </div>
     </div>
   );
