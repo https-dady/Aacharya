@@ -90,6 +90,8 @@ import MentorAttendance from "../features/lms/pages/mentor/MentorAttendance.jsx"
 
 // Student pages
 import StudentDashboard from "../features/lms/pages/student/StudentDashboard.jsx";
+import StudentTimetable from "../features/lms/pages/student/StudentTimetable.jsx";
+
 
 export const applicationRoutes = [
   // Super Admin
@@ -495,6 +497,11 @@ export const applicationRoutes = [
       path: "dashboard",
       element: <StudentDashboard />,
     },
+    {
+  id: "student-timetable",
+  path: "timetable",
+  element: <StudentTimetable />,
+},
   ],
 },
 ];
