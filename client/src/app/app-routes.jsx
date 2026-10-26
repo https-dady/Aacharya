@@ -106,7 +106,7 @@ import StudentDocumentVault from "../features/lms/pages/student/StudentDocumentV
 import StudentNotifications from "../features/lms/pages/student/StudentNotifications.jsx";
 import StudentAnnouncements from "../features/lms/pages/student/StudentAnnouncements.jsx";
 import StudentAcademicOverview from "../features/lms/pages/student/StudentAcademicOverview.jsx";
-
+import StudentCareerResources from "../features/lms/pages/student/StudentCareerResources.jsx";
 
 // Alumni pages
 import AlumniDashboard from "../features/lms/pages/alumni/AlumniDashboard.jsx";
@@ -597,6 +597,11 @@ export const applicationRoutes = [
   id: "student-academic-overview",
   path: "academic-overview",
   element: <StudentAcademicOverview />,
+},
+{
+  id: "student-career-resources",
+  path: "career/resources",
+  element: <StudentCareerResources />,
 },
   ],
 },

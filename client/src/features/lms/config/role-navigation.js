@@ -302,6 +302,12 @@ export const ROLE_NAVIGATION = Object.freeze({
   path: "/student/academic-overview",
   group: "main",
 },
+{
+  id: "career-resources",
+  label: "CampusX Resources",
+  path: "/student/career/resources",
+  group: "career",
+},
   ],
 
   [LMS_ROLES.ALUMNI]: [
