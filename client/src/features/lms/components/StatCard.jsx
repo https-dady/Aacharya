@@ -1,7 +1,7 @@
 const TREND_STYLES = {
-  positive: 'bg-emerald-50 text-emerald-700',
-  negative: 'bg-rose-50 text-rose-700',
-  neutral: 'bg-slate-100 text-slate-600',
+  positive: 'border-[#5A8C78]/30 bg-[#5A8C78]/15 text-[#A6D8C1]',
+  negative: 'border-[#B86D78]/30 bg-[#B86D78]/15 text-[#F0B0B9]',
+  neutral: 'border-[#777982]/30 bg-[#777982]/15 text-[#C0C1C8]',
 };
 
 export default function StatCard({
@@ -15,13 +15,13 @@ export default function StatCard({
   className = '',
 }) {
   const accentStyles = {
-    indigo: 'bg-indigo-50 text-indigo-600',
-    blue: 'bg-blue-50 text-blue-600',
-    emerald: 'bg-emerald-50 text-emerald-600',
-    amber: 'bg-amber-50 text-amber-600',
-    rose: 'bg-rose-50 text-rose-600',
-    violet: 'bg-violet-50 text-violet-600',
-    cyan: 'bg-cyan-50 text-cyan-600',
+    indigo: 'border-[#CDB5F7]/20 bg-[#CDB5F7]/10 text-[#CDB5F7]',
+    blue: 'border-sky-400/20 bg-sky-400/10 text-sky-300',
+    emerald: 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300',
+    amber: 'border-[#E5DF98]/20 bg-[#E5DF98]/10 text-[#E5DF98]',
+    rose: 'border-rose-400/20 bg-rose-400/10 text-rose-300',
+    violet: 'border-violet-400/20 bg-violet-400/10 text-violet-300',
+    cyan: 'border-cyan-400/20 bg-cyan-400/10 text-cyan-300',
   };
 
   const iconStyle = accentStyles[accent] || accentStyles.indigo;
@@ -29,22 +29,33 @@ export default function StatCard({
 
   return (
     <article
-      className={`rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md sm:p-6 ${className}`}
+      className={[
+        'min-w-0 rounded-2xl border border-[#343640] bg-[#1D1F27] p-5',
+        'transition duration-200 hover:-translate-y-0.5 hover:border-[#4A4658]',
+        'hover:shadow-lg hover:shadow-black/10 sm:p-6',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
     >
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-500">
+        <div className="min-w-0 flex-1">
+          <p className="break-words text-sm font-medium leading-5 text-[#A5A6B0]">
             {title}
           </p>
 
-          <p className="mt-3 break-words text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+          <p className="mt-3 break-words text-2xl font-bold tracking-tight text-[#EAEAE6] sm:text-3xl">
             {value ?? '—'}
           </p>
         </div>
 
         {icon && (
           <div
-            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconStyle}`}
+            className={[
+              'flex h-11 w-11 shrink-0 items-center justify-center',
+              'rounded-xl border',
+              iconStyle,
+            ].join(' ')}
           >
             {typeof icon === 'string' ? (
               <span className="text-xl" aria-hidden="true">
@@ -61,14 +72,18 @@ export default function StatCard({
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {trendLabel && (
             <span
-              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${trendStyle}`}
+              className={[
+                'inline-flex max-w-full items-center rounded-full border',
+                'px-2.5 py-1 text-xs font-semibold',
+                trendStyle,
+              ].join(' ')}
             >
-              {trendLabel}
+              <span className="break-words">{trendLabel}</span>
             </span>
           )}
 
           {description && (
-            <p className="text-xs leading-5 text-slate-500">
+            <p className="min-w-0 break-words text-xs leading-5 text-[#92929F]">
               {description}
             </p>
           )}
