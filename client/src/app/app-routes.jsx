@@ -79,6 +79,8 @@ import FacultyCourseDetails from "../features/lms/pages/faculty/FacultyCourseDet
 import FacultyCourseMaterialDetails from "../features/lms/pages/faculty/FacultyCourseMaterialDetails.jsx";
 import FacultyCourseMaterialUpload from "../features/lms/pages/faculty/FacultyCourseMaterialUpload.jsx";
 
+import MentorDashboard from "../features/lms/pages/mentor/MentorDashboard.jsx";
+
 export const applicationRoutes = [
   // Super Admin
   {
@@ -417,6 +419,21 @@ export const applicationRoutes = [
   path: "courses/materials/upload",
   element: <FacultyCourseMaterialUpload />,
 },
+    ],
+  },
+
+  // Mentor / TG
+  {
+    id: "mentor",
+    path: "/mentor",
+    roles: ["MENTOR"],
+    element: <AppLayout />,
+    children: [
+      {
+        id: "mentor-dashboard",
+        path: "dashboard",
+        element: <MentorDashboard />,
+      },
     ],
   },
 ];
