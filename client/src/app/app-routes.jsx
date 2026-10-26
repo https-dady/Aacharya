@@ -101,6 +101,10 @@ import StudentCourseDetails from "../features/lms/pages/student/StudentCourseDet
 import StudentAssignmentDetails from "../features/lms/pages/student/StudentAssignmentDetails.jsx";
 import StudentQuizDetails from "../features/lms/pages/student/StudentQuizDetails.jsx";
 
+// Alumni pages
+import AlumniDashboard from "../features/lms/pages/alumni/AlumniDashboard.jsx";
+import AlumniProfile from "../features/lms/pages/alumni/AlumniProfile.jsx";
+
 export const applicationRoutes = [
   // Super Admin
   {
@@ -554,6 +558,26 @@ export const applicationRoutes = [
   id: "student-quiz-details",
   path: "quizzes/:quizId",
   element: <StudentQuizDetails />,
+},
+  ],
+},
+
+// Alumni
+{
+  id: "alumni",
+  path: "/alumni",
+  roles: ["ALUMNI"],
+  element: <AppLayout />,
+  children: [
+    {
+      id: "alumni-dashboard",
+      path: "dashboard",
+      element: <AlumniDashboard />,
+    },
+    {
+  id: "alumni-profile",
+  path: "profile",
+  element: <AlumniProfile />,
 },
   ],
 },
