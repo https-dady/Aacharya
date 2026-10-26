@@ -59,6 +59,7 @@ import ResultEdit from "../features/lms/pages/hod/ResultEdit.jsx";
 
 // Faculty pages
 import FacultyDashboard from "../features/lms/pages/faculty/FacultyDashboard.jsx";
+import FacultyProfile from "../features/lms/pages/faculty/FacultyProfile.jsx";
 
 export const applicationRoutes = [
   // Super Admin
@@ -317,6 +318,11 @@ export const applicationRoutes = [
         id: "faculty-dashboard",
         path: "dashboard",
         element: <FacultyDashboard />,
+      },
+      {
+        id: "faculty-profile",
+        path: "profile",
+        element: <FacultyProfile />,
       },
     ],
   },
