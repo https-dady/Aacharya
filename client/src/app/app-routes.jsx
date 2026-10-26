@@ -63,10 +63,14 @@ import FacultyNotifications from "../features/lms/pages/faculty/FacultyNotificat
 import FacultyCourses from "../features/lms/pages/faculty/FacultyCourses.jsx";
 import FacultyTimetable from "../features/lms/pages/faculty/FacultyTimetable.jsx";
 import FacultyAttendance from "../features/lms/pages/faculty/FacultyAttendance.jsx";
+
 import FacultyAssignments from "../features/lms/pages/faculty/FacultyAssignments.jsx";
 import FacultyAssignmentForm from "../features/lms/pages/faculty/FacultyAssignmentForm.jsx";
 import FacultyAssignmentDetails from "../features/lms/pages/faculty/FacultyAssignmentDetails.jsx";
 import FacultyAssignmentSubmissions from "../features/lms/pages/faculty/FacultyAssignmentSubmissions.jsx";
+
+import FacultyQuizzes from "../features/lms/pages/faculty/FacultyQuizzes.jsx";
+import FacultyQuizForm from "../features/lms/pages/faculty/FacultyQuizForm.jsx";
 
 export const applicationRoutes = [
   // Super Admin
@@ -365,6 +369,16 @@ export const applicationRoutes = [
   id: "faculty-assignment-submissions",
   path: "assignments/submissions",
   element: <FacultyAssignmentSubmissions />,
+},
+{
+  id: "faculty-quizzes",
+  path: "quizzes",
+  element: <FacultyQuizzes />,
+},
+{
+  id: "faculty-quiz-create",
+  path: "quizzes/new",
+  element: <FacultyQuizForm />,
 },
     ],
   },
