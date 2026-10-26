@@ -204,6 +204,12 @@ export const ROLE_NAVIGATION = Object.freeze({
       group: 'mentoring',
     },
     {
+      id: 'student-mentoring',
+      label: 'Student Mentoring',
+      path: '/mentor/mentoring',
+      group: 'mentoring',
+    },
+    {
       id: 'batches',
       label: 'My Batches & Sections',
       path: '/mentor/batches',
