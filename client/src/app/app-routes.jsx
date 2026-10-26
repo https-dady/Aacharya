@@ -71,6 +71,9 @@ import FacultyAssignmentSubmissions from "../features/lms/pages/faculty/FacultyA
 
 import FacultyQuizzes from "../features/lms/pages/faculty/FacultyQuizzes.jsx";
 import FacultyQuizForm from "../features/lms/pages/faculty/FacultyQuizForm.jsx";
+import FacultyQuizQuestions from "../features/lms/pages/faculty/FacultyQuizQuestions.jsx";
+import FacultyQuizResults from "../features/lms/pages/faculty/FacultyQuizResults.jsx";
+
 
 export const applicationRoutes = [
   // Super Admin
@@ -379,6 +382,16 @@ export const applicationRoutes = [
   id: "faculty-quiz-create",
   path: "quizzes/new",
   element: <FacultyQuizForm />,
+},
+{
+  id: "faculty-quiz-questions",
+  path: "quizzes/questions",
+  element: <FacultyQuizQuestions />,
+},
+{
+  id: "faculty-quiz-results",
+  path: "quizzes/results",
+  element: <FacultyQuizResults />,
 },
     ],
   },
