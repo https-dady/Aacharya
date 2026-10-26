@@ -288,6 +288,18 @@ export const ROLE_NAVIGATION = Object.freeze({
       group: 'main',
     },
     {
+      id: 'opportunities',
+      label: 'Career Opportunities',
+      path: '/alumni/opportunities',
+      group: 'career',
+    },
+    {
+      id: 'community',
+      label: 'Alumni Community',
+      path: '/alumni/community',
+      group: 'community',
+    },
+    {
       id: 'profile',
       label: 'My Profile',
       path: '/alumni/profile',
