@@ -108,55 +108,75 @@ export default function SectionList() {
             {filteredSections.map((section, index) => {
               const sectionId = section.id || section._id;
 
+              const sectionName =
+                section.name ||
+                section.sectionName ||
+                'Unnamed Section';
+
               return (
                 <article
-                  key={sectionId || `${section.name}-${index}`}
+                  key={sectionId || `${sectionName}-${index}`}
                   className="rounded-xl border border-[#383943] bg-[#191A21] p-5 transition-colors hover:border-[#555762]"
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-xs font-medium uppercase tracking-wider text-[#858590]">
                         Academic Section
                       </p>
 
-                      <h3 className="mt-2 text-lg font-semibold text-[#EAEAE6]">
-                        {section.name ||
-                          section.sectionName ||
-                          'Unnamed Section'}
+                      <h3 className="mt-2 break-words text-lg font-semibold text-[#EAEAE6]">
+                        {sectionName}
                       </h3>
                     </div>
 
-                    <span className="rounded-full border border-[#454650] px-2.5 py-1 text-xs text-[#C8C8D0]">
+                    <span className="shrink-0 rounded-full border border-[#454650] px-2.5 py-1 text-xs text-[#C8C8D0]">
                       {section.status || 'Unknown'}
                     </span>
                   </div>
 
                   <div className="mt-5 space-y-3">
                     <div>
-                      <p className="text-xs text-[#858590]">Batch</p>
-                      <p className="mt-1 text-sm text-[#D0D0D8]">
+                      <p className="text-xs text-[#858590]">
+                        Batch
+                      </p>
+
+                      <p className="mt-1 break-words text-sm text-[#D0D0D8]">
                         {section.batchName || 'Not available'}
                       </p>
                     </div>
 
                     <div>
-                      <p className="text-xs text-[#858590]">Academic Year</p>
+                      <p className="text-xs text-[#858590]">
+                        Academic Year
+                      </p>
+
                       <p className="mt-1 text-sm text-[#D0D0D8]">
                         {section.academicYear || 'Not available'}
                       </p>
                     </div>
                   </div>
 
-                  <div className="mt-5 border-t border-[#343640] pt-4">
+                  <div className="mt-5 flex flex-wrap gap-2 border-t border-[#343640] pt-4">
                     <Link
                       to="/hod/sections/details"
                       state={{ section }}
+                      className="min-w-0 flex-1"
                     >
                       <ActionButton
                         variant="secondary"
                         fullWidth
                       >
                         View Section
+                      </ActionButton>
+                    </Link>
+
+                    <Link
+                      to="/hod/sections/edit"
+                      state={{ section }}
+                      className="min-w-0 flex-1"
+                    >
+                      <ActionButton fullWidth>
+                        Edit Section
                       </ActionButton>
                     </Link>
                   </div>
@@ -169,7 +189,9 @@ export default function SectionList() {
 
       <p className="mt-5 text-xs leading-5 text-[#777986]">
         Section records are not yet connected to the backend. This page
-        does not create, modify, or persist section data.
+        does not create, modify, or persist section data. The edit action
+        passes the selected section to the existing edit page, where
+        changes are currently validated locally only.
       </p>
     </div>
   );
