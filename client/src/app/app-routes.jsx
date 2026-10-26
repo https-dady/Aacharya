@@ -65,6 +65,8 @@ import FacultyTimetable from "../features/lms/pages/faculty/FacultyTimetable.jsx
 import FacultyAttendance from "../features/lms/pages/faculty/FacultyAttendance.jsx";
 import FacultyAssignments from "../features/lms/pages/faculty/FacultyAssignments.jsx";
 import FacultyAssignmentForm from "../features/lms/pages/faculty/FacultyAssignmentForm.jsx";
+import FacultyAssignmentDetails from "../features/lms/pages/faculty/FacultyAssignmentDetails.jsx";
+
 
 export const applicationRoutes = [
   // Super Admin
@@ -353,6 +355,11 @@ export const applicationRoutes = [
   id: "faculty-assignment-create",
   path: "assignments/new",
   element: <FacultyAssignmentForm />,
+},
+{
+  id: "faculty-assignment-details",
+  path: "assignments/details",
+  element: <FacultyAssignmentDetails />,
 },
     ],
   },
