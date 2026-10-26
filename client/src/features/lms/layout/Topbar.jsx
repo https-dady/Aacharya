@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export default function Topbar({
   title = 'Dashboard',
@@ -14,9 +14,13 @@ export default function Topbar({
   const [searchValue, setSearchValue] = useState('');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
+  const profileMenuRef = useRef(null);
+
   const displayName = user?.name || 'Account';
   const displayRole = user?.role || '';
-  const avatarInitial = displayName.trim().charAt(0).toUpperCase() || 'A';
+
+  const avatarInitial =
+    displayName.trim().charAt(0).toUpperCase() || 'A';
 
   function handleSearchSubmit(event) {
     event.preventDefault();
@@ -44,13 +48,45 @@ export default function Topbar({
     }
   }
 
+  useEffect(() => {
+    function handleOutsideClick(event) {
+      if (
+        profileMenuRef.current &&
+        !profileMenuRef.current.contains(event.target)
+      ) {
+        setIsProfileOpen(false);
+      }
+    }
+
+    function handleEscapeKey(event) {
+      if (event.key === 'Escape') {
+        setIsProfileOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('keydown', handleEscapeKey);
+
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('keydown', handleEscapeKey);
+    };
+  }, []);
+
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-[#383943] bg-[#14161C]/95 backdrop-blur-xl">
       <div className="flex min-h-20 items-center gap-3 px-4 sm:px-6 lg:px-8">
         <button
           type="button"
           aria-label="Open navigation menu"
-          className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 lg:hidden"
+          aria-controls="lms-sidebar"
+          className={[
+            'inline-flex h-10 w-10 shrink-0 items-center justify-center',
+            'rounded-xl text-[#A4A4AF] transition-colors',
+            'hover:bg-[#26272B] hover:text-[#EAEAE6]',
+            'focus-visible:outline-none focus-visible:ring-2',
+            'focus-visible:ring-[#CDB5F7] lg:hidden',
+          ].join(' ')}
           onClick={onMenuClick}
         >
           <svg
@@ -69,12 +105,12 @@ export default function Topbar({
         </button>
 
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-lg font-bold tracking-tight text-slate-900 sm:text-xl">
+          <h1 className="truncate text-lg font-bold tracking-tight text-[#EAEAE6] sm:text-xl">
             {title}
           </h1>
 
           {subtitle && (
-            <p className="mt-0.5 hidden truncate text-sm text-slate-500 sm:block">
+            <p className="mt-0.5 hidden truncate text-sm text-[#A4A4AF] sm:block">
               {subtitle}
             </p>
           )}
@@ -96,7 +132,7 @@ export default function Topbar({
               fill="none"
               stroke="currentColor"
               strokeWidth="1.8"
-              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+              className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[#858590]"
             >
               <circle cx="10.8" cy="10.8" r="6.8" />
               <path strokeLinecap="round" d="m16 16 4 4" />
@@ -108,7 +144,14 @@ export default function Topbar({
               value={searchValue}
               onChange={(event) => setSearchValue(event.target.value)}
               placeholder="Search..."
-              className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100"
+              className={[
+                'h-10 w-full rounded-xl border border-[#383943]',
+                'bg-[#1D1F27] pl-9 pr-3 text-sm text-[#EAEAE6]',
+                'outline-none transition-colors',
+                'placeholder:text-[#777783]',
+                'focus:border-[#CDB5F7]',
+                'focus:ring-2 focus:ring-[#CDB5F7]/15',
+              ].join(' ')}
             />
           </div>
         </form>
@@ -120,7 +163,14 @@ export default function Topbar({
               ? `Notifications, ${notificationCount} unread`
               : 'Notifications'
           }
-          className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-slate-600 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          className={[
+            'relative inline-flex h-10 w-10 shrink-0 items-center',
+            'justify-center rounded-xl text-[#A4A4AF]',
+            'transition-colors hover:bg-[#26272B]',
+            'hover:text-[#EAEAE6]',
+            'focus-visible:outline-none focus-visible:ring-2',
+            'focus-visible:ring-[#CDB5F7]',
+          ].join(' ')}
           onClick={onNotificationsClick}
         >
           <svg
@@ -136,38 +186,50 @@ export default function Topbar({
               strokeLinejoin="round"
               d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"
             />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M10 21h4" />
+
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M10 21h4"
+            />
           </svg>
 
           {notificationCount > 0 && (
             <span
               aria-hidden="true"
-              className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-rose-500 ring-2 ring-white"
+              className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[#E5DF98] ring-2 ring-[#14161C]"
             />
           )}
         </button>
 
-        <div className="relative shrink-0">
+        <div ref={profileMenuRef} className="relative shrink-0">
           <button
             type="button"
             aria-expanded={isProfileOpen}
             aria-haspopup="menu"
             aria-label="Open profile menu"
-            className="flex items-center gap-2 rounded-xl p-1.5 transition hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-            onClick={() => setIsProfileOpen((current) => !current)}
+            className={[
+              'flex items-center gap-2 rounded-xl p-1.5',
+              'transition-colors hover:bg-[#26272B]',
+              'focus-visible:outline-none focus-visible:ring-2',
+              'focus-visible:ring-[#CDB5F7]',
+            ].join(' ')}
+            onClick={() => {
+              setIsProfileOpen((current) => !current);
+            }}
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-sm font-bold text-indigo-700">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full border border-[#CDB5F7]/25 bg-[#CDB5F7]/15 text-sm font-bold text-[#CDB5F7]">
               {avatarInitial}
             </span>
 
             <span className="hidden max-w-32 text-left sm:block">
-              <span className="block truncate text-sm font-semibold text-slate-800">
+              <span className="block truncate text-sm font-semibold text-[#EAEAE6]">
                 {displayName}
               </span>
 
               {displayRole && (
-                <span className="block truncate text-xs text-slate-500">
-                  {displayRole}
+                <span className="block truncate text-xs capitalize text-[#A4A4AF]">
+                  {displayRole.replaceAll('_', ' ')}
                 </span>
               )}
             </span>
@@ -178,7 +240,11 @@ export default function Topbar({
               fill="none"
               stroke="currentColor"
               strokeWidth="1.8"
-              className="hidden h-4 w-4 text-slate-400 sm:block"
+              className={[
+                'hidden h-4 w-4 text-[#858590] sm:block',
+                'transition-transform duration-150',
+                isProfileOpen ? 'rotate-180' : '',
+              ].join(' ')}
             >
               <path
                 strokeLinecap="round"
@@ -192,12 +258,34 @@ export default function Topbar({
             <div
               role="menu"
               aria-label="Account menu"
-              className="absolute right-0 top-full mt-2 w-52 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg shadow-slate-200/60"
+              className={[
+                'absolute right-0 top-full mt-2 w-56',
+                'rounded-xl border border-[#383943]',
+                'bg-[#1D1F27] p-1.5 shadow-2xl shadow-black/30',
+              ].join(' ')}
             >
+              <div className="border-b border-[#383943] px-3 py-3">
+                <p className="truncate text-sm font-semibold text-[#EAEAE6]">
+                  {displayName}
+                </p>
+
+                {displayRole && (
+                  <p className="mt-1 truncate text-xs capitalize text-[#A4A4AF]">
+                    {displayRole.replaceAll('_', ' ')}
+                  </p>
+                )}
+              </div>
+
               <button
                 type="button"
                 role="menuitem"
-                className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-slate-700 transition hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                className={[
+                  'mt-1 w-full rounded-lg px-3 py-2.5 text-left',
+                  'text-sm text-[#EAEAE6] transition-colors',
+                  'hover:bg-[#26272B]',
+                  'focus-visible:outline-none focus-visible:ring-2',
+                  'focus-visible:ring-[#CDB5F7]',
+                ].join(' ')}
                 onClick={handleProfileClick}
               >
                 My Profile
@@ -206,7 +294,13 @@ export default function Topbar({
               <button
                 type="button"
                 role="menuitem"
-                className="w-full rounded-lg px-3 py-2.5 text-left text-sm text-rose-600 transition hover:bg-rose-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500"
+                className={[
+                  'w-full rounded-lg px-3 py-2.5 text-left',
+                  'text-sm text-[#E5DF98] transition-colors',
+                  'hover:bg-[#E5DF98]/10',
+                  'focus-visible:outline-none focus-visible:ring-2',
+                  'focus-visible:ring-[#E5DF98]',
+                ].join(' ')}
                 onClick={handleLogout}
               >
                 Sign Out
