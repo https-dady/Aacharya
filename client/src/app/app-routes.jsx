@@ -15,7 +15,6 @@ import HodDetails from "../features/lms/pages/super-admin/HodDetails.jsx";
 
 // HOD pages
 import HodDashboard from "../features/lms/pages/hod/HodDashboard.jsx";
-import HodProfile from "../features/lms/pages/hod/HodProfile.jsx";
 
 import FacultyList from "../features/lms/pages/hod/FacultyList.jsx";
 import CreateFaculty from "../features/lms/pages/hod/CreateFaculty.jsx";
@@ -60,6 +59,7 @@ import ResultEdit from "../features/lms/pages/hod/ResultEdit.jsx";
 // Faculty pages
 import FacultyDashboard from "../features/lms/pages/faculty/FacultyDashboard.jsx";
 import FacultyProfile from "../features/lms/pages/faculty/FacultyProfile.jsx";
+import FacultyNotifications from "../features/lms/pages/faculty/FacultyNotifications.jsx";
 
 export const applicationRoutes = [
   // Super Admin
@@ -128,11 +128,6 @@ export const applicationRoutes = [
         id: "hod-dashboard",
         path: "dashboard",
         element: <HodDashboard />,
-      },
-      {
-        id: "hod-profile",
-        path: "profile",
-        element: <HodProfile />,
       },
 
       // Faculty Management
@@ -323,6 +318,11 @@ export const applicationRoutes = [
         id: "faculty-profile",
         path: "profile",
         element: <FacultyProfile />,
+      },
+      {
+        id: "faculty-notifications",
+        path: "notifications",
+        element: <FacultyNotifications />,
       },
     ],
   },
