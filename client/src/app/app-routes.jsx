@@ -79,6 +79,7 @@ import FacultyCourseDetails from "../features/lms/pages/faculty/FacultyCourseDet
 import FacultyCourseMaterialDetails from "../features/lms/pages/faculty/FacultyCourseMaterialDetails.jsx";
 import FacultyCourseMaterialUpload from "../features/lms/pages/faculty/FacultyCourseMaterialUpload.jsx";
 
+// Mentor pages
 import MentorDashboard from "../features/lms/pages/mentor/MentorDashboard.jsx";
 import MentorStudents from "../features/lms/pages/mentor/MentorStudents.jsx";
 import MentorStudentDetails from "../features/lms/pages/mentor/MentorStudentDetails.jsx";
@@ -87,6 +88,8 @@ import MentorStudentImport from "../features/lms/pages/mentor/MentorStudentImpor
 import MentorStudentMentoring from "../features/lms/pages/mentor/MentorStudentMentoring.jsx";
 import MentorAttendance from "../features/lms/pages/mentor/MentorAttendance.jsx";
 
+// Student pages
+import StudentDashboard from "../features/lms/pages/student/StudentDashboard.jsx";
 
 export const applicationRoutes = [
   // Super Admin
@@ -478,4 +481,20 @@ export const applicationRoutes = [
 },
     ],
   },
+
+
+  // Student
+{
+  id: "student",
+  path: "/student",
+  roles: ["STUDENT"],
+  element: <AppLayout />,
+  children: [
+    {
+      id: "student-dashboard",
+      path: "dashboard",
+      element: <StudentDashboard />,
+    },
+  ],
+},
 ];
