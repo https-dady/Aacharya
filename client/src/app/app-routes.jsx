@@ -73,8 +73,9 @@ import FacultyQuizzes from "../features/lms/pages/faculty/FacultyQuizzes.jsx";
 import FacultyQuizForm from "../features/lms/pages/faculty/FacultyQuizForm.jsx";
 import FacultyQuizQuestions from "../features/lms/pages/faculty/FacultyQuizQuestions.jsx";
 import FacultyQuizResults from "../features/lms/pages/faculty/FacultyQuizResults.jsx";
-import FacultyResults from "../features/lms/pages/faculty/FacultyResults.jsx";
 
+import FacultyResults from "../features/lms/pages/faculty/FacultyResults.jsx";
+import FacultyCourseDetails from "../features/lms/pages/faculty/FacultyCourseDetails.jsx";
 
 export const applicationRoutes = [
   // Super Admin
@@ -398,6 +399,11 @@ export const applicationRoutes = [
   id: "faculty-results",
   path: "results",
   element: <FacultyResults />,
+},
+{
+  id: "faculty-course-details",
+  path: "courses/details",
+  element: <FacultyCourseDetails />,
 },
     ],
   },
