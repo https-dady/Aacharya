@@ -1,4 +1,4 @@
-import api from '../../../auth/services/api/axios.js';
+import api from '../../auth/services/api/axios.js';
 
 const NOTIFICATION_BASE_URL = '/v1/notifications';
 
@@ -37,7 +37,7 @@ function normalizeListOptions(options = {}) {
   }
 
   if (options.unreadOnly !== undefined) {
-    params.unreadOnly = String(Boolean(options.unreadOnly));
+    params.unreadOnly = String(options.unreadOnly === true);
   }
 
   if (options.type !== undefined && options.type !== '') {
@@ -66,14 +66,7 @@ const notificationService = {
   /**
    * Retrieve the authenticated user's notifications.
    *
-   * Backend:
    * GET /api/v1/notifications
-   *
-   * Returns:
-   * {
-   *   items: Notification[],
-   *   pagination: PaginationMetadata
-   * }
    */
   async getNotifications(options = {}) {
     const response = await api.get(NOTIFICATION_BASE_URL, {
@@ -97,7 +90,6 @@ const notificationService = {
   /**
    * Retrieve the authenticated user's unread notification count.
    *
-   * Backend:
    * GET /api/v1/notifications/unread-count
    */
   async getUnreadCount() {
@@ -120,7 +112,6 @@ const notificationService = {
   /**
    * Mark one notification as read.
    *
-   * Backend:
    * PATCH /api/v1/notifications/:notificationId/read
    */
   async markAsRead(notificationId) {
@@ -138,7 +129,6 @@ const notificationService = {
   /**
    * Mark all notifications belonging to the authenticated user as read.
    *
-   * Backend:
    * PATCH /api/v1/notifications/read-all
    */
   async markAllAsRead() {
@@ -147,10 +137,11 @@ const notificationService = {
     );
 
     const body = unwrapResponse(response);
+    const result = body.data ?? {};
 
     return {
-      matchedCount: body.data?.matchedCount ?? 0,
-      modifiedCount: body.data?.modifiedCount ?? 0,
+      matchedCount: result.matchedCount ?? 0,
+      modifiedCount: result.modifiedCount ?? 0,
     };
   },
 };
