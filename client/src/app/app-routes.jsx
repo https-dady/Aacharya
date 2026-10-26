@@ -85,6 +85,8 @@ import MentorStudentDetails from "../features/lms/pages/mentor/MentorStudentDeta
 import MentorStudentForm from "../features/lms/pages/mentor/MentorStudentForm.jsx";
 import MentorStudentImport from "../features/lms/pages/mentor/MentorStudentImport.jsx";
 import MentorStudentMentoring from "../features/lms/pages/mentor/MentorStudentMentoring.jsx";
+import MentorAttendance from "../features/lms/pages/mentor/MentorAttendance.jsx";
+
 
 export const applicationRoutes = [
   // Super Admin
@@ -468,6 +470,11 @@ export const applicationRoutes = [
   id: "mentor-student-mentoring",
   path: "mentoring",
   element: <MentorStudentMentoring />,
+},
+{
+  id: "mentor-attendance",
+  path: "attendance",
+  element: <MentorAttendance />,
 },
     ],
   },
