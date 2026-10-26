@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import {
+  Outlet,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
 
 import useAuth from '../../auth/context/useAuth.js';
 
@@ -37,6 +41,29 @@ function getDisplayName(user) {
   );
 }
 
+function SessionLoadingView() {
+  return (
+    <div
+      className="flex min-h-screen items-center justify-center bg-[#14161C] px-6"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex flex-col items-center gap-4">
+        <div
+          aria-hidden="true"
+          className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#CDB5F7] text-xl font-extrabold text-[#14161C]"
+        >
+          A
+        </div>
+
+        <p className="text-sm text-[#A4A4AF]">
+          Restoring your session...
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function AppLayout({
   onLogout,
   onSearch,
@@ -59,13 +86,35 @@ export default function AppLayout({
   );
 
   const pageInformation = useMemo(
-    () => getPageInformation(location.pathname, navigation),
+    () =>
+      getPageInformation(
+        location.pathname,
+        navigation,
+      ),
     [location.pathname, navigation],
   );
 
   useEffect(() => {
     setIsSidebarOpen(false);
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!isSidebarOpen) {
+      return undefined;
+    }
+
+    function handleEscape(event) {
+      if (event.key === 'Escape') {
+        setIsSidebarOpen(false);
+      }
+    }
+
+    document.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [isSidebarOpen]);
 
   function handleProfileClick() {
     const profileItem = navigation.find(
@@ -85,11 +134,29 @@ export default function AppLayout({
 
     await auth.logout();
 
-    navigate('/', { replace: true });
+    navigate('/', {
+      replace: true,
+    });
+  }
+
+  if (auth.loading) {
+    return <SessionLoadingView />;
   }
 
   return (
     <div className="min-h-screen bg-[#14161C] text-[#EAEAE6]">
+      <a
+        href="#main-content"
+        className={[
+          'sr-only z-[100] rounded-lg bg-[#CDB5F7]',
+          'px-4 py-3 font-semibold text-[#14161C]',
+          'focus:not-sr-only focus:fixed focus:left-4 focus:top-4',
+          'focus:outline-none focus:ring-2 focus:ring-[#E5DF98]',
+        ].join(' ')}
+      >
+        Skip to main content
+      </a>
+
       <div className="flex min-h-screen">
         <Sidebar
           role={role}
@@ -104,7 +171,10 @@ export default function AppLayout({
             subtitle={pageInformation.subtitle}
             user={{
               name: getDisplayName(user),
-              role: role.replaceAll('_', ' '),
+              role:
+                typeof role === 'string'
+                  ? role.replaceAll('_', ' ')
+                  : '',
             }}
             notificationCount={notificationCount}
             onMenuClick={() => setIsSidebarOpen(true)}
@@ -117,7 +187,7 @@ export default function AppLayout({
           <main
             id="main-content"
             tabIndex={-1}
-            className="min-w-0 flex-1"
+            className="min-w-0 flex-1 outline-none"
           >
             <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">
               <Outlet />
