@@ -7,6 +7,7 @@ import ForgotPassword from './features/auth/pages/ForgotPassword.jsx';
 import VerifyResetOtp from './features/auth/pages/VerifyResetOtp.jsx';
 import ResetPassword from './features/auth/pages/ResetPassword.jsx';
 import EmailVerification from './features/auth/pages/EmailVerification.jsx';
+import Dashboard from './features/lms/Dashboard.jsx';
 
 import authService from './features/auth/services/authService.js';
 import useAuth from './features/auth/context/useAuth.js';
@@ -534,6 +535,10 @@ export default function App() {
     effectiveScreen === 'authenticated' ||
     effectiveScreen === 'email-verification';
 
+  if (effectiveScreen === 'authenticated') {
+    return <Dashboard user={user} onLogout={handleLogout} />;
+  }
+
   return (
     <main className="auth-shell">
       <section className="auth-visual" aria-label="About Aacharya LMS">
@@ -663,14 +668,6 @@ export default function App() {
             />
           )}
 
-          {effectiveScreen === 'authenticated' && (
-            <AuthenticatedView
-              user={user}
-              onLogout={handleLogout}
-              loading={loading}
-              error={error}
-            />
-          )}
         </div>
 
         <AuthFooter />
