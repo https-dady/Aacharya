@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import PageHeader from "../../../../components/common/PageHeader";
-import SectionCard from "../../../../components/common/SectionCard";
-import FormField from "../../../../components/common/FormField";
-import ActionButton from "../../../../components/common/ActionButton";
+
+import ActionButton from "../../components/ActionButton.jsx";
+import FormField from "../../components/FormField.jsx";
+import PageHeader from "../../components/PageHeader.jsx";
+import SectionCard from "../../components/SectionCard.jsx";
 
 const initialForm = {
   title: "",
@@ -25,6 +26,13 @@ export default function EditAssignment() {
     ...initialForm,
     ...(assignment || {}),
     title: assignment?.title || assignment?.name || "",
+    course:
+      assignment?.courseName || assignment?.course || "",
+    faculty:
+      assignment?.facultyName || assignment?.faculty || "",
+    batch: assignment?.batchName || assignment?.batch || "",
+    section:
+      assignment?.sectionName || assignment?.section || "",
     description:
       assignment?.description || assignment?.instructions || "",
     dueDate: assignment?.dueDate || "",
@@ -67,16 +75,19 @@ export default function EditAssignment() {
       nextErrors.course = "Course name is required.";
     }
 
-    if (
-      form.totalMarks !== "" &&
-      (!Number.isFinite(Number(form.totalMarks)) ||
-        Number(form.totalMarks) <= 0)
-    ) {
-      nextErrors.totalMarks = "Enter a valid positive marks value.";
+    if (form.totalMarks !== "") {
+      if (
+        !Number.isFinite(Number(form.totalMarks)) ||
+        Number(form.totalMarks) <= 0
+      ) {
+        nextErrors.totalMarks =
+          "Enter a valid positive marks value.";
+      }
     }
 
+    setErrors(nextErrors);
+
     if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors);
       setNotice("");
       return;
     }
@@ -88,13 +99,13 @@ export default function EditAssignment() {
 
   if (!assignment) {
     return (
-      <div className="space-y-6">
+      <div className="mx-auto w-full max-w-[1200px]">
         <PageHeader
-          eyebrow="Academic Management"
+          eyebrow="ACADEMIC OVERSIGHT"
           title="Edit Assignment"
           description="Update assignment information and academic allocation."
           breadcrumbs={[
-            { label: "HOD Dashboard", to: "/hod" },
+            { label: "HOD Dashboard", to: "/hod/dashboard" },
             { label: "Assignments", to: "/hod/assignments" },
             { label: "Edit" },
           ]}
@@ -102,13 +113,13 @@ export default function EditAssignment() {
 
         <SectionCard>
           <div className="px-5 py-10 text-center">
-            <h2 className="text-lg font-semibold text-white">
+            <h2 className="text-lg font-semibold text-[#EAEAE6]">
               Assignment not selected
             </h2>
 
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-400">
+            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#A5A6B0]">
               Open the edit page from a selected assignment record. No
-              assignment has been supplied to this page.
+              assignment information has been provided to this page.
             </p>
 
             <div className="mt-6">
@@ -125,30 +136,33 @@ export default function EditAssignment() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-[1200px]">
       <PageHeader
-        eyebrow="Academic Management"
+        eyebrow="ACADEMIC OVERSIGHT"
         title="Edit Assignment"
-        description="Review and update the selected assignment's information."
+        description="Review and update the selected assignment information."
         breadcrumbs={[
-          { label: "HOD Dashboard", to: "/hod" },
+          { label: "HOD Dashboard", to: "/hod/dashboard" },
           { label: "Assignments", to: "/hod/assignments" },
           { label: "Edit" },
         ]}
         actions={
           <Link to="/hod/assignments">
-            <ActionButton variant="secondary">
-              Cancel
-            </ActionButton>
+            <ActionButton variant="secondary">Cancel</ActionButton>
           </Link>
         }
       />
 
       <SectionCard
-        title="Assignment Information"
+        eyebrow="ASSIGNMENT INFORMATION"
+        title="Assignment Details"
         description="Fields are initialized from the selected assignment record."
       >
-        <form onSubmit={handleSubmit} className="space-y-6" noValidate>
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-6"
+          noValidate
+        >
           <div className="grid gap-5 md:grid-cols-2">
             <FormField
               label="Assignment Title"
@@ -173,7 +187,7 @@ export default function EditAssignment() {
             <FormField
               label="Course Code"
               name="courseCode"
-              value={form.courseCode}
+              value={form.courseCode || ""}
               onChange={handleChange}
               placeholder="Enter course code"
             />
@@ -181,7 +195,7 @@ export default function EditAssignment() {
             <FormField
               label="Faculty"
               name="faculty"
-              value={form.faculty}
+              value={form.faculty || ""}
               onChange={handleChange}
               placeholder="Enter faculty name"
             />
@@ -189,7 +203,7 @@ export default function EditAssignment() {
             <FormField
               label="Batch"
               name="batch"
-              value={form.batch}
+              value={form.batch || ""}
               onChange={handleChange}
               placeholder="Enter batch"
             />
@@ -197,7 +211,7 @@ export default function EditAssignment() {
             <FormField
               label="Section"
               name="section"
-              value={form.section}
+              value={form.section || ""}
               onChange={handleChange}
               placeholder="Enter section"
             />
@@ -218,39 +232,39 @@ export default function EditAssignment() {
               onChange={handleChange}
               placeholder="Enter total marks"
               error={errors.totalMarks}
-              inputProps={{ min: 1 }}
+              min={1}
             />
           </div>
 
           <div>
             <label
-              htmlFor="description"
-              className="mb-2 block text-sm font-medium text-slate-300"
+              htmlFor="assignment-description"
+              className="mb-2 block text-sm font-semibold text-[#EAEAE6]"
             >
               Instructions / Description
             </label>
 
             <textarea
-              id="description"
+              id="assignment-description"
               name="description"
-              value={form.description}
+              value={form.description || ""}
               onChange={handleChange}
               rows={5}
               placeholder="Enter assignment instructions"
-              className="w-full rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-indigo-400/60 focus:ring-2 focus:ring-indigo-400/10"
+              className="w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-4 py-3 text-sm text-[#EAEAE6] outline-none transition-colors placeholder:text-[#858590] focus-visible:border-[#CDB5F7] focus-visible:ring-2 focus-visible:ring-[#CDB5F7] focus-visible:ring-offset-2 focus-visible:ring-offset-[#14161C]"
             />
           </div>
 
           {notice && (
             <div
               role="status"
-              className="rounded-xl border border-amber-400/20 bg-amber-400/[0.05] p-4 text-sm leading-6 text-amber-200"
+              className="rounded-xl border border-[#E5DF98]/20 bg-[#E5DF98]/5 p-4 text-sm leading-6 text-[#E5DF98]"
             >
               {notice}
             </div>
           )}
 
-          <div className="flex flex-wrap justify-end gap-3 border-t border-white/10 pt-5">
+          <div className="flex flex-wrap justify-end gap-3 border-t border-[#343640] pt-5">
             <Link to="/hod/assignments">
               <ActionButton variant="secondary" type="button">
                 Cancel
@@ -264,12 +278,12 @@ export default function EditAssignment() {
         </form>
       </SectionCard>
 
-      <div className="rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-4">
-        <p className="text-sm font-medium text-amber-200">
-          Saving is not connected yet
+      <div className="mt-5 rounded-xl border border-[#454650] bg-[#191A21] p-4">
+        <p className="text-sm font-medium text-[#E5DF98]">
+          Backend integration pending
         </p>
 
-        <p className="mt-1 text-sm leading-6 text-slate-400">
+        <p className="mt-2 text-sm leading-6 text-[#9697A2]">
           This form validates input locally. It does not send an API request
           or persist changes to an assignment record.
         </p>
