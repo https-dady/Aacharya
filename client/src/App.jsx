@@ -7,10 +7,10 @@ import ForgotPassword from './features/auth/pages/ForgotPassword.jsx';
 import VerifyResetOtp from './features/auth/pages/VerifyResetOtp.jsx';
 import ResetPassword from './features/auth/pages/ResetPassword.jsx';
 import EmailVerification from './features/auth/pages/EmailVerification.jsx';
-import Dashboard from './features/lms/Dashboard.jsx';
 
 import authService from './features/auth/services/authService.js';
 import useAuth from './features/auth/context/useAuth.js';
+
 const INITIAL_LOGIN_FORM = {
   institutionalId: '',
   password: '',
@@ -40,6 +40,7 @@ function BrandMark() {
     <div className="brand-mark" aria-hidden="true">
       <svg viewBox="0 0 40 40" fill="none">
         <rect width="40" height="40" rx="13" fill="#CDB5F7" />
+
         <path
           d="M11 27.5V12.5H15.5L25 23.1V12.5H29V27.5H24.7L15 16.8V27.5H11Z"
           fill="#14161C"
@@ -56,6 +57,7 @@ function BrandHeader() {
 
       <span className="brand-copy">
         <span className="brand-name">aacharya</span>
+
         <span className="brand-caption">
           LEARNING MANAGEMENT SYSTEM
         </span>
@@ -72,7 +74,9 @@ function DecorativeGrid() {
       <div className="grid-orbit grid-orbit-three" />
 
       <div className="grid-floating-card floating-card-one">
-        <span className="floating-icon floating-icon-lavender">A</span>
+        <span className="floating-icon floating-icon-lavender">
+          A
+        </span>
 
         <span>
           <strong>Learn with purpose</strong>
@@ -81,7 +85,9 @@ function DecorativeGrid() {
       </div>
 
       <div className="grid-floating-card floating-card-two">
-        <span className="floating-icon floating-icon-butter">✓</span>
+        <span className="floating-icon floating-icon-butter">
+          ✓
+        </span>
 
         <span>
           <strong>Your journey, organized</strong>
@@ -93,7 +99,11 @@ function DecorativeGrid() {
         <div className="symbol-ring symbol-ring-outer" />
         <div className="symbol-ring symbol-ring-inner" />
 
-        <svg className="symbol-book" viewBox="0 0 100 100" fill="none">
+        <svg
+          className="symbol-book"
+          viewBox="0 0 100 100"
+          fill="none"
+        >
           <path
             d="M50 30C40 23 28 22 17 26V66C29 62 41 64 50 71V30Z"
             stroke="currentColor"
@@ -145,7 +155,12 @@ function AuthFooter() {
   );
 }
 
-function AuthenticatedView({ user, onLogout, loading, error }) {
+function AuthenticatedView({
+  user,
+  onLogout,
+  loading,
+  error,
+}) {
   const fullName = user?.fullName || 'User';
   const role = user?.role || 'Account';
 
@@ -163,6 +178,7 @@ function AuthenticatedView({ user, onLogout, loading, error }) {
         <h1 className="text-4xl font-semibold leading-tight tracking-tight text-[#EAEAE6] sm:text-5xl">
           Welcome,
           <br />
+
           <span className="break-words text-[#CDB5F7]">
             {fullName}.
           </span>
@@ -184,28 +200,40 @@ function AuthenticatedView({ user, onLogout, loading, error }) {
 
       <div className="space-y-4 rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
         <div>
-          <p className="text-xs text-[#858590]">Full name</p>
+          <p className="text-xs text-[#858590]">
+            Full name
+          </p>
+
           <p className="mt-1 break-words text-sm font-medium text-[#EAEAE6]">
             {fullName}
           </p>
         </div>
 
         <div>
-          <p className="text-xs text-[#858590]">Institutional ID</p>
+          <p className="text-xs text-[#858590]">
+            Institutional ID
+          </p>
+
           <p className="mt-1 break-words text-sm font-medium text-[#EAEAE6]">
             {user?.institutionalId || 'Not available'}
           </p>
         </div>
 
         <div>
-          <p className="text-xs text-[#858590]">Role</p>
+          <p className="text-xs text-[#858590]">
+            Role
+          </p>
+
           <p className="mt-1 text-sm font-medium text-[#E5DF98]">
             {role}
           </p>
         </div>
 
         <div>
-          <p className="text-xs text-[#858590]">Email</p>
+          <p className="text-xs text-[#858590]">
+            Email
+          </p>
+
           <p className="mt-1 break-all text-sm font-medium text-[#EAEAE6]">
             {user?.email || 'Not available'}
           </p>
@@ -266,8 +294,10 @@ export default function App() {
 
   const [recovery, setRecovery] = useState(INITIAL_RECOVERY_STATE);
 
-  const [emailVerificationChallengeId, setEmailVerificationChallengeId] =
-    useState('');
+  const [
+    emailVerificationChallengeId,
+    setEmailVerificationChallengeId,
+  ] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -292,6 +322,7 @@ export default function App() {
 
   async function handleLogin(event) {
     event.preventDefault();
+
     clearFeedback();
     setLoading(true);
 
@@ -318,6 +349,7 @@ export default function App() {
 
   async function handleRequestPasswordReset(event, email) {
     event.preventDefault();
+
     clearFeedback();
     setLoading(true);
 
@@ -352,7 +384,10 @@ export default function App() {
     }
   }
 
-  async function handleVerifyResetOtp({ challengeId, otp }) {
+  async function handleVerifyResetOtp({
+    challengeId,
+    otp,
+  }) {
     clearFeedback();
     setLoading(true);
 
@@ -386,7 +421,10 @@ export default function App() {
     }
   }
 
-  async function handleConfirmPasswordReset({ resetToken, newPassword }) {
+  async function handleConfirmPasswordReset({
+    resetToken,
+    newPassword,
+  }) {
     clearFeedback();
     setLoading(true);
 
@@ -438,7 +476,10 @@ export default function App() {
     }
   }
 
-  async function handleVerifyEmail({ challengeId, otp }) {
+  async function handleVerifyEmail({
+    challengeId,
+    otp,
+  }) {
     clearFeedback();
     setLoading(true);
 
@@ -536,12 +577,22 @@ export default function App() {
     effectiveScreen === 'email-verification';
 
   if (effectiveScreen === 'authenticated') {
-    return <Dashboard user={user} onLogout={handleLogout} />;
+    return (
+      <AuthenticatedView
+        user={user}
+        onLogout={handleLogout}
+        loading={loading}
+        error={error}
+      />
+    );
   }
 
   return (
     <main className="auth-shell">
-      <section className="auth-visual" aria-label="About Aacharya LMS">
+      <section
+        className="auth-visual"
+        aria-label="About Aacharya LMS"
+      >
         <div className="visual-top">
           <BrandHeader />
 
@@ -560,8 +611,10 @@ export default function App() {
           <h2>
             Your potential.
             <br />
+
             <span>Our platform.</span>
             <br />
+
             Your future.
           </h2>
 
@@ -585,12 +638,17 @@ export default function App() {
               </span>
             </div>
 
-            <span className="visual-edition">EDITION 01</span>
+            <span className="visual-edition">
+              EDITION 01
+            </span>
           </div>
         </div>
       </section>
 
-      <section className="auth-panel" aria-label="Account access">
+      <section
+        className="auth-panel"
+        aria-label="Account access"
+      >
         <div className="mobile-brand">
           <BrandHeader />
         </div>
@@ -667,7 +725,6 @@ export default function App() {
               isVerified={Boolean(user?.isEmailVerified)}
             />
           )}
-
         </div>
 
         <AuthFooter />
