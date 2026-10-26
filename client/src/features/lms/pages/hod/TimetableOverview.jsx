@@ -29,15 +29,17 @@ export default function TimetableOverview() {
     return timetableEntries.filter((entry) => {
       const matchesDay = entry.day === selectedDay;
 
+      const searchableValues = [
+        entry.courseName,
+        entry.courseCode,
+        entry.facultyName,
+        entry.sectionName,
+        entry.room,
+      ];
+
       const matchesSearch =
         !query ||
-        [
-          entry.courseName,
-          entry.courseCode,
-          entry.facultyName,
-          entry.sectionName,
-          entry.room,
-        ].some((value) =>
+        searchableValues.some((value) =>
           String(value || '').toLowerCase().includes(query),
         );
 
@@ -63,7 +65,7 @@ export default function TimetableOverview() {
               </ActionButton>
             </Link>
 
-            <Link to="/hod/timetable/create">
+            <Link to="/hod/timetable/new">
               <ActionButton>
                 Create Timetable
               </ActionButton>
@@ -75,7 +77,9 @@ export default function TimetableOverview() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="rounded-xl border border-[#343640] bg-[#191A21] p-5">
           <p className="text-sm text-[#9697A2]">Scheduled Classes</p>
-          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">—</p>
+          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
+            —
+          </p>
           <p className="mt-2 text-xs text-[#777986]">
             Awaiting timetable records
           </p>
@@ -83,7 +87,9 @@ export default function TimetableOverview() {
 
         <div className="rounded-xl border border-[#343640] bg-[#191A21] p-5">
           <p className="text-sm text-[#9697A2]">Faculty Allocations</p>
-          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">—</p>
+          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
+            —
+          </p>
           <p className="mt-2 text-xs text-[#777986]">
             Awaiting faculty assignments
           </p>
@@ -91,7 +97,9 @@ export default function TimetableOverview() {
 
         <div className="rounded-xl border border-[#343640] bg-[#191A21] p-5">
           <p className="text-sm text-[#9697A2]">Section Coverage</p>
-          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">—</p>
+          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
+            —
+          </p>
           <p className="mt-2 text-xs text-[#777986]">
             Awaiting section schedule data
           </p>
@@ -161,7 +169,7 @@ export default function TimetableOverview() {
                     Clear Search
                   </ActionButton>
                 ) : (
-                  <Link to="/hod/timetable/create">
+                  <Link to="/hod/timetable/new">
                     <ActionButton>
                       Create Timetable
                     </ActionButton>
@@ -191,15 +199,19 @@ export default function TimetableOverview() {
                       <td className="px-4 py-4 text-[#D0D0D8]">
                         {entry.startTime || '—'} – {entry.endTime || '—'}
                       </td>
+
                       <td className="px-4 py-4 text-[#EAEAE6]">
                         {entry.courseName || '—'}
                       </td>
+
                       <td className="px-4 py-4 text-[#D0D0D8]">
                         {entry.facultyName || '—'}
                       </td>
+
                       <td className="px-4 py-4 text-[#D0D0D8]">
                         {entry.sectionName || '—'}
                       </td>
+
                       <td className="px-4 py-4 text-[#D0D0D8]">
                         {entry.room || '—'}
                       </td>
