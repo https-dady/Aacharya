@@ -93,6 +93,8 @@ import StudentDashboard from "../features/lms/pages/student/StudentDashboard.jsx
 import StudentTimetable from "../features/lms/pages/student/StudentTimetable.jsx";
 import StudentCourses from "../features/lms/pages/student/StudentCourses.jsx";
 import StudentAttendance from "../features/lms/pages/student/StudentAttendance.jsx";
+import StudentAssignments from "../features/lms/pages/student/StudentAssignments.jsx";
+
 
 export const applicationRoutes = [
   // Super Admin
@@ -512,6 +514,11 @@ export const applicationRoutes = [
   id: "student-attendance",
   path: "attendance",
   element: <StudentAttendance />,
+},
+{
+  id: "student-assignments",
+  path: "assignments",
+  element: <StudentAssignments />,
 },
   ],
 },
