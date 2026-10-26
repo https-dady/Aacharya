@@ -57,6 +57,9 @@ import ResultOverview from "../features/lms/pages/hod/ResultOverview.jsx";
 import ResultDetails from "../features/lms/pages/hod/ResultDetails.jsx";
 import ResultEdit from "../features/lms/pages/hod/ResultEdit.jsx";
 
+// Faculty pages
+import FacultyDashboard from "../features/lms/pages/faculty/FacultyDashboard.jsx";
+
 export const applicationRoutes = [
   // Super Admin
   {
@@ -274,7 +277,7 @@ export const applicationRoutes = [
         element: <QuizOverview />,
       },
       {
-        id: "hod-quizzes-details",
+        id: "hod-quiz-details",
         path: "quizzes/details",
         element: <QuizDetails />,
       },
@@ -299,6 +302,21 @@ export const applicationRoutes = [
         id: "hod-result-edit",
         path: "results/edit",
         element: <ResultEdit />,
+      },
+    ],
+  },
+
+  // Faculty
+  {
+    id: "faculty",
+    path: "/faculty",
+    roles: ["FACULTY"],
+    element: <AppLayout />,
+    children: [
+      {
+        id: "faculty-dashboard",
+        path: "dashboard",
+        element: <FacultyDashboard />,
       },
     ],
   },
