@@ -17,7 +17,7 @@ const dashboardSections = [
     title: 'Mentors & TG',
     description:
       'Manage mentor responsibilities and batch or section assignments.',
-    path: '/hod/mentors',
+    path: '/hod/mentors/assignments',
     label: 'Open mentors',
     icon: 'mentors',
     category: 'DEPARTMENT',
