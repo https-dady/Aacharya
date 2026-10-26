@@ -7,10 +7,17 @@ export default function EmptyState({
 }) {
   return (
     <section
-      className={`flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-12 text-center sm:px-8 ${className}`}
       aria-label={title}
+      className={[
+        'flex min-w-0 flex-col items-center justify-center',
+        'rounded-2xl border border-dashed border-[#3B3C43]',
+        'bg-[#1D1F27] px-5 py-12 text-center sm:px-8',
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
     >
-      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
+      <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl border border-[#CDB5F7]/15 bg-[#CDB5F7]/10 text-[#CDB5F7]">
         {icon || (
           <svg
             aria-hidden="true"
@@ -39,12 +46,12 @@ export default function EmptyState({
         )}
       </div>
 
-      <h2 className="text-lg font-semibold tracking-tight text-slate-900">
+      <h2 className="max-w-full break-words text-lg font-semibold tracking-tight text-[#EAEAE6]">
         {title}
       </h2>
 
       {description && (
-        <p className="mt-2 max-w-md text-sm leading-6 text-slate-500">
+        <p className="mt-2 max-w-md text-sm leading-6 text-[#A5A6B0]">
           {description}
         </p>
       )}
