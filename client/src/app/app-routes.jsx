@@ -76,6 +76,7 @@ import FacultyQuizResults from "../features/lms/pages/faculty/FacultyQuizResults
 
 import FacultyResults from "../features/lms/pages/faculty/FacultyResults.jsx";
 import FacultyCourseDetails from "../features/lms/pages/faculty/FacultyCourseDetails.jsx";
+import FacultyCourseMaterialDetails from "../features/lms/pages/faculty/FacultyCourseMaterialDetails.jsx";
 
 export const applicationRoutes = [
   // Super Admin
@@ -404,6 +405,11 @@ export const applicationRoutes = [
   id: "faculty-course-details",
   path: "courses/details",
   element: <FacultyCourseDetails />,
+},
+{
+  id: "faculty-course-material-details",
+  path: "courses/materials/details",
+  element: <FacultyCourseMaterialDetails />,
 },
     ],
   },
