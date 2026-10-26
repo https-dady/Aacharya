@@ -84,6 +84,33 @@ const FACULTY_COLUMNS = [
       );
     },
   },
+  {
+    key: 'actions',
+    header: 'Actions',
+    render: (_value, faculty) => (
+      <div className="flex flex-wrap gap-2">
+        <Link
+          to="/hod/faculty/details"
+          state={{ faculty }}
+          aria-label={`View details for ${faculty.fullName || 'faculty member'}`}
+        >
+          <ActionButton variant="secondary" size="sm">
+            View
+          </ActionButton>
+        </Link>
+
+        <Link
+          to="/hod/faculty/edit"
+          state={{ faculty }}
+          aria-label={`Edit ${faculty.fullName || 'faculty member'}`}
+        >
+          <ActionButton size="sm">
+            Edit
+          </ActionButton>
+        </Link>
+      </div>
+    ),
+  },
 ];
 
 function FilterSelect({
