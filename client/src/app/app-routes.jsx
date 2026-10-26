@@ -96,6 +96,7 @@ import StudentAttendance from "../features/lms/pages/student/StudentAttendance.j
 import StudentAssignments from "../features/lms/pages/student/StudentAssignments.jsx";
 import StudentQuizzes from "../features/lms/pages/student/StudentQuizzes.jsx";
 import StudentResults from "../features/lms/pages/student/StudentResults.jsx";
+import StudentProfile from "../features/lms/pages/student/StudentProfile.jsx";
 
 export const applicationRoutes = [
   // Super Admin
@@ -530,6 +531,11 @@ export const applicationRoutes = [
   id: "student-results",
   path: "results",
   element: <StudentResults />,
+},
+{
+  id: "student-profile",
+  path: "profile",
+  element: <StudentProfile />,
 },
   ],
 },
