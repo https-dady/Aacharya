@@ -80,7 +80,7 @@ export const ROLE_NAVIGATION = Object.freeze({
     {
       id: 'mentors',
       label: 'Mentors & TG',
-      path: '/hod/mentors',
+      path: '/hod/mentors/assignments',
       group: 'department',
     },
     {
