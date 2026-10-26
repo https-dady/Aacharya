@@ -1,31 +1,17 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import PageHeader from "../../../../components/common/PageHeader";
-import SectionCard from "../../../../components/common/SectionCard";
-import SearchInput from "../../../../components/common/SearchInput";
-import EmptyState from "../../../../components/common/EmptyState";
-import ActionButton from "../../../../components/common/ActionButton";
 
-const results = [];
-
-function SummaryCard({ label, value, description }) {
-  return (
-    <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-      <p className="text-sm text-slate-400">{label}</p>
-
-      <p className="mt-3 text-2xl font-semibold tracking-tight text-white">
-        {value}
-      </p>
-
-      <p className="mt-2 text-xs leading-5 text-slate-500">
-        {description}
-      </p>
-    </div>
-  );
-}
+import ActionButton from "../../components/ActionButton.jsx";
+import EmptyState from "../../components/EmptyState.jsx";
+import PageHeader from "../../components/PageHeader.jsx";
+import SearchInput from "../../components/SearchInput.jsx";
+import SectionCard from "../../components/SectionCard.jsx";
 
 export default function ResultOverview() {
   const [search, setSearch] = useState("");
+
+  // Real result data will be connected during backend integration.
+  const results = [];
 
   const filteredResults = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -34,12 +20,11 @@ export default function ResultOverview() {
 
     return results.filter((result) =>
       [
-        result.examName,
+        result.title,
         result.course,
         result.courseCode,
         result.batch,
         result.section,
-        result.status,
       ]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(query)),
@@ -49,130 +34,109 @@ export default function ResultOverview() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Academic Management"
+        eyebrow="Academic Oversight"
         title="Results Overview"
-        description="Review assessment result records and monitor result publication across academic courses."
+        description="Review assessment results and academic performance across your department."
         breadcrumbs={[
-          { label: "HOD Dashboard", to: "/hod" },
+          { label: "HOD Dashboard", to: "/hod/dashboard" },
           { label: "Results" },
         ]}
         actions={
-          <Link to="/hod/courses">
-            <ActionButton variant="secondary">
-              View Courses
-            </ActionButton>
+          <Link to="/hod/dashboard">
+            <ActionButton variant="secondary">Back to Dashboard</ActionButton>
           </Link>
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard
-          label="Total Result Records"
-          value="—"
-          description="Assessment result records available"
-        />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <SectionCard
+          title="Assessment Results"
+          description="Department-level assessment records."
+          variant="default"
+        >
+          <p className="text-sm leading-6 text-[#A7A7B0]">
+            View available assessment results once the result data source is
+            connected.
+          </p>
+        </SectionCard>
 
-        <SummaryCard
-          label="Published"
-          value="—"
-          description="Results released for student access"
-        />
-
-        <SummaryCard
-          label="Pending Publication"
-          value="—"
-          description="Results awaiting publication"
-        />
-
-        <SummaryCard
-          label="Assessments"
-          value="—"
-          description="Assessments with result records"
-        />
+        <SectionCard
+          title="Academic Performance"
+          description="Performance information for department assessments."
+          variant="elevated"
+        >
+          <p className="text-sm leading-6 text-[#A7A7B0]">
+            Performance summaries will appear when actual assessment data is
+            available.
+          </p>
+        </SectionCard>
       </div>
 
       <SectionCard
-        title="Results Catalogue"
-        description="Search assessment result records when data becomes available."
+        title="Result Records"
+        description="Search the available assessment result records."
+        action={
+          <span className="rounded-full border border-[#343640] bg-[#26272B] px-3 py-1 text-xs font-medium text-[#A7A7B0]">
+            {filteredResults.length} records
+          </span>
+        }
       >
-        <div className="mb-5">
+        <div className="mb-5 max-w-xl">
           <SearchInput
-            name="resultSearch"
-            label="Search results"
+            name="result-search"
+            label="Search result records"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by exam, course, batch, section..."
+            placeholder="Search by assessment, course, batch or section"
           />
         </div>
 
-        {filteredResults.length === 0 ? (
-          <EmptyState
-            title={
-              search
-                ? "No matching results"
-                : "No result records available"
-            }
-            description={
-              search
-                ? "Try another search term."
-                : "Result records will appear here once assessment data is connected."
-            }
-          />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left">
-              <thead>
-                <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-slate-500">
-                  <th className="px-4 py-3 font-medium">Assessment</th>
-                  <th className="px-4 py-3 font-medium">Course</th>
-                  <th className="px-4 py-3 font-medium">Batch</th>
-                  <th className="px-4 py-3 font-medium">Section</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 text-right font-medium">
+        {filteredResults.length > 0 ? (
+          <div className="overflow-x-auto rounded-xl border border-[#343640]">
+            <table className="w-full min-w-[640px] text-left text-sm">
+              <thead className="bg-[#26272B] text-xs uppercase tracking-wide text-[#A7A7B0]">
+                <tr>
+                  <th scope="col" className="px-4 py-3">
+                    Assessment
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Course
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Batch
+                  </th>
+                  <th scope="col" className="px-4 py-3">
+                    Section
+                  </th>
+                  <th scope="col" className="px-4 py-3">
                     Action
                   </th>
                 </tr>
               </thead>
 
-              <tbody>
+              <tbody className="divide-y divide-[#343640]">
                 {filteredResults.map((result) => (
                   <tr
                     key={result.id}
-                    className="border-b border-white/5 last:border-0"
+                    className="text-[#EAEAE6] transition-colors hover:bg-[#26272B]/70"
                   >
-                    <td className="px-4 py-4">
-                      <p className="font-medium text-slate-200">
-                        {result.examName || "Untitled assessment"}
-                      </p>
-
-                      <p className="mt-1 text-xs text-slate-500">
-                        {result.courseCode || "Course code unavailable"}
-                      </p>
+                    <td className="px-4 py-4 font-medium">
+                      {result.title}
                     </td>
-
-                    <td className="px-4 py-4 text-sm text-slate-300">
-                      {result.course || "—"}
+                    <td className="px-4 py-4 text-[#A7A7B0]">
+                      {result.course}
                     </td>
-
-                    <td className="px-4 py-4 text-sm text-slate-300">
+                    <td className="px-4 py-4 text-[#A7A7B0]">
                       {result.batch || "—"}
                     </td>
-
-                    <td className="px-4 py-4 text-sm text-slate-300">
+                    <td className="px-4 py-4 text-[#A7A7B0]">
                       {result.section || "—"}
                     </td>
-
                     <td className="px-4 py-4">
-                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs text-slate-300">
-                        {result.status || "Unspecified"}
-                      </span>
-                    </td>
-
-                    <td className="px-4 py-4 text-right">
                       <Link
                         to="/hod/results/details"
                         state={{ result }}
-                        className="text-sm font-medium text-indigo-300 transition hover:text-indigo-200"
+                        className="rounded-lg font-semibold text-[#CDB5F7] hover:text-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
                       >
                         View details
                       </Link>
@@ -182,18 +146,26 @@ export default function ResultOverview() {
               </tbody>
             </table>
           </div>
+        ) : (
+          <EmptyState
+            title={search ? "No matching results" : "No result records available"}
+            description={
+              search
+                ? "Try another search term."
+                : "Result records will appear here after actual assessment data is connected. No sample records are being displayed."
+            }
+          />
         )}
       </SectionCard>
 
-      <div className="rounded-xl border border-amber-400/15 bg-amber-400/[0.04] p-4">
-        <p className="text-sm font-medium text-amber-200">
+      <div className="rounded-xl border border-[#CDB5F7]/20 bg-[#CDB5F7]/5 p-4">
+        <p className="text-sm font-semibold text-[#CDB5F7]">
           Backend integration pending
         </p>
-
-        <p className="mt-1 text-sm leading-6 text-slate-400">
-          Result records and summary counts are not connected to a backend
-          yet. This page does not calculate grades, publish results, or modify
-          student marks.
+        <p className="mt-1 text-sm leading-6 text-[#A7A7B0]">
+          This page currently provides the result overview interface only.
+          Search and result counts will use real records once data integration
+          is implemented.
         </p>
       </div>
     </div>
