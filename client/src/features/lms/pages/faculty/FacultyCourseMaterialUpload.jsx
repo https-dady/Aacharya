@@ -9,7 +9,7 @@ const MATERIAL_TYPES = [
   {
     value: "document",
     label: "Document",
-    description: "PDFs, notes, and study material",
+    description: "PDFs, notes and study material",
   },
   {
     value: "video",
@@ -19,22 +19,11 @@ const MATERIAL_TYPES = [
   {
     value: "external",
     label: "External resource",
-    description: "Links to external learning resources",
+    description: "Links to learning resources",
   },
 ];
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
-
-const ALLOWED_FILE_TYPES = [
-  "application/pdf",
-  "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.ms-excel",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "text/plain",
-];
 
 const ALLOWED_EXTENSIONS = [
   ".pdf",
@@ -46,6 +35,35 @@ const ALLOWED_EXTENSIONS = [
   ".xlsx",
   ".txt",
 ];
+
+const ALLOWED_MIME_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/plain",
+];
+
+function resolveCourseContext(state) {
+  const course = state?.course ?? null;
+  const material = state?.material ?? null;
+
+  const courseId =
+    state?.courseId ??
+    course?._id ??
+    course?.id ??
+    course?.courseId ??
+    material?.courseId ??
+    "";
+
+  return {
+    course,
+    courseId: String(courseId || ""),
+  };
+}
 
 function getFileSize(bytes) {
   if (!Number.isFinite(bytes) || bytes < 0) {
@@ -64,39 +82,59 @@ function getFileSize(bytes) {
 }
 
 function getFileExtension(filename) {
-  const extension = filename.split(".").pop();
+  const index = filename.lastIndexOf(".");
 
-  return extension ? extension.toUpperCase() : "FILE";
+  return index >= 0 ? filename.slice(index).toLowerCase() : "";
 }
 
-function isAllowedFile(file) {
-  const filename = file.name.toLowerCase();
+function validateFile(file) {
+  if (!file) {
+    return "Choose a document to continue.";
+  }
 
-  const hasAllowedExtension = ALLOWED_EXTENSIONS.some((extension) =>
-    filename.endsWith(extension),
-  );
+  const extension = getFileExtension(file.name);
 
-  const hasAllowedMimeType =
-    ALLOWED_FILE_TYPES.includes(file.type) ||
-    file.type === "";
+  if (!ALLOWED_EXTENSIONS.includes(extension)) {
+    return "Unsupported file type. Choose a supported document format.";
+  }
 
-  return hasAllowedExtension && hasAllowedMimeType;
+  if (file.type && !ALLOWED_MIME_TYPES.includes(file.type)) {
+    return "The selected file's content type is not supported.";
+  }
+
+  if (file.size === 0) {
+    return "The selected file is empty.";
+  }
+
+  if (file.size > MAX_FILE_SIZE) {
+    return "The file must be 25 MB or smaller.";
+  }
+
+  return "";
 }
 
-function getCourseContext(locationState) {
-  const course = locationState?.course ?? {};
-  const material = locationState?.material ?? {};
+function validateResourceUrl(value) {
+  const trimmed = value.trim();
 
-  return {
-    course,
-    material,
-    courseId:
-      locationState?.courseId ??
-      course?._id ??
-      course?.id ??
-      material?.courseId ??
-      "",
-  };
+  if (!trimmed) {
+    return "Enter the resource URL.";
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return "Only HTTP and HTTPS links are supported.";
+    }
+
+    if (!parsed.hostname || !parsed.hostname.includes(".")) {
+      return "Enter a valid resource URL.";
+    }
+
+    return "";
+  } catch {
+    return "Enter a valid URL, including https://.";
+  }
 }
 
 function FieldLabel({ htmlFor, children, required = false }) {
@@ -124,9 +162,8 @@ function TextInput({
   value,
   onChange,
   placeholder,
-  required = false,
-  maxLength,
   type = "text",
+  maxLength,
   error,
   ...props
 }) {
@@ -139,15 +176,13 @@ function TextInput({
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        required={required}
         maxLength={maxLength}
         aria-invalid={error ? "true" : undefined}
         aria-describedby={error ? `${id}-error` : undefined}
         className={[
           "min-h-11 w-full rounded-xl border bg-[#1D1F27]",
           "px-3.5 py-2.5 text-sm text-[#EAEAE6]",
-          "placeholder:text-[#858590]",
-          "transition-colors",
+          "placeholder:text-[#858590] transition-colors",
           "focus-visible:outline-none focus-visible:ring-2",
           "focus-visible:ring-[#CDB5F7] focus-visible:ring-offset-2",
           "focus-visible:ring-offset-[#14161C]",
@@ -168,59 +203,6 @@ function TextInput({
         </p>
       )}
     </div>
-  );
-}
-
-function TextArea({
-  id,
-  value,
-  onChange,
-  placeholder,
-  rows = 4,
-  maxLength,
-  ...props
-}) {
-  return (
-    <textarea
-      id={id}
-      name={id}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      rows={rows}
-      maxLength={maxLength}
-      className={[
-        "w-full resize-y rounded-xl border border-[#454650]",
-        "bg-[#1D1F27] px-3.5 py-3 text-sm text-[#EAEAE6]",
-        "placeholder:text-[#858590] hover:border-[#62636E]",
-        "focus-visible:outline-none focus-visible:ring-2",
-        "focus-visible:ring-[#CDB5F7] focus-visible:ring-offset-2",
-        "focus-visible:ring-offset-[#14161C]",
-      ].join(" ")}
-      {...props}
-    />
-  );
-}
-
-function SelectInput({ id, value, onChange, children, ...props }) {
-  return (
-    <select
-      id={id}
-      name={id}
-      value={value}
-      onChange={onChange}
-      className={[
-        "min-h-11 w-full rounded-xl border border-[#454650]",
-        "bg-[#1D1F27] px-3.5 py-2.5 text-sm text-[#EAEAE6]",
-        "hover:border-[#62636E]",
-        "focus-visible:outline-none focus-visible:ring-2",
-        "focus-visible:ring-[#CDB5F7] focus-visible:ring-offset-2",
-        "focus-visible:ring-offset-[#14161C]",
-      ].join(" ")}
-      {...props}
-    >
-      {children}
-    </select>
   );
 }
 
@@ -254,7 +236,7 @@ export default function FacultyCourseMaterialUpload() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
-  const { course, courseId } = getCourseContext(location.state);
+  const { course, courseId } = resolveCourseContext(location.state);
 
   const [form, setForm] = useState({
     title: "",
@@ -275,23 +257,14 @@ export default function FacultyCourseMaterialUpload() {
     course?.courseName ??
     "Selected course";
 
-  const courseCode =
-    course?.code ??
-    course?.courseCode ??
-    "";
+  const courseCode = course?.code ?? course?.courseCode ?? "";
 
   const courseDetailsPath = "/faculty/courses/details";
 
-  function updateField(event) {
-    const { name, value } = event.target;
+  const requiresFile = form.type === "document";
+  const requiresUrl = form.type === "video" || form.type === "external";
 
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-
-    setNotice("");
-
+  function clearError(name) {
     setErrors((current) => {
       if (!current[name]) {
         return current;
@@ -304,24 +277,34 @@ export default function FacultyCourseMaterialUpload() {
     });
   }
 
-  function validateFile(file) {
-    if (!file) {
-      return "Choose a file to continue.";
-    }
+  function updateField(event) {
+    const { name, value } = event.target;
 
-    if (!isAllowedFile(file)) {
-      return "Choose a supported PDF, Office document, spreadsheet, or TXT file.";
-    }
+    setForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
 
-    if (file.size === 0) {
-      return "The selected file is empty.";
-    }
+    setNotice("");
+    clearError(name);
+  }
 
-    if (file.size > MAX_FILE_SIZE) {
-      return "The file must be 25 MB or smaller.";
-    }
+  function updateMaterialType(type) {
+    setForm((current) => ({
+      ...current,
+      type,
+    }));
 
-    return "";
+    setNotice("");
+
+    setErrors((current) => {
+      const next = { ...current };
+
+      delete next.file;
+      delete next.resourceUrl;
+
+      return next;
+    });
   }
 
   function handleFileSelection(event) {
@@ -337,23 +320,21 @@ export default function FacultyCourseMaterialUpload() {
 
     if (fileError) {
       setSelectedFile(null);
+
       setErrors((current) => ({
         ...current,
         file: fileError,
       }));
 
-      event.target.value = "";
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
       return;
     }
 
     setSelectedFile(file);
-
-    setErrors((current) => {
-      const next = { ...current };
-      delete next.file;
-
-      return next;
-    });
+    clearError("file");
   }
 
   function removeSelectedFile() {
@@ -364,17 +345,13 @@ export default function FacultyCourseMaterialUpload() {
       fileInputRef.current.value = "";
     }
 
-    setErrors((current) => {
-      const next = { ...current };
-      delete next.file;
-
-      return next;
-    });
+    clearError("file");
   }
 
   function handleDrop(event) {
     event.preventDefault();
     setIsDragging(false);
+    setNotice("");
 
     const file = event.dataTransfer.files?.[0];
 
@@ -394,71 +371,58 @@ export default function FacultyCourseMaterialUpload() {
     }
 
     setSelectedFile(file);
-    setNotice("");
+    clearError("file");
 
-    setErrors((current) => {
-      const next = { ...current };
-      delete next.file;
-
-      return next;
-    });
+    // Keep the native file input synchronized with the dropped file.
+    // Browsers do not permit assigning arbitrary file paths to inputs.
   }
 
   function validateForm() {
     const nextErrors = {};
 
-    if (!form.title.trim()) {
-      nextErrors.title = "Enter a title for this material.";
+    if (!course) {
+      nextErrors.course =
+        "No course was supplied. Open this form from the selected course page.";
     }
 
-    if (form.title.trim().length > 120) {
+    if (!courseId) {
+      nextErrors.courseId =
+        "The course ID is missing. Return to Courses and open the upload form from a course.";
+    }
+
+    const title = form.title.trim();
+
+    if (!title) {
+      nextErrors.title = "Enter a title for this material.";
+    } else if (title.length > 120) {
       nextErrors.title = "The title cannot exceed 120 characters.";
     }
 
-    if (form.description.length > 2000) {
+    if (form.description.trim().length > 2000) {
       nextErrors.description =
         "The description cannot exceed 2000 characters.";
     }
 
     if (!form.moduleName.trim()) {
       nextErrors.moduleName = "Enter the module or chapter name.";
+    } else if (form.moduleName.trim().length > 120) {
+      nextErrors.moduleName =
+        "The module or chapter name cannot exceed 120 characters.";
     }
 
-    if (
-      form.type === "document" &&
-      !selectedFile
-    ) {
-      nextErrors.file = "Choose a document to upload.";
-    }
-
-    if (
-      form.type === "video" ||
-      form.type === "external"
-    ) {
-      const url = form.resourceUrl.trim();
-
-      if (!url) {
-        nextErrors.resourceUrl = "Enter the resource URL.";
-      } else {
-        try {
-          const parsedUrl = new URL(url);
-
-          if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-            nextErrors.resourceUrl =
-              "Use a valid HTTP or HTTPS URL.";
-          }
-        } catch {
-          nextErrors.resourceUrl =
-            "Enter a valid URL, including https://.";
-        }
-      }
-    }
-
-    if (form.type === "document" && selectedFile) {
+    if (requiresFile) {
       const fileError = validateFile(selectedFile);
 
       if (fileError) {
         nextErrors.file = fileError;
+      }
+    }
+
+    if (requiresUrl) {
+      const urlError = validateResourceUrl(form.resourceUrl);
+
+      if (urlError) {
+        nextErrors.resourceUrl = urlError;
       }
     }
 
@@ -476,16 +440,11 @@ export default function FacultyCourseMaterialUpload() {
     }
 
     setNotice(
-      "Your form is valid, but the material upload API is not connected yet. Nothing has been uploaded or saved.",
+      "Validation completed. The form is ready for integration, but no material has been uploaded or saved because the backend upload endpoint is not connected.",
     );
   }
 
   function handleBack() {
-    if (window.history.state?.idx > 0) {
-      navigate(-1);
-      return;
-    }
-
     navigate(courseDetailsPath, {
       state: {
         course,
@@ -494,15 +453,12 @@ export default function FacultyCourseMaterialUpload() {
     });
   }
 
-  const requiresFile = form.type === "document";
-  const requiresUrl = form.type === "video" || form.type === "external";
-
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6">
       <PageHeader
         eyebrow="Faculty workspace"
         title="Upload course material"
-        description="Prepare learning resources for your students by adding a document, video lecture, or external learning link."
+        description="Prepare learning resources for your students by adding a document, video lecture or external learning link."
         breadcrumbs={[
           {
             label: "Dashboard",
@@ -524,22 +480,43 @@ export default function FacultyCourseMaterialUpload() {
           <ActionButton
             variant="secondary"
             onClick={handleBack}
-            leadingIcon={
-              <span aria-hidden="true">←</span>
-            }
+            leadingIcon={<span aria-hidden="true">←</span>}
           >
             Back to course
           </ActionButton>
         }
       />
 
+      {!courseId && (
+        <div
+          role="alert"
+          className="rounded-xl border border-[#E5DF98]/30 bg-[#E5DF98]/10 p-4"
+        >
+          <p className="text-sm font-semibold text-[#E5DF98]">
+            Course context is missing
+          </p>
+
+          <p className="mt-1 text-sm leading-6 text-[#D8D2A0]">
+            Open this page using the Upload Material button on a specific
+            course. Material validation cannot continue until the course
+            context is available.
+          </p>
+
+          <Link
+            to="/faculty/courses"
+            className="mt-3 inline-flex min-h-10 items-center text-sm font-semibold text-[#CDB5F7] underline underline-offset-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+          >
+            Return to my courses
+          </Link>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
-        <div className="min-w-0 space-y-6">
+        <div className="min-w-0">
           <SectionCard
             eyebrow="Resource setup"
             title="Material information"
             description="Add the details students will see when they open this resource."
-            variant="default"
           >
             <form
               id="faculty-material-upload-form"
@@ -557,8 +534,8 @@ export default function FacultyCourseMaterialUpload() {
                   value={form.title}
                   onChange={updateField}
                   placeholder="e.g. Introduction to Data Structures"
-                  required
                   maxLength={120}
+                  required
                   error={errors.title}
                 />
 
@@ -572,27 +549,48 @@ export default function FacultyCourseMaterialUpload() {
                   Description
                 </FieldLabel>
 
-                <TextArea
+                <textarea
                   id="description"
+                  name="description"
                   value={form.description}
                   onChange={updateField}
                   placeholder="Describe what students will learn from this material..."
                   rows={4}
                   maxLength={2000}
+                  aria-invalid={errors.description ? "true" : undefined}
+                  aria-describedby={
+                    errors.description ? "description-error" : undefined
+                  }
+                  className={[
+                    "w-full resize-y rounded-xl border bg-[#1D1F27]",
+                    "px-3.5 py-3 text-sm text-[#EAEAE6]",
+                    "placeholder:text-[#858590]",
+                    "focus-visible:outline-none focus-visible:ring-2",
+                    "focus-visible:ring-[#CDB5F7] focus-visible:ring-offset-2",
+                    "focus-visible:ring-offset-[#14161C]",
+                    errors.description
+                      ? "border-[#D58B95]"
+                      : "border-[#454650] hover:border-[#62636E]",
+                  ].join(" ")}
                 />
 
-                <p className="mt-2 text-xs text-[#858590]">
-                  {form.description.length}/2000 characters
-                </p>
+                <div className="mt-2 flex items-start justify-between gap-3">
+                  {errors.description ? (
+                    <p
+                      id="description-error"
+                      role="alert"
+                      className="text-sm text-[#D58B95]"
+                    >
+                      {errors.description}
+                    </p>
+                  ) : (
+                    <span />
+                  )}
 
-                {errors.description && (
-                  <p
-                    role="alert"
-                    className="mt-2 text-sm text-[#D58B95]"
-                  >
-                    {errors.description}
+                  <p className="shrink-0 text-xs text-[#858590]">
+                    {form.description.length}/2000
                   </p>
-                )}
+                </div>
               </div>
 
               <div>
@@ -605,24 +603,26 @@ export default function FacultyCourseMaterialUpload() {
                   value={form.moduleName}
                   onChange={updateField}
                   placeholder="e.g. Module 1 — Fundamentals"
-                  required
                   maxLength={120}
+                  required
                   error={errors.moduleName}
                 />
 
                 <p className="mt-2 text-xs leading-5 text-[#858590]">
-                  Enter the module or chapter name. A module catalogue
-                  will need to be connected before this can become a
-                  course-linked selection.
+                  Enter the module or chapter name. A real module selector
+                  requires an available course-module API.
                 </p>
               </div>
 
               <div>
-                <FieldLabel htmlFor="type" required>
+                <FieldLabel htmlFor="material-type" required>
                   Material type
                 </FieldLabel>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div
+                  id="material-type"
+                  className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+                >
                   {MATERIAL_TYPES.map((item) => {
                     const selected = form.type === item.value;
 
@@ -630,22 +630,7 @@ export default function FacultyCourseMaterialUpload() {
                       <button
                         key={item.value}
                         type="button"
-                        onClick={() => {
-                          setForm((current) => ({
-                            ...current,
-                            type: item.value,
-                          }));
-
-                          setErrors((current) => {
-                            const next = { ...current };
-                            delete next.file;
-                            delete next.resourceUrl;
-
-                            return next;
-                          });
-
-                          setNotice("");
-                        }}
+                        onClick={() => updateMaterialType(item.value)}
                         aria-pressed={selected}
                         className={[
                           "rounded-xl border p-4 text-left transition-colors",
@@ -716,7 +701,8 @@ export default function FacultyCourseMaterialUpload() {
                           </p>
 
                           <p className="mt-1 text-xs text-[#A7A7B0]">
-                            {getFileExtension(selectedFile.name)} ·{" "}
+                            {getFileExtension(selectedFile.name).slice(1).toUpperCase()}
+                            {" · "}
                             {getFileSize(selectedFile.size)}
                           </p>
                         </div>
@@ -776,8 +762,8 @@ export default function FacultyCourseMaterialUpload() {
                         id="file-help"
                         className="mt-2 text-xs leading-5 text-[#A7A7B0]"
                       >
-                        PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX or TXT ·
-                        Maximum 25 MB
+                        PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX or TXT · Maximum
+                        25 MB
                       </span>
                     </button>
                   )}
@@ -812,9 +798,23 @@ export default function FacultyCourseMaterialUpload() {
                   />
 
                   <p className="mt-2 text-xs leading-5 text-[#858590]">
-                    Use a publicly accessible or institution-approved
-                    HTTPS link. Link access and permissions must be
-                    verified when backend integration is added.
+                    Use an institution-approved HTTP or HTTPS link. Link
+                    accessibility and permissions must be verified separately.
+                  </p>
+                </div>
+              )}
+
+              {(errors.course || errors.courseId) && (
+                <div
+                  role="alert"
+                  className="rounded-xl border border-[#D58B95]/30 bg-[#D58B95]/10 p-4"
+                >
+                  <p className="text-sm font-semibold text-[#D58B95]">
+                    Course context required
+                  </p>
+
+                  <p className="mt-1 text-sm leading-6 text-[#EAEAE6]">
+                    {errors.course || errors.courseId}
                   </p>
                 </div>
               )}
@@ -829,17 +829,14 @@ export default function FacultyCourseMaterialUpload() {
               )}
 
               <div className="flex flex-col-reverse gap-3 border-t border-[#343640] pt-5 sm:flex-row sm:justify-end">
-                <ActionButton
-                  variant="secondary"
-                  onClick={handleBack}
-                >
+                <ActionButton variant="secondary" onClick={handleBack}>
                   Cancel
                 </ActionButton>
 
                 <ActionButton
                   type="submit"
                   variant="primary"
-                  leadingIcon={<span aria-hidden="true">↑</span>}
+                  leadingIcon={<span aria-hidden="true">✓</span>}
                 >
                   Validate material
                 </ActionButton>
@@ -852,7 +849,7 @@ export default function FacultyCourseMaterialUpload() {
           <SectionCard
             eyebrow="Course context"
             title="Selected course"
-            description="Review the course context before preparing the resource."
+            description="Verify the course before preparing its resource."
           >
             <div className="space-y-4">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#CDB5F7]/10 text-lg font-bold text-[#CDB5F7]">
@@ -871,25 +868,24 @@ export default function FacultyCourseMaterialUpload() {
                 )}
               </div>
 
+              {courseId && (
+                <p className="break-all text-xs leading-5 text-[#858590]">
+                  Course ID: {courseId}
+                </p>
+              )}
+
               {!courseId && (
-                <div className="rounded-xl border border-[#E5DF98]/20 bg-[#E5DF98]/5 p-3">
-                  <p className="text-xs leading-5 text-[#E5DF98]">
-                    Course context was not provided by navigation.
-                    Return to the course page and open the upload form
-                    from there.
-                  </p>
-                </div>
+                <p className="rounded-xl border border-[#E5DF98]/20 bg-[#E5DF98]/5 p-3 text-xs leading-5 text-[#E5DF98]">
+                  Course context was not supplied. Return to your courses
+                  and open this form from the intended course.
+                </p>
               )}
 
               <Link
-                to={courseDetailsPath}
-                state={{
-                  course,
-                  courseId,
-                }}
+                to="/faculty/courses"
                 className="inline-flex min-h-10 items-center text-sm font-semibold text-[#CDB5F7] hover:text-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
               >
-                View course details
+                View my courses
                 <span className="ml-2" aria-hidden="true">
                   →
                 </span>
@@ -902,54 +898,39 @@ export default function FacultyCourseMaterialUpload() {
             title="Resource checklist"
           >
             <ul className="space-y-4">
-              <li className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#CDB5F7]/10 text-xs font-bold text-[#CDB5F7]">
-                  1
-                </span>
+              {[
+                {
+                  title: "Clear title",
+                  description:
+                    "Make the topic easy for students to identify.",
+                },
+                {
+                  title: "Correct module",
+                  description:
+                    "Specify the module or chapter covered by this resource.",
+                },
+                {
+                  title: "Accessible resource",
+                  description:
+                    "Ensure students are permitted to access the selected document or link.",
+                },
+              ].map((item, index) => (
+                <li key={item.title} className="flex gap-3">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#CDB5F7]/10 text-xs font-bold text-[#CDB5F7]">
+                    {index + 1}
+                  </span>
 
-                <div>
-                  <p className="text-sm font-medium text-[#EAEAE6]">
-                    Clear title
-                  </p>
+                  <div>
+                    <p className="text-sm font-medium text-[#EAEAE6]">
+                      {item.title}
+                    </p>
 
-                  <p className="mt-1 text-xs leading-5 text-[#A7A7B0]">
-                    Make the topic easy for students to identify.
-                  </p>
-                </div>
-              </li>
-
-              <li className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#CDB5F7]/10 text-xs font-bold text-[#CDB5F7]">
-                  2
-                </span>
-
-                <div>
-                  <p className="text-sm font-medium text-[#EAEAE6]">
-                    Correct module
-                  </p>
-
-                  <p className="mt-1 text-xs leading-5 text-[#A7A7B0]">
-                    Include the module or chapter this resource covers.
-                  </p>
-                </div>
-              </li>
-
-              <li className="flex gap-3">
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#CDB5F7]/10 text-xs font-bold text-[#CDB5F7]">
-                  3
-                </span>
-
-                <div>
-                  <p className="text-sm font-medium text-[#EAEAE6]">
-                    Verify resource access
-                  </p>
-
-                  <p className="mt-1 text-xs leading-5 text-[#A7A7B0]">
-                    Ensure the document or external link is appropriate
-                    for your students.
-                  </p>
-                </div>
-              </li>
+                    <p className="mt-1 text-xs leading-5 text-[#A7A7B0]">
+                      {item.description}
+                    </p>
+                  </div>
+                </li>
+              ))}
             </ul>
           </SectionCard>
 
@@ -959,9 +940,9 @@ export default function FacultyCourseMaterialUpload() {
             </p>
 
             <p className="mt-2 text-sm leading-6 text-[#A7A7B0]">
-              The form currently validates resource details locally.
-              Saving files and publishing materials require backend
-              integration.
+              File selection and form validation run locally. The form does
+              not upload or publish material until a verified backend API
+              is integrated.
             </p>
           </div>
         </aside>
