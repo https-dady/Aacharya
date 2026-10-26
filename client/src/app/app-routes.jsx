@@ -15,6 +15,7 @@ import HodDetails from "../features/lms/pages/super-admin/HodDetails.jsx";
 
 // HOD pages
 import HodDashboard from "../features/lms/pages/hod/HodDashboard.jsx";
+import HodProfile from "../features/lms/pages/hod/HodProfile.jsx";
 
 import FacultyList from "../features/lms/pages/hod/FacultyList.jsx";
 import CreateFaculty from "../features/lms/pages/hod/CreateFaculty.jsx";
@@ -123,6 +124,11 @@ export const applicationRoutes = [
         id: "hod-dashboard",
         path: "dashboard",
         element: <HodDashboard />,
+      },
+      {
+        id: "hod-profile",
+        path: "profile",
+        element: <HodProfile />,
       },
 
       // Faculty Management
@@ -268,7 +274,7 @@ export const applicationRoutes = [
         element: <QuizOverview />,
       },
       {
-        id: "hod-quiz-details",
+        id: "hod-quizzes-details",
         path: "quizzes/details",
         element: <QuizDetails />,
       },
