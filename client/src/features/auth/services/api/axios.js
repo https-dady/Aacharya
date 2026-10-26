@@ -4,6 +4,7 @@ const API_BASE_URL = (
 
 const ACCESS_TOKEN_KEY = 'aacharya_access_token';
 const REQUEST_TIMEOUT_MS = 15000;
+
 let refreshPromise = null;
 
 function getAccessToken() {
@@ -24,8 +25,33 @@ function notifyAuthenticationExpired() {
   }
 }
 
+function buildRequestUrl(path, params) {
+  const url = new URL(`${API_BASE_URL}${path}`);
+
+  if (params && typeof params === 'object') {
+    Object.entries(params).forEach(([key, value]) => {
+      if (value === undefined || value === null || value === '') {
+        return;
+      }
+
+      if (Array.isArray(value)) {
+        value.forEach((item) => {
+          url.searchParams.append(key, String(item));
+        });
+
+        return;
+      }
+
+      url.searchParams.set(key, String(value));
+    });
+  }
+
+  return url.toString();
+}
+
 async function parseResponse(response) {
   const contentType = response.headers.get('content-type') || '';
+
   const data = contentType.includes('application/json')
     ? await response.json()
     : (await response.text()) || null;
@@ -35,19 +61,36 @@ async function parseResponse(response) {
       data?.message ||
       data?.error?.message ||
       `Request failed with status ${response.status}.`;
+
     const error = new Error(message);
-    error.response = { status: response.status, data };
+
+    error.response = {
+      status: response.status,
+      data,
+    };
+
     error.status = response.status;
+
     throw error;
   }
 
-  return { data, status: response.status, headers: response.headers };
+  return {
+    data,
+    status: response.status,
+    headers: response.headers,
+  };
 }
 
 async function performRequest(path, options = {}) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    REQUEST_TIMEOUT_MS,
+  );
+
   const headers = new Headers(options.headers || {});
+
   headers.set('Accept', 'application/json');
 
   if (options.body !== undefined) {
@@ -55,19 +98,24 @@ async function performRequest(path, options = {}) {
   }
 
   const token = getAccessToken();
+
   if (token && !options.skipAuthorization) {
     headers.set('Authorization', `Bearer ${token}`);
   }
 
   try {
     const requestOptions = { ...options };
+
     delete requestOptions.skipAuthorization;
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    delete requestOptions.params;
+
+    const response = await fetch(buildRequestUrl(path, options.params), {
       ...requestOptions,
       headers,
       credentials: 'include',
       signal: controller.signal,
     });
+
     return await parseResponse(response);
   } catch (error) {
     if (error?.name === 'AbortError') {
@@ -99,18 +147,25 @@ async function refreshAccessToken() {
       .then((response) => {
         const body = response?.data;
         const tokenData = body?.data ?? body;
-        const token = tokenData?.accessToken ?? tokenData?.token;
+
+        const token =
+          tokenData?.accessToken ??
+          tokenData?.token;
 
         if (typeof token !== 'string' || !token.trim()) {
-          throw new Error('The refresh endpoint did not return an access token.');
+          throw new Error(
+            'The refresh endpoint did not return an access token.',
+          );
         }
 
         setAccessToken(token);
+
         return token;
       })
       .catch((error) => {
         setAccessToken(null);
         notifyAuthenticationExpired();
+
         throw new Error(
           'Your session has expired. Please sign in again.',
           { cause: error },
@@ -124,31 +179,31 @@ async function refreshAccessToken() {
   return refreshPromise;
 }
 
-async function post(path, body) {
-  const options = {
-    method: 'POST',
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  };
-
+async function requestWithRefresh(path, options = {}) {
   try {
     return await performRequest(path, options);
   } catch (error) {
     const isUnauthorized = error?.response?.status === 401;
-    const isAuthEntryPoint = /\/v1\/auth\/(login|refresh)$/.test(path);
 
-    if (!isUnauthorized || isAuthEntryPoint) {
+    const isAuthEntryPoint =
+      /\/v1\/auth\/(login|refresh)$/.test(path);
+
+    if (
+      !isUnauthorized ||
+      isAuthEntryPoint ||
+      options.skipAuthorization
+    ) {
       throw error;
     }
 
     try {
-      const token = await refreshAccessToken();
-      return await performRequest(path, {
-        ...options,
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await refreshAccessToken();
+
+      return await performRequest(path, options);
     } catch (refreshError) {
       setAccessToken(null);
       notifyAuthenticationExpired();
+
       throw new Error(
         'Authentication failed. Please sign in again.',
         { cause: refreshError },
@@ -157,7 +212,42 @@ async function post(path, body) {
   }
 }
 
-const api = { post };
+async function get(path, options = {}) {
+  return requestWithRefresh(path, {
+    ...options,
+    method: 'GET',
+  });
+}
 
-export { getAccessToken, setAccessToken };
+async function post(path, body, options = {}) {
+  return requestWithRefresh(path, {
+    ...options,
+    method: 'POST',
+    ...(body === undefined
+      ? {}
+      : { body: JSON.stringify(body) }),
+  });
+}
+
+async function patch(path, body, options = {}) {
+  return requestWithRefresh(path, {
+    ...options,
+    method: 'PATCH',
+    ...(body === undefined
+      ? {}
+      : { body: JSON.stringify(body) }),
+  });
+}
+
+const api = {
+  get,
+  post,
+  patch,
+};
+
+export {
+  getAccessToken,
+  setAccessToken,
+};
+
 export default api;
