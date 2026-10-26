@@ -155,7 +155,9 @@ export default function BatchDetails() {
                         </p>
 
                         <h3 className="mt-2 text-base font-semibold text-[#EAEAE6]">
-                          {section.name || section.sectionName || 'Unnamed Section'}
+                          {section.name ||
+                            section.sectionName ||
+                            'Unnamed Section'}
                         </h3>
 
                         {sectionId && (
@@ -163,6 +165,20 @@ export default function BatchDetails() {
                             ID: {sectionId}
                           </p>
                         )}
+
+                        <div className="mt-4">
+                          <Link
+                            to="/hod/sections/details"
+                            state={{ section }}
+                          >
+                            <ActionButton
+                              variant="secondary"
+                              fullWidth
+                            >
+                              View Section
+                            </ActionButton>
+                          </Link>
+                        </div>
                       </div>
                     );
                   })}
@@ -171,19 +187,10 @@ export default function BatchDetails() {
             </SectionCard>
           </div>
 
-          <div className="mt-5 flex flex-wrap justify-end gap-3">
+          <div className="mt-5 flex justify-end">
             <Link to="/hod/batches">
               <ActionButton variant="secondary">
                 Back to Batches
-              </ActionButton>
-            </Link>
-
-            <Link
-              to="/hod/batches/edit"
-              state={{ batch }}
-            >
-              <ActionButton>
-                Edit Batch Details
               </ActionButton>
             </Link>
           </div>
