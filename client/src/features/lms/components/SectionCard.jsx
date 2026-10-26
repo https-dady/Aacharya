@@ -1,3 +1,30 @@
+const VARIANT_STYLES = {
+  default: {
+    container: 'border-[#343640] bg-[#1D1F27]',
+    divider: 'border-[#343640]',
+    icon: 'bg-[#CDB5F7]/10 text-[#CDB5F7]',
+    eyebrow: 'text-[#CDB5F7]',
+    title: 'text-[#EAEAE6]',
+    description: 'text-[#A5A6B0]',
+  },
+  elevated: {
+    container: 'border-[#3B3C43] bg-[#26272B]',
+    divider: 'border-[#3B3C43]',
+    icon: 'bg-[#E5DF98]/10 text-[#E5DF98]',
+    eyebrow: 'text-[#E5DF98]',
+    title: 'text-[#EAEAE6]',
+    description: 'text-[#B2B2BC]',
+  },
+  contrast: {
+    container: 'border-[#CDB5F7]/30 bg-[#20212A]',
+    divider: 'border-[#CDB5F7]/20',
+    icon: 'bg-[#CDB5F7]/15 text-[#CDB5F7]',
+    eyebrow: 'text-[#CDB5F7]',
+    title: 'text-[#EAEAE6]',
+    description: 'text-[#B8B8C2]',
+  },
+};
+
 export default function SectionCard({
   title,
   description,
@@ -8,33 +35,39 @@ export default function SectionCard({
   variant = 'default',
   className = '',
 }) {
-  const variants = {
-    default: 'bg-[#1D1F27] border-[#343640]',
-    elevated: 'bg-[#26272B] border-[#3B3C43]',
-    contrast: 'bg-[#EAEAE6] border-[#D4D4CF]',
-  };
+  const styles = VARIANT_STYLES[variant] || VARIANT_STYLES.default;
 
-  const selectedVariant = variants[variant] || variants.default;
-  const isContrast = variant === 'contrast';
+  const hasHeader = Boolean(
+    title || description || eyebrow || icon || action,
+  );
 
   return (
     <section
-      className={`min-w-0 overflow-hidden rounded-2xl border ${selectedVariant} ${className}`}
+      className={[
+        'min-w-0 overflow-hidden rounded-2xl border',
+        styles.container,
+        className,
+      ]
+        .filter(Boolean)
+        .join(' ')}
     >
-      {(title || description || eyebrow || icon || action) && (
+      {hasHeader && (
         <header
-          className={`flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6 ${
-            children ? 'border-b' : ''
-          } ${isContrast ? 'border-[#D4D4CF]' : 'border-[#343640]'}`}
+          className={[
+            'flex flex-wrap items-start justify-between gap-4 p-5 sm:p-6',
+            children ? `border-b ${styles.divider}` : '',
+          ]
+            .filter(Boolean)
+            .join(' ')}
         >
-          <div className="flex min-w-0 items-start gap-3">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
             {icon && (
               <div
-                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
-                  isContrast
-                    ? 'bg-[#14161C] text-[#CDB5F7]'
-                    : 'bg-[#CDB5F7]/10 text-[#CDB5F7]'
-                }`}
+                className={[
+                  'flex h-10 w-10 shrink-0 items-center justify-center',
+                  'rounded-xl border border-white/5',
+                  styles.icon,
+                ].join(' ')}
               >
                 {typeof icon === 'string' ? (
                   <span aria-hidden="true">{icon}</span>
@@ -44,12 +77,14 @@ export default function SectionCard({
               </div>
             )}
 
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               {eyebrow && (
                 <p
-                  className={`mb-1 text-xs font-semibold uppercase tracking-[0.14em] ${
-                    isContrast ? 'text-[#55565E]' : 'text-[#CDB5F7]'
-                  }`}
+                  className={[
+                    'mb-1 break-words text-xs font-semibold uppercase',
+                    'tracking-[0.14em]',
+                    styles.eyebrow,
+                  ].join(' ')}
                 >
                   {eyebrow}
                 </p>
@@ -57,9 +92,11 @@ export default function SectionCard({
 
               {title && (
                 <h2
-                  className={`text-base font-semibold tracking-tight sm:text-lg ${
-                    isContrast ? 'text-[#14161C]' : 'text-[#EAEAE6]'
-                  }`}
+                  className={[
+                    'break-words text-base font-semibold tracking-tight',
+                    'sm:text-lg',
+                    styles.title,
+                  ].join(' ')}
                 >
                   {title}
                 </h2>
@@ -67,9 +104,10 @@ export default function SectionCard({
 
               {description && (
                 <p
-                  className={`mt-1 text-sm leading-6 ${
-                    isContrast ? 'text-[#55565E]' : 'text-[#A5A6B0]'
-                  }`}
+                  className={[
+                    'mt-1 break-words text-sm leading-6',
+                    styles.description,
+                  ].join(' ')}
                 >
                   {description}
                 </p>
@@ -78,17 +116,15 @@ export default function SectionCard({
           </div>
 
           {action && (
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2">
               {action}
             </div>
           )}
         </header>
       )}
 
-      {children && (
-        <div className="min-w-0 p-5 sm:p-6">
-          {children}
-        </div>
+      {children != null && (
+        <div className="min-w-0 p-5 sm:p-6">{children}</div>
       )}
     </section>
   );

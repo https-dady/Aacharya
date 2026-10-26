@@ -15,12 +15,23 @@ export default function Topbar({
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const profileMenuRef = useRef(null);
+  const profileButtonRef = useRef(null);
+  const profileMenuItemRef = useRef(null);
 
   const displayName = user?.name || 'Account';
   const displayRole = user?.role || '';
 
-  const avatarInitial =
-    displayName.trim().charAt(0).toUpperCase() || 'A';
+  const avatarInitial = displayName.trim().charAt(0).toUpperCase() || 'A';
+
+  function closeProfileMenu({ restoreFocus = false } = {}) {
+    setIsProfileOpen(false);
+
+    if (restoreFocus) {
+      requestAnimationFrame(() => {
+        profileButtonRef.current?.focus();
+      });
+    }
+  }
 
   function handleSearchSubmit(event) {
     event.preventDefault();
@@ -33,45 +44,52 @@ export default function Topbar({
   }
 
   function handleProfileClick() {
-    setIsProfileOpen(false);
-
-    if (onProfileClick) {
-      onProfileClick();
-    }
+    closeProfileMenu();
+    onProfileClick?.();
   }
 
   async function handleLogout() {
-    setIsProfileOpen(false);
+    closeProfileMenu();
+    await onLogout?.();
+  }
 
-    if (onLogout) {
-      await onLogout();
-    }
+  function handleProfileButtonClick() {
+    setIsProfileOpen((current) => !current);
   }
 
   useEffect(() => {
+    if (!isProfileOpen) {
+      return undefined;
+    }
+
+    requestAnimationFrame(() => {
+      profileMenuItemRef.current?.focus();
+    });
+
     function handleOutsideClick(event) {
       if (
         profileMenuRef.current &&
         !profileMenuRef.current.contains(event.target)
       ) {
-        setIsProfileOpen(false);
+        closeProfileMenu();
       }
     }
 
-    function handleEscapeKey(event) {
+    function handleKeyDown(event) {
       if (event.key === 'Escape') {
-        setIsProfileOpen(false);
+        event.preventDefault();
+        closeProfileMenu({ restoreFocus: true });
       }
     }
 
     document.addEventListener('mousedown', handleOutsideClick);
-    document.addEventListener('keydown', handleEscapeKey);
+    document.addEventListener('keydown', handleKeyDown);
 
     return () => {
       document.removeEventListener('mousedown', handleOutsideClick);
-      document.removeEventListener('keydown', handleEscapeKey);
+      document.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [isProfileOpen]);
 
   return (
     <header className="sticky top-0 z-30 border-b border-[#383943] bg-[#14161C]/95 backdrop-blur-xl">
@@ -186,7 +204,6 @@ export default function Topbar({
               strokeLinejoin="round"
               d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"
             />
-
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -204,6 +221,7 @@ export default function Topbar({
 
         <div ref={profileMenuRef} className="relative shrink-0">
           <button
+            ref={profileButtonRef}
             type="button"
             aria-expanded={isProfileOpen}
             aria-haspopup="menu"
@@ -214,9 +232,7 @@ export default function Topbar({
               'focus-visible:outline-none focus-visible:ring-2',
               'focus-visible:ring-[#CDB5F7]',
             ].join(' ')}
-            onClick={() => {
-              setIsProfileOpen((current) => !current);
-            }}
+            onClick={handleProfileButtonClick}
           >
             <span className="flex h-9 w-9 items-center justify-center rounded-full border border-[#CDB5F7]/25 bg-[#CDB5F7]/15 text-sm font-bold text-[#CDB5F7]">
               {avatarInitial}
@@ -277,6 +293,7 @@ export default function Topbar({
               </div>
 
               <button
+                ref={profileMenuItemRef}
                 type="button"
                 role="menuitem"
                 className={[
