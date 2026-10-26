@@ -39,6 +39,7 @@ const FACULTY_COLUMNS = [
   {
     key: 'role',
     header: 'Role',
+    accessor: 'role',
     render: (value) => {
       const isMentor = value === 'MENTOR';
 
@@ -60,6 +61,7 @@ const FACULTY_COLUMNS = [
   {
     key: 'status',
     header: 'Account Status',
+    accessor: 'status',
     render: (value) => {
       const statusStyles = {
         ACTIVE:
@@ -160,7 +162,7 @@ export default function FacultyList() {
   /*
    * Frontend-only phase:
    * No sample faculty records are fabricated.
-   * Connect the existing backend list endpoint during integration.
+   * Actual records will be connected during the API integration phase.
    */
   const facultyMembers = [];
   const isLoading = false;
@@ -214,30 +216,42 @@ export default function FacultyList() {
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <div className="rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
-          <p className="text-sm text-[#A5A6B0]">Faculty Directory</p>
+          <p className="text-sm text-[#A5A6B0]">
+            Faculty Directory
+          </p>
+
           <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
             —
           </p>
+
           <p className="mt-1 text-xs text-[#777986]">
             Total records will appear after integration.
           </p>
         </div>
 
         <div className="rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
-          <p className="text-sm text-[#A5A6B0]">Faculty Accounts</p>
+          <p className="text-sm text-[#A5A6B0]">
+            Faculty Accounts
+          </p>
+
           <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
             —
           </p>
+
           <p className="mt-1 text-xs text-[#777986]">
             Account totals are not loaded yet.
           </p>
         </div>
 
         <div className="rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
-          <p className="text-sm text-[#A5A6B0]">Mentor / TG</p>
+          <p className="text-sm text-[#A5A6B0]">
+            Mentor / TG
+          </p>
+
           <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
             —
           </p>
+
           <p className="mt-1 text-xs text-[#777986]">
             Role totals are not loaded yet.
           </p>
@@ -312,11 +326,31 @@ export default function FacultyList() {
           <DataTable
             columns={FACULTY_COLUMNS}
             data={facultyMembers}
-            rowKey="id"
+            rowKey={(faculty) =>
+              faculty.id || faculty._id || faculty.institutionalId
+            }
             loading={isLoading}
             ariaLabel="Department faculty directory"
-            emptyTitle="No faculty records loaded"
-            emptyDescription="Faculty records will appear here when the frontend is connected to the department faculty API. No sample accounts are being displayed."
+            emptyTitle={
+              hasActiveFilters
+                ? 'No matching faculty records'
+                : 'No faculty records loaded'
+            }
+            emptyDescription={
+              hasActiveFilters
+                ? 'No records match the selected filters. Clear the filters or try another search.'
+                : 'Faculty records will appear here when the frontend is connected to the department faculty API. No sample accounts are being displayed.'
+            }
+            emptyAction={
+              hasActiveFilters ? (
+                <ActionButton
+                  variant="secondary"
+                  onClick={resetFilters}
+                >
+                  Clear filters
+                </ActionButton>
+              ) : null
+            }
           />
         </div>
       </SectionCard>
