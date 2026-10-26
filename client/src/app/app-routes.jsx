@@ -83,6 +83,8 @@ import MentorDashboard from "../features/lms/pages/mentor/MentorDashboard.jsx";
 import MentorStudents from "../features/lms/pages/mentor/MentorStudents.jsx";
 import MentorStudentDetails from "../features/lms/pages/mentor/MentorStudentDetails.jsx";
 import MentorStudentForm from "../features/lms/pages/mentor/MentorStudentForm.jsx";
+import MentorStudentImport from "../features/lms/pages/mentor/MentorStudentImport.jsx";
+
 
 export const applicationRoutes = [
   // Super Admin
@@ -456,6 +458,11 @@ export const applicationRoutes = [
   id: "mentor-student-edit",
   path: "students/:studentId/edit",
   element: <MentorStudentForm />,
+},
+{
+  id: "mentor-student-import",
+  path: "students/import",
+  element: <MentorStudentImport />,
 },
     ],
   },
