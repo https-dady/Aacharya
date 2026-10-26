@@ -26,6 +26,7 @@ const BATCH_COLUMNS = [
   {
     key: 'status',
     header: 'Status',
+    accessor: 'status',
     render: (value) => {
       const styles = {
         ACTIVE:
@@ -47,6 +48,21 @@ const BATCH_COLUMNS = [
         </span>
       );
     },
+  },
+  {
+    key: 'actions',
+    header: 'Actions',
+    render: (_value, batch) => (
+      <Link
+        to="/hod/batches/details"
+        state={{ batch }}
+        aria-label={`View details for ${batch.name || 'academic batch'}`}
+      >
+        <ActionButton variant="secondary" size="sm">
+          View Details
+        </ActionButton>
+      </Link>
+    ),
   },
 ];
 
@@ -169,7 +185,7 @@ export default function BatchList() {
                 size="sm"
                 onClick={() => setSearch('')}
               >
-                Clear search
+                Clear Search
               </ActionButton>
             )}
           </div>
@@ -177,7 +193,11 @@ export default function BatchList() {
           <DataTable
             columns={BATCH_COLUMNS}
             data={filteredBatches}
-            rowKey="id"
+            rowKey={(batch) =>
+              batch.id ||
+              batch._id ||
+              `${batch.name}-${batch.academicYear}`
+            }
             loading={isLoading}
             ariaLabel="Department academic batches"
             emptyTitle="No batch records loaded"
