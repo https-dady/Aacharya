@@ -91,6 +91,7 @@ import MentorAttendance from "../features/lms/pages/mentor/MentorAttendance.jsx"
 // Student pages
 import StudentDashboard from "../features/lms/pages/student/StudentDashboard.jsx";
 import StudentTimetable from "../features/lms/pages/student/StudentTimetable.jsx";
+import StudentCourses from "../features/lms/pages/student/StudentCourses.jsx";
 
 
 export const applicationRoutes = [
@@ -501,6 +502,11 @@ export const applicationRoutes = [
   id: "student-timetable",
   path: "timetable",
   element: <StudentTimetable />,
+},
+{
+  id: "student-courses",
+  path: "courses",
+  element: <StudentCourses />,
 },
   ],
 },
