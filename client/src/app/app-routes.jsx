@@ -102,6 +102,7 @@ import StudentProfile from "../features/lms/pages/student/StudentProfile.jsx";
 import StudentCourseDetails from "../features/lms/pages/student/StudentCourseDetails.jsx";
 import StudentAssignmentDetails from "../features/lms/pages/student/StudentAssignmentDetails.jsx";
 import StudentQuizDetails from "../features/lms/pages/student/StudentQuizDetails.jsx";
+import StudentDocumentVault from "../features/lms/pages/student/StudentDocumentVault.jsx";
 
 // Alumni pages
 import AlumniDashboard from "../features/lms/pages/alumni/AlumniDashboard.jsx";
@@ -572,6 +573,11 @@ export const applicationRoutes = [
   id: "student-quiz-details",
   path: "quizzes/:quizId",
   element: <StudentQuizDetails />,
+},
+{
+  id: "student-document-vault",
+  path: "documents",
+  element: <StudentDocumentVault />,
 },
   ],
 },

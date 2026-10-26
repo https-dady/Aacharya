@@ -278,6 +278,12 @@ export const ROLE_NAVIGATION = Object.freeze({
       path: '/student/profile',
       group: 'account',
     },
+    {
+      id: "documents",
+      label: "Document Vault",
+      path: "/student/documents",
+      group: "account",
+    },
   ],
 
   [LMS_ROLES.ALUMNI]: [
