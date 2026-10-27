@@ -35,10 +35,8 @@ const app = express();
 
 app.disable('x-powered-by');
 
-// 1. Security headers.
 app.use(helmet());
 
-// 2. Cross-origin request configuration.
 app.use(
   cors({
     origin: env.clientUrl,
@@ -47,36 +45,53 @@ app.use(
   }),
 );
 
-// 3. Request logging before parsers so malformed requests are logged.
+app.use(express.json({ limit: '1mb' }));
+
+app.use(cookieParser());
+
 app.use(
   pinoHttp({
     level: env.logLevel,
+
     redact: {
       paths: [
+        // Authentication headers and cookies.
         'req.headers.authorization',
         'req.headers.cookie',
+
+        // Passwords and authentication tokens.
         'req.body.password',
         'req.body.passwordHash',
+        'req.body.currentPassword',
+        'req.body.newPassword',
         'req.body.otp',
         'req.body.token',
+        'req.body.accessToken',
+        'req.body.refreshToken',
+
+        // Password-reset credentials.
+        'req.body.resetToken',
+        'req.body.passwordResetToken',
+
+        // Email verification credentials.
+        'req.body.verificationToken',
+        'req.body.emailVerificationToken',
+
+        // Potentially sensitive bulk-import data.
         'req.body.csvContent',
       ],
+
       censor: '[REDACTED]',
     },
   }),
 );
 
-// 4. Request body and cookie parsing.
-app.use(express.json({ limit: '1mb' }));
-app.use(cookieParser());
-
-// 5. Health endpoints remain outside API rate limiting.
+// Health endpoints remain outside API rate limiting.
 app.use('/health', healthRoutes);
 
-// 6. Apply rate limiting to versioned API routes.
+// API-wide rate limiting.
 app.use('/api/v1', apiRateLimiter);
 
-// 7. API metadata.
 app.get('/api/v1/meta', (_req, res) => {
   res.status(200).json({
     success: true,
@@ -88,43 +103,41 @@ app.get('/api/v1/meta', (_req, res) => {
   });
 });
 
-// 8. Authentication.
+// Authentication.
 app.use('/api/v1/auth', authRoutes);
 
-// 9. Notifications.
+// Notifications.
 app.use('/api/v1/notifications', notificationRoutes);
 
-// 10. Department management.
+// Department management.
 app.use('/api/v1/departments', departmentRoutes);
 
-// 11. Account provisioning: HOD creation.
+// Account provisioning: HOD creation.
 app.use('/api/v1/provisioning', hodRoutes);
 
-// 12. Faculty account provisioning.
+// Faculty account provisioning.
 app.use('/api/v1/provisioning/faculty', facultyRoutes);
 
-// 13. Batch management.
+// Batch management.
 app.use('/api/v1/provisioning/batches', batchRoutes);
 
-// 14. Section management.
+// Section management.
 app.use('/api/v1/provisioning', sectionRoutes);
 
-// 15. Mentor roles and batch/section assignments.
+// Mentor role and batch/section assignments.
 app.use('/api/v1/provisioning', mentorRoutes);
 
-// 16. Student account provisioning.
+// Student account provisioning.
 app.use('/api/v1/provisioning', studentRoutes);
 
-// 17. Bulk student import.
+// Bulk student import.
 app.use('/api/v1/provisioning', studentImportRoutes);
 
-// 18. Handle student-upload-specific errors.
+// Error handling.
 app.use(studentUploadErrorMiddleware);
 
-// 19. Handle unmatched routes.
 app.use(notFoundHandler);
 
-// 20. Centralized fallback error handler — must remain last.
 app.use(errorHandler);
 
 export default app;

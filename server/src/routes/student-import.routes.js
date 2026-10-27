@@ -33,6 +33,10 @@ import {
   studentImportIdempotencyMiddleware,
 } from '../middleware/student-import-idempotency.middleware.js';
 
+import {
+  auditEvent,
+} from '../middleware/audit.middleware.js';
+
 const studentImportRouter = Router();
 
 const MAX_IMPORT_SIZE = 1024 * 1024;
@@ -68,12 +72,22 @@ const previewStudentsSchema = z.object({
 
 /*
  * Download the official student import template.
+ *
+ * Audit metadata intentionally excludes request bodies,
+ * uploaded file contents, credentials, and tokens.
  */
 studentImportRouter.get(
   '/students/import-template',
   authenticate,
   authorize('MENTOR'),
   authRateLimiter,
+  auditEvent({
+    action: 'STUDENT_IMPORT_TEMPLATE_DOWNLOAD',
+    resourceType: 'StudentImportTemplate',
+    getMetadata: (req) => ({
+      format: String(req.query.format || 'csv').toLowerCase(),
+    }),
+  }),
   downloadStudentImportTemplateController,
 );
 
@@ -94,6 +108,16 @@ studentImportRouter.post(
   authenticate,
   authorize('MENTOR'),
   authRateLimiter,
+  auditEvent({
+    action: 'STUDENT_IMPORT_PREVIEW',
+    resourceType: 'StudentImport',
+    getResourceId: (req) => req.params.sectionId,
+    getMetadata: (req) => ({
+      inputType: req.is('multipart/form-data')
+        ? 'xlsx'
+        : 'csv',
+    }),
+  }),
   studentUpload.single('file'),
   validate(previewStudentsSchema),
   previewStudentImportController,
@@ -104,17 +128,33 @@ studentImportRouter.post(
  *
  * Middleware order:
  * 1. Authenticate the caller.
- * 2. Apply rate limiting.
- * 3. Validate the Idempotency-Key.
- * 4. Parse the uploaded file.
- * 5. Validate request parameters and body.
- * 6. Execute the import controller.
+ * 2. Authorize the mentor role.
+ * 3. Apply rate limiting.
+ * 4. Register audit logging for the completed response.
+ * 5. Validate the Idempotency-Key.
+ * 6. Parse the uploaded file.
+ * 7. Validate request parameters and body.
+ * 8. Execute the import controller.
+ *
+ * The audit middleware observes the final HTTP status.
+ * It does not record CSV contents, XLSX contents, passwords,
+ * Idempotency-Key values, or authentication tokens.
  */
 studentImportRouter.post(
   '/sections/:sectionId/students/import',
   authenticate,
   authorize('MENTOR'),
   authRateLimiter,
+  auditEvent({
+    action: 'STUDENT_IMPORT',
+    resourceType: 'StudentImport',
+    getResourceId: (req) => req.params.sectionId,
+    getMetadata: (req) => ({
+      inputType: req.is('multipart/form-data')
+        ? 'xlsx'
+        : 'csv',
+    }),
+  }),
   studentImportIdempotencyMiddleware,
   studentUpload.single('file'),
   validate(importStudentsSchema),

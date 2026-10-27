@@ -13,6 +13,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
+import { auditEvent } from '../middleware/audit.middleware.js';
 
 const studentRouter = Router();
 
@@ -100,6 +101,13 @@ studentRouter.post(
   authorize('MENTOR'),
   authRateLimiter,
   validate(createStudentSchema),
+  auditEvent({
+    action: 'STUDENT_ACCOUNT_CREATE',
+    resourceType: 'Student',
+    getMetadata: (req) => ({
+      sectionId: req.params.sectionId,
+    }),
+  }),
   createStudentController,
 );
 
@@ -139,6 +147,15 @@ studentRouter.patch(
   authorize('MENTOR'),
   authRateLimiter,
   validate(updateStudentSchema),
+  auditEvent({
+    action: 'STUDENT_PROFILE_UPDATE',
+    resourceType: 'Student',
+    getResourceId: (req) => req.params.studentId,
+    getMetadata: (req) => ({
+      sectionId: req.params.sectionId,
+      updatedFields: Object.keys(req.body),
+    }),
+  }),
   updateStudentController,
 );
 
@@ -152,6 +169,15 @@ studentRouter.patch(
   authorize('MENTOR'),
   authRateLimiter,
   validate(updateStudentStatusSchema),
+  auditEvent({
+    action: 'STUDENT_STATUS_UPDATE',
+    resourceType: 'Student',
+    getResourceId: (req) => req.params.studentId,
+    getMetadata: (req) => ({
+      sectionId: req.params.sectionId,
+      newStatus: req.body.status,
+    }),
+  }),
   updateStudentStatusController,
 );
 

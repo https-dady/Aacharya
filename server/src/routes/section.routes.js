@@ -10,6 +10,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
+import { auditEvent } from '../middleware/audit.middleware.js';
 
 import { SECTION_STATUSES } from '../models/section.model.js';
 
@@ -89,6 +90,14 @@ sectionRouter.post(
   authorize('HOD'),
   authRateLimiter,
   validate(createSectionSchema),
+  auditEvent({
+    action: 'SECTION_CREATE',
+    resourceType: 'Section',
+    getMetadata: (req) => ({
+      batchId: req.params.batchId,
+      sectionCode: req.body.code.trim().toUpperCase(),
+    }),
+  }),
   createSectionController,
 );
 

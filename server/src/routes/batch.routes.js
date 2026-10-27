@@ -10,6 +10,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
+import { auditEvent } from '../middleware/audit.middleware.js';
 
 import { BATCH_STATUSES } from '../models/batch.model.js';
 
@@ -96,6 +97,17 @@ batchRouter.post(
   authorize('HOD'),
   authRateLimiter,
   validate(createBatchSchema),
+
+  auditEvent({
+    action: 'BATCH_CREATE',
+    resourceType: 'Batch',
+
+    getMetadata: (req) => ({
+      batchCode: req.body.code.trim().toUpperCase(),
+      academicYear: req.body.academicYear,
+    }),
+  }),
+
   createBatchController,
 );
 

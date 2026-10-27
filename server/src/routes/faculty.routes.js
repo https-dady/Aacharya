@@ -10,6 +10,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
+import { auditEvent } from '../middleware/audit.middleware.js';
 
 import {
   USER_ROLES,
@@ -69,6 +70,13 @@ facultyRouter.post(
   authorize('HOD'),
   authRateLimiter,
   validate(createFacultySchema),
+  auditEvent({
+    action: 'FACULTY_ACCOUNT_CREATE',
+    resourceType: 'FacultyAccount',
+    getMetadata: (req) => ({
+      targetRole: USER_ROLES.FACULTY,
+    }),
+  }),
   createFacultyController,
 );
 

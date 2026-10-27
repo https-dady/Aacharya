@@ -1,17 +1,23 @@
+﻿
+import dns from 'node:dns';
 import dotenv from 'dotenv';
 
 dotenv.config({ path: 'server/.env' });
 dotenv.config({ path: '.env' });
 
-import mongoose from 'mongoose';
+const { default: mongoose } = await import('mongoose');
 
-import { env } from '../src/config/env.js';
-import {
+const { env } = await import('../src/config/env.js');
+
+const {
   User,
   USER_ROLES,
   ACCOUNT_STATUSES,
-} from '../src/models/user.model.js';
-import { hashPassword } from '../src/services/auth/password.service.js';
+} = await import('../src/models/user.model.js');
+
+const { hashPassword } = await import(
+  '../src/services/auth/password.service.js'
+);
 
 const TEST_USER = {
   institutionalId: 'STU001',
@@ -20,6 +26,27 @@ const TEST_USER = {
   role: USER_ROLES.STUDENT,
   status: ACCOUNT_STATUSES.ACTIVE,
 };
+
+function configureMongoDns() {
+  if (!process.env.MONGODB_URI?.startsWith('mongodb+srv://')) {
+    return;
+  }
+
+  const configuredServers = process.env.MONGODB_DNS_SERVERS
+    ?.split(',')
+    .map((server) => server.trim())
+    .filter(Boolean);
+
+  const dnsServers = configuredServers?.length
+    ? configuredServers
+    : ['8.8.8.8', '1.1.1.1'];
+
+  dns.setServers(dnsServers);
+
+  console.log(
+    `MongoDB DNS resolver configured (${dnsServers.length} servers).`,
+  );
+}
 
 async function seedTestUser() {
   if (env.nodeEnv !== 'development') {
@@ -34,7 +61,13 @@ async function seedTestUser() {
     throw new Error('MONGODB_URI is not configured.');
   }
 
-  await mongoose.connect(mongodbUri);
+  configureMongoDns();
+
+  await mongoose.connect(mongodbUri, {
+    serverSelectionTimeoutMS: 15000,
+  });
+
+  console.log('MongoDB connected.');
 
   const existingUser = await User.findOne({
     institutionalId: TEST_USER.institutionalId,
@@ -65,5 +98,7 @@ try {
   console.error('Test user seeding failed:', error.message);
   process.exitCode = 1;
 } finally {
-  await mongoose.disconnect();
+  if (mongoose.connection.readyState !== 0) {
+    await mongoose.disconnect();
+  }
 }

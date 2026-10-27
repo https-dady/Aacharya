@@ -1,12 +1,9 @@
+import { env } from '../../config/env.js';
+
 const BREVO_EMAIL_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
 function getBrevoConfiguration() {
-  const apiKey = process.env.BREVO_API_KEY?.trim();
-  const senderEmail = process.env.BREVO_SENDER_EMAIL?.trim();
-  const senderName = process.env.BREVO_SENDER_NAME?.trim()
-    || 'Aacharya LMS';
-
-  if (!apiKey || !senderEmail) {
+  if (!env.email.enabled) {
     const error = new Error(
       'Email service is not configured.',
     );
@@ -18,7 +15,11 @@ function getBrevoConfiguration() {
     throw error;
   }
 
-  return { apiKey, senderEmail, senderName };
+  return {
+    apiKey: env.email.apiKey,
+    senderEmail: env.email.senderEmail,
+    senderName: env.email.senderName,
+  };
 }
 
 function createEmailServiceError(statusCode, message) {
@@ -68,23 +69,28 @@ async function sendTransactionalEmail({
   try {
     response = await fetch(BREVO_EMAIL_API_URL, {
       method: 'POST',
+
       headers: {
         accept: 'application/json',
         'api-key': apiKey,
         'content-type': 'application/json',
       },
+
       body: JSON.stringify({
         sender: {
           name: senderName,
           email: senderEmail,
         },
+
         to: [{ email: to.trim() }],
         subject: subject.trim(),
         htmlContent,
+
         ...(textContent !== undefined
           ? { textContent }
           : {}),
       }),
+
       signal: AbortSignal.timeout(15000),
     });
   } catch {

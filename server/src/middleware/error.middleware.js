@@ -1,11 +1,143 @@
-function createErrorResponse(code, message) {
+function createErrorResponse(code, message, details) {
+  const error = {
+    code,
+    message,
+  };
+
+  if (Array.isArray(details) && details.length > 0) {
+    error.details = details;
+  }
+
   return {
     success: false,
-    error: {
-      code,
-      message,
-    },
+    error,
   };
+}
+
+function resolveErrorStatus(error) {
+  // MongoDB duplicate-key error.
+  if (error?.code === 11000) {
+    return 409;
+  }
+
+  // Mongoose document validation error.
+  if (error?.name === 'ValidationError') {
+    return 422;
+  }
+
+  // Invalid MongoDB document ID or cast operation.
+  if (error?.name === 'CastError') {
+    return 400;
+  }
+
+  const statusCode = Number(error?.statusCode ?? error?.status);
+
+  if (
+    Number.isInteger(statusCode) &&
+    statusCode >= 400 &&
+    statusCode <= 599
+  ) {
+    return statusCode;
+  }
+
+  return 500;
+}
+
+function resolveErrorCode(statusCode, error) {
+  if (
+    statusCode < 500 &&
+    typeof error?.code === 'string' &&
+    error.code.trim() !== ''
+  ) {
+    return error.code;
+  }
+
+  switch (statusCode) {
+    case 400:
+      return 'BAD_REQUEST';
+
+    case 401:
+      return 'UNAUTHORIZED';
+
+    case 403:
+      return 'FORBIDDEN';
+
+    case 404:
+      return 'NOT_FOUND';
+
+    case 409:
+      return 'CONFLICT';
+
+    case 413:
+      return 'PAYLOAD_TOO_LARGE';
+
+    case 422:
+      return 'VALIDATION_ERROR';
+
+    case 429:
+      return 'TOO_MANY_REQUESTS';
+
+    default:
+      return 'INTERNAL_SERVER_ERROR';
+  }
+}
+
+function resolveErrorMessage(statusCode, error) {
+  if (
+    statusCode < 500 &&
+    error?.expose === true &&
+    typeof error.message === 'string'
+  ) {
+    return error.message;
+  }
+
+  switch (statusCode) {
+    case 400:
+      return 'The request could not be processed.';
+
+    case 401:
+      return 'Authentication is required.';
+
+    case 403:
+      return 'You do not have permission to perform this action.';
+
+    case 404:
+      return 'The requested resource was not found.';
+
+    case 409:
+      return 'The request conflicts with the current resource state.';
+
+    case 413:
+      return 'The request payload exceeds the permitted size.';
+
+    case 422:
+      return 'The request contains invalid data.';
+
+    case 429:
+      return 'Too many requests. Please try again later.';
+
+    default:
+      return 'An unexpected error occurred.';
+  }
+}
+
+function resolveValidationDetails(statusCode, error) {
+  if (statusCode !== 422 || !Array.isArray(error?.details)) {
+    return undefined;
+  }
+
+  return error.details
+    .filter(
+      (detail) =>
+        detail &&
+        typeof detail.path === 'string' &&
+        typeof detail.message === 'string',
+    )
+    .slice(0, 50)
+    .map((detail) => ({
+      path: detail.path.slice(0, 200),
+      message: detail.message.slice(0, 500),
+    }));
 }
 
 export function notFoundHandler(req, res, next) {
@@ -23,71 +155,22 @@ export function errorHandler(error, req, res, next) {
     return;
   }
 
-  const statusCode = Number(error.statusCode ?? error.status);
+  const statusCode = resolveErrorStatus(error);
+  const code = resolveErrorCode(statusCode, error);
+  const message = resolveErrorMessage(statusCode, error);
+  const details = resolveValidationDetails(statusCode, error);
 
-  const isValidStatusCode =
-    Number.isInteger(statusCode) &&
-    statusCode >= 400 &&
-    statusCode <= 599;
-
-  const resolvedStatusCode = isValidStatusCode ? statusCode : 500;
-
-  let code = 'INTERNAL_SERVER_ERROR';
-  let message = 'An unexpected error occurred.';
-
-  if (resolvedStatusCode === 400) {
-    code = 'BAD_REQUEST';
-    message = 'The request could not be processed.';
-  } else if (resolvedStatusCode === 401) {
-    code = 'UNAUTHORIZED';
-    message = 'Authentication is required.';
-  } else if (resolvedStatusCode === 403) {
-    code = 'FORBIDDEN';
-    message = 'You do not have permission to perform this action.';
-  } else if (resolvedStatusCode === 404) {
-    code = 'NOT_FOUND';
-    message = 'The requested resource was not found.';
-  } else if (resolvedStatusCode === 409) {
-    code = 'CONFLICT';
-    message = 'The request conflicts with the current resource state.';
-  } else if (resolvedStatusCode === 413) {
-    code = 'PAYLOAD_TOO_LARGE';
-    message = 'The request payload exceeds the permitted size.';
-  } else if (resolvedStatusCode === 422) {
-    code = 'VALIDATION_ERROR';
-    message = 'The request contains invalid data.';
-  } else if (resolvedStatusCode === 429) {
-    code = 'TOO_MANY_REQUESTS';
-    message = 'Too many requests. Please try again later.';
-  }
-
-  if (
-    resolvedStatusCode < 500 &&
-    typeof error.code === 'string' &&
-    error.code.trim() !== ''
-  ) {
-    code = error.code;
-  }
-
-  if (
-    resolvedStatusCode < 500 &&
-    error.expose === true &&
-    typeof error.message === 'string'
-  ) {
-    message = error.message;
-  }
-
-  if (resolvedStatusCode >= 500) {
+  if (statusCode >= 500) {
     req.log?.error(
       {
         err: error,
-        statusCode: resolvedStatusCode,
+        statusCode,
       },
       'Request failed',
     );
   }
 
-  res.status(resolvedStatusCode).json(
-    createErrorResponse(code, message),
+  res.status(statusCode).json(
+    createErrorResponse(code, message, details),
   );
 }

@@ -6,6 +6,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
+import { auditEvent } from '../middleware/audit.middleware.js';
 
 const hodRouter = Router();
 
@@ -31,6 +32,13 @@ hodRouter.post(
   authorize('SUPER_ADMIN'),
   authRateLimiter,
   validate(createHodSchema),
+  auditEvent({
+    action: 'HOD_ACCOUNT_CREATE',
+    resourceType: 'DepartmentHOD',
+    getMetadata: (req) => ({
+      departmentId: req.params.departmentId,
+    }),
+  }),
   createHodController,
 );
 

@@ -10,6 +10,7 @@ import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
+import { auditEvent } from '../middleware/audit.middleware.js';
 
 import {
   ACCOUNT_STATUSES,
@@ -81,6 +82,19 @@ mentorRouter.patch(
   authorize('HOD'),
   authRateLimiter,
   validate(assignMentorSchema),
+
+  auditEvent({
+    action: 'MENTOR_ASSIGNMENT_UPDATE',
+    resourceType: 'FacultyMentorAssignment',
+
+    getResourceId: (req) => req.params.facultyId,
+
+    getMetadata: (req) => ({
+      batchCount: req.body.batchIds.length,
+      sectionCount: req.body.sectionIds.length,
+    }),
+  }),
+
   assignMentorController,
 );
 

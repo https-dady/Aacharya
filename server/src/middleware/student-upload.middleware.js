@@ -2,6 +2,9 @@ import multer from 'multer';
 
 const MAX_FILE_SIZE = 1024 * 1024;
 
+const XLSX_MIME_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
 const studentUpload = multer({
   storage: multer.memoryStorage(),
 
@@ -13,16 +16,39 @@ const studentUpload = multer({
   },
 
   fileFilter(req, file, callback) {
-    const originalName = file.originalname || '';
+    const originalName =
+      typeof file.originalname === 'string'
+        ? file.originalname.trim()
+        : '';
 
-    if (!/\.xlsx$/i.test(originalName)) {
-      const error = new Error('Only .xlsx files are allowed.');
+    const mimeType =
+      typeof file.mimetype === 'string'
+        ? file.mimetype.trim().toLowerCase()
+        : '';
+
+    if (!/^[^/\\]+\.xlsx$/i.test(originalName)) {
+      const error = new Error(
+        'Only .xlsx files are allowed.',
+      );
+
       error.statusCode = 400;
+      error.code = 'INVALID_FILE_EXTENSION';
 
       return callback(error);
     }
 
-    callback(null, true);
+    if (mimeType !== XLSX_MIME_TYPE) {
+      const error = new Error(
+        'The uploaded file must use the XLSX file format.',
+      );
+
+      error.statusCode = 400;
+      error.code = 'INVALID_FILE_TYPE';
+
+      return callback(error);
+    }
+
+    return callback(null, true);
   },
 });
 

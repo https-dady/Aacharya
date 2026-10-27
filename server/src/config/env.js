@@ -134,9 +134,10 @@ function readStudentImportIdempotencySecret(value, nodeEnv) {
   return secret;
 }
 
-
 function readCookieSameSite(value, nodeEnv) {
-  const sameSite = (value ?? (nodeEnv === 'production' ? 'none' : 'strict'))
+  const sameSite = (
+    value ?? (nodeEnv === 'production' ? 'none' : 'strict')
+  )
     .trim()
     .toLowerCase();
 
@@ -172,8 +173,47 @@ function readCloudinaryConfiguration() {
   });
 }
 
+function readEmailConfiguration() {
+  const apiKey = process.env.BREVO_API_KEY?.trim() ?? '';
+  const senderEmail = process.env.BREVO_SENDER_EMAIL?.trim() ?? '';
+  const senderName =
+    process.env.BREVO_SENDER_NAME?.trim() || 'Aacharya LMS';
+
+  const configuredCount = [
+    apiKey,
+    senderEmail,
+  ].filter(Boolean).length;
+
+  if (configuredCount !== 0 && configuredCount !== 2) {
+    throw new Error(
+      'Email configuration is incomplete. Set BREVO_API_KEY and BREVO_SENDER_EMAIL together.',
+    );
+  }
+
+  if (
+    senderEmail
+    && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderEmail)
+  ) {
+    throw new Error(
+      'BREVO_SENDER_EMAIL must be a valid email address.',
+    );
+  }
+
+  return Object.freeze({
+    enabled: configuredCount === 2,
+    apiKey,
+    senderEmail,
+    senderName,
+  });
+}
+
 const nodeEnv = readNodeEnvironment(process.env.NODE_ENV);
-const cookieSameSite = readCookieSameSite(process.env.COOKIE_SAME_SITE, nodeEnv);
+
+const cookieSameSite = readCookieSameSite(
+  process.env.COOKIE_SAME_SITE,
+  nodeEnv,
+);
+
 const mongodbUri = process.env.MONGODB_URI ?? '';
 
 if (nodeEnv === 'production' && !mongodbUri.trim()) {
@@ -217,6 +257,15 @@ const passwordResetOtpSecret = readPasswordResetOtpSecret(
 );
 
 if (
+  nodeEnv === 'production'
+  && !passwordResetOtpSecret
+) {
+  throw new Error(
+    'PASSWORD_RESET_OTP_SECRET is required in production.',
+  );
+}
+
+if (
   passwordResetOtpSecret
   && (
     passwordResetOtpSecret === jwtAccessSecret
@@ -235,6 +284,15 @@ const studentImportIdempotencySecret =
   );
 
 if (
+  nodeEnv === 'production'
+  && !studentImportIdempotencySecret
+) {
+  throw new Error(
+    'STUDENT_IMPORT_IDEMPOTENCY_SECRET is required in production.',
+  );
+}
+
+if (
   studentImportIdempotencySecret
   && (
     studentImportIdempotencySecret === jwtAccessSecret
@@ -249,12 +307,18 @@ if (
 
 export const env = Object.freeze({
   nodeEnv,
+
   port: readPort(process.env.PORT),
+
   clientUrl: readClientUrl(process.env.CLIENT_URL),
+
   mongodbUri,
+
   logLevel: readLogLevel(process.env.LOG_LEVEL),
 
   cloudinary: readCloudinaryConfiguration(),
+
+  email: readEmailConfiguration(),
 
   refreshCookie: Object.freeze({
     sameSite: cookieSameSite,

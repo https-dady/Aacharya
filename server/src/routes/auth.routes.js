@@ -1,5 +1,4 @@
 import { Router } from 'express';
-
 import { z } from 'zod';
 
 import {
@@ -14,11 +13,10 @@ import {
 } from '../controllers/auth.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
-
 import { validate } from '../middleware/validate.middleware.js';
-
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 import { requireTrustedOrigin } from '../middleware/csrf.middleware.js';
+import { auditEvent } from '../middleware/audit.middleware.js';
 
 const authRouter = Router();
 
@@ -65,6 +63,10 @@ authRouter.post(
   requireTrustedOrigin,
   authRateLimiter,
   validate(loginSchema),
+  auditEvent({
+    action: 'AUTH_LOGIN_ATTEMPT',
+    resourceType: 'Authentication',
+  }),
   loginController,
 );
 
@@ -72,12 +74,20 @@ authRouter.post(
   '/refresh',
   requireTrustedOrigin,
   authRateLimiter,
+  auditEvent({
+    action: 'AUTH_TOKEN_REFRESH',
+    resourceType: 'Authentication',
+  }),
   refreshController,
 );
 
 authRouter.post(
   '/logout',
   requireTrustedOrigin,
+  auditEvent({
+    action: 'AUTH_LOGOUT',
+    resourceType: 'Authentication',
+  }),
   logoutController,
 );
 
@@ -86,6 +96,10 @@ authRouter.post(
   authenticate,
   authRateLimiter,
   validate(emailVerificationSchema),
+  auditEvent({
+    action: 'EMAIL_VERIFICATION_REQUEST',
+    resourceType: 'EmailVerification',
+  }),
   requestEmailVerificationController,
 );
 
@@ -94,6 +108,11 @@ authRouter.post(
   authenticate,
   authRateLimiter,
   validate(confirmEmailVerificationSchema),
+  auditEvent({
+    action: 'EMAIL_VERIFICATION_CONFIRM',
+    resourceType: 'EmailVerification',
+    getResourceId: (req) => req.body.challengeId,
+  }),
   confirmEmailVerificationController,
 );
 
@@ -101,6 +120,10 @@ authRouter.post(
   '/password/reset/request',
   authRateLimiter,
   validate(requestPasswordResetSchema),
+  auditEvent({
+    action: 'PASSWORD_RESET_REQUEST',
+    resourceType: 'PasswordReset',
+  }),
   requestPasswordResetController,
 );
 
@@ -108,6 +131,11 @@ authRouter.post(
   '/password/reset/verify',
   authRateLimiter,
   validate(verifyPasswordResetOtpSchema),
+  auditEvent({
+    action: 'PASSWORD_RESET_OTP_VERIFY',
+    resourceType: 'PasswordReset',
+    getResourceId: (req) => req.body.challengeId,
+  }),
   verifyPasswordResetOtpController,
 );
 
@@ -115,6 +143,10 @@ authRouter.post(
   '/password/reset/confirm',
   authRateLimiter,
   validate(confirmPasswordResetSchema),
+  auditEvent({
+    action: 'PASSWORD_RESET_CONFIRM',
+    resourceType: 'PasswordReset',
+  }),
   confirmPasswordResetController,
 );
 
