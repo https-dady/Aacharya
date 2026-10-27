@@ -13,6 +13,32 @@ import {
 
 let server;
 let isShuttingDown = false;
+let shutdownPromise;
+
+function listen() {
+  return new Promise((resolve, reject) => {
+    const httpServer = app.listen(env.port);
+
+    const handleStartupError = (error) => {
+      httpServer.removeListener('listening', handleListening);
+      reject(error);
+    };
+
+    const handleListening = () => {
+      httpServer.removeListener('error', handleStartupError);
+      server = httpServer;
+
+      console.log(
+        `Aacharya LMS API running at http://localhost:${env.port}`,
+      );
+
+      resolve(httpServer);
+    };
+
+    httpServer.once('error', handleStartupError);
+    httpServer.once('listening', handleListening);
+  });
+}
 
 async function startServer() {
   try {
@@ -32,14 +58,10 @@ async function startServer() {
       return;
     }
 
-    server = app.listen(env.port, () => {
-      console.log(
-        `Aacharya LMS API running at http://localhost:${env.port}`,
-      );
-    });
+    await listen();
   } catch (error) {
     console.error(
-      'Aacharya LMS startup failed. Check the application configuration and database connectivity.',
+      'Aacharya LMS startup failed. Check the application configuration, port availability, and database connectivity.',
       error.message,
     );
 
@@ -56,40 +78,70 @@ async function startServer() {
   }
 }
 
-async function shutdown(signal) {
-  if (isShuttingDown) {
+function closeHttpServer() {
+  if (!server) {
+    return Promise.resolve();
+  }
+
+  const httpServer = server;
+  server = undefined;
+
+  return new Promise((resolve, reject) => {
+    httpServer.close((error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
+async function performShutdown(signal) {
+  console.log(`${signal} received. Shutting down gracefully.`);
+
+  let shutdownFailed = false;
+
+  try {
+    await closeHttpServer();
+  } catch (error) {
+    shutdownFailed = true;
+
+    console.error(
+      'HTTP server shutdown failed:',
+      error.message,
+    );
+  }
+
+  try {
+    await disconnectDatabase();
+  } catch (error) {
+    shutdownFailed = true;
+
+    console.error(
+      'Database shutdown failed:',
+      error.message,
+    );
+  }
+
+  if (shutdownFailed) {
+    process.exitCode = 1;
     return;
   }
 
-  isShuttingDown = true;
+  console.log('HTTP server and database connection closed.');
+}
 
-  console.log(`${signal} received. Shutting down gracefully.`);
-
-  try {
-    if (server) {
-      await new Promise((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-
-          resolve();
-        });
-      });
-    }
-
-    await disconnectDatabase();
-
-    console.log('HTTP server and database connection closed.');
-  } catch (error) {
-    console.error(
-      'Graceful shutdown failed:',
-      error.message,
-    );
-
-    process.exitCode = 1;
+function shutdown(signal) {
+  if (shutdownPromise) {
+    return shutdownPromise;
   }
+
+  isShuttingDown = true;
+  shutdownPromise = performShutdown(signal);
+
+  return shutdownPromise;
 }
 
 process.on('SIGINT', () => {

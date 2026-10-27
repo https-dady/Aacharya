@@ -35,8 +35,10 @@ const app = express();
 
 app.disable('x-powered-by');
 
+// 1. Security headers.
 app.use(helmet());
 
+// 2. Cross-origin request configuration.
 app.use(
   cors({
     origin: env.clientUrl,
@@ -45,14 +47,10 @@ app.use(
   }),
 );
 
-app.use(express.json({ limit: '1mb' }));
-
-app.use(cookieParser());
-
+// 3. Request logging before parsers so malformed requests are logged.
 app.use(
   pinoHttp({
     level: env.logLevel,
-
     redact: {
       paths: [
         'req.headers.authorization',
@@ -63,18 +61,22 @@ app.use(
         'req.body.token',
         'req.body.csvContent',
       ],
-
       censor: '[REDACTED]',
     },
   }),
 );
 
-// Health endpoints remain outside API rate limiting.
+// 4. Request body and cookie parsing.
+app.use(express.json({ limit: '1mb' }));
+app.use(cookieParser());
+
+// 5. Health endpoints remain outside API rate limiting.
 app.use('/health', healthRoutes);
 
-// API-wide rate limiting.
+// 6. Apply rate limiting to versioned API routes.
 app.use('/api/v1', apiRateLimiter);
 
+// 7. API metadata.
 app.get('/api/v1/meta', (_req, res) => {
   res.status(200).json({
     success: true,
@@ -86,41 +88,43 @@ app.get('/api/v1/meta', (_req, res) => {
   });
 });
 
-// Authentication.
+// 8. Authentication.
 app.use('/api/v1/auth', authRoutes);
 
-// Notifications.
+// 9. Notifications.
 app.use('/api/v1/notifications', notificationRoutes);
 
-// Department management.
+// 10. Department management.
 app.use('/api/v1/departments', departmentRoutes);
 
-// Account provisioning: HOD creation.
+// 11. Account provisioning: HOD creation.
 app.use('/api/v1/provisioning', hodRoutes);
 
-// Faculty account provisioning.
+// 12. Faculty account provisioning.
 app.use('/api/v1/provisioning/faculty', facultyRoutes);
 
-// Batch management.
+// 13. Batch management.
 app.use('/api/v1/provisioning/batches', batchRoutes);
 
-// Section management.
+// 14. Section management.
 app.use('/api/v1/provisioning', sectionRoutes);
 
-// Mentor role and batch/section assignments.
+// 15. Mentor roles and batch/section assignments.
 app.use('/api/v1/provisioning', mentorRoutes);
 
-// Student account provisioning.
+// 16. Student account provisioning.
 app.use('/api/v1/provisioning', studentRoutes);
 
-// Bulk student import.
+// 17. Bulk student import.
 app.use('/api/v1/provisioning', studentImportRoutes);
 
-// Error handling.
+// 18. Handle student-upload-specific errors.
 app.use(studentUploadErrorMiddleware);
 
+// 19. Handle unmatched routes.
 app.use(notFoundHandler);
 
+// 20. Centralized fallback error handler — must remain last.
 app.use(errorHandler);
 
 export default app;
