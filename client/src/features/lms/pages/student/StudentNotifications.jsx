@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+
+import notificationService from '../../services/notificationService.js';
 
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
-import LoadingState from '../../components/LoadingState.jsx';
 
-import notificationService from '../../services/notificationService.js';
+const PAGE_SIZE = 20;
 
 const FILTER_OPTIONS = [
   { label: 'All notifications', value: 'all' },
@@ -14,7 +16,7 @@ const FILTER_OPTIONS = [
 ];
 
 function getNotificationId(notification) {
-  return notification?.id || notification?._id || null;
+  return String(notification?._id ?? notification?.id ?? '');
 }
 
 function isNotificationRead(notification) {
@@ -22,7 +24,9 @@ function isNotificationRead(notification) {
 }
 
 function formatDate(value) {
-  if (!value) return 'Date unavailable';
+  if (!value) {
+    return 'Date unavailable';
+  }
 
   const date = new Date(value);
 
@@ -36,76 +40,209 @@ function formatDate(value) {
   }).format(date);
 }
 
-function getErrorMessage(error) {
-  if (error?.response?.status === 401) {
-    return 'Your session has expired. Please sign in again.';
+function formatLabel(value) {
+  if (!value || typeof value !== 'string') {
+    return 'Notification';
   }
 
-  if (error?.response?.status === 403) {
-    return 'Your account does not currently have access to notifications.';
-  }
-
-  return error?.message || 'Unable to load notifications. Please try again.';
+  return value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
-function getPriorityClass(priority) {
+function getPriorityClasses(priority) {
   switch (priority) {
     case 'urgent':
-      return 'border-rose-400/20 bg-rose-400/10 text-rose-300';
+      return 'border-red-400/30 bg-red-400/10 text-red-300';
 
     case 'high':
-      return 'border-[#E5DF98]/20 bg-[#E5DF98]/10 text-[#E5DF98]';
+      return 'border-amber-300/30 bg-amber-300/10 text-amber-200';
+
+    case 'low':
+      return 'border-[#454650] bg-[#26272B] text-[#A5A6B0]';
 
     default:
-      return 'border-[#454650] bg-[#26272B] text-[#A5A6B0]';
+      return 'border-[#CDB5F7]/20 bg-[#CDB5F7]/10 text-[#CDB5F7]';
   }
+}
+
+function getErrorMessage(error, fallback) {
+  return (
+    error?.response?.data?.message ||
+    error?.message ||
+    fallback
+  );
+}
+
+function StatCard({ label, value, accent = false }) {
+  return (
+    <div className="rounded-2xl border border-[#343640] bg-[#202126] p-5">
+      <p className="text-sm text-[#A5A6B0]">{label}</p>
+
+      <p
+        className={`mt-3 text-3xl font-semibold ${
+          accent ? 'text-[#CDB5F7]' : 'text-[#EAEAE6]'
+        }`}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function NotificationItem({
+  notification,
+  onSelect,
+  onMarkAsRead,
+  markingId,
+}) {
+  const notificationId = getNotificationId(notification);
+  const read = isNotificationRead(notification);
+  const marking = markingId === notificationId;
+
+  return (
+    <article
+      className={`rounded-xl border p-4 transition-colors ${
+        read
+          ? 'border-[#343640] bg-[#202126]/60'
+          : 'border-[#CDB5F7]/25 bg-[#CDB5F7]/[0.04]'
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          aria-hidden="true"
+          className={`mt-2 h-2.5 w-2.5 shrink-0 rounded-full ${
+            read ? 'bg-[#777985]' : 'bg-[#CDB5F7]'
+          }`}
+        />
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="break-words text-sm font-semibold text-[#EAEAE6]">
+              {notification.title}
+            </h3>
+
+            {!read && (
+              <span className="rounded-full bg-[#CDB5F7]/10 px-2 py-1 text-xs font-medium text-[#CDB5F7]">
+                Unread
+              </span>
+            )}
+          </div>
+
+          <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-6 text-[#A5A6B0]">
+            {notification.message}
+          </p>
+
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-[#454650] px-2.5 py-1 text-xs text-[#A5A6B0]">
+              {formatLabel(notification.type)}
+            </span>
+
+            {notification.priority && (
+              <span
+                className={`rounded-full border px-2.5 py-1 text-xs ${getPriorityClasses(
+                  notification.priority,
+                )}`}
+              >
+                {formatLabel(notification.priority)} priority
+              </span>
+            )}
+          </div>
+
+          <p className="mt-3 text-xs text-[#777985]">
+            {formatDate(notification.createdAt)}
+          </p>
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => onSelect(notification)}
+              className="rounded-lg px-3 py-2 text-sm font-medium text-[#CDB5F7] transition hover:bg-[#CDB5F7]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+            >
+              View details
+            </button>
+
+            {!read && (
+              <button
+                type="button"
+                onClick={() => onMarkAsRead(notification)}
+                disabled={marking}
+                className="rounded-lg border border-[#454650] px-3 py-2 text-sm font-medium text-[#EAEAE6] transition hover:border-[#CDB5F7] hover:text-[#CDB5F7] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+              >
+                {marking ? 'Marking...' : 'Mark as read'}
+              </button>
+            )}
+
+            {notification.actionUrl && (
+              <Link
+                to={notification.actionUrl}
+                className="rounded-lg px-3 py-2 text-sm font-medium text-[#E5DF98] transition hover:bg-[#E5DF98]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#E5DF98]"
+              >
+                Open related page
+              </Link>
+            )}
+          </div>
+        </div>
+      </div>
+    </article>
+  );
 }
 
 export default function StudentNotifications() {
   const [notifications, setNotifications] = useState([]);
   const [pagination, setPagination] = useState(null);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [selectedNotification, setSelectedNotification] = useState(null);
 
-  const [isLoading, setIsLoading] = useState(true);
-  const [isMarkingAllRead, setIsMarkingAllRead] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [markingId, setMarkingId] = useState('');
+  const [markingAll, setMarkingAll] = useState(false);
 
-  const [errorMessage, setErrorMessage] = useState('');
+  const [error, setError] = useState('');
   const [actionError, setActionError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const loadNotifications = useCallback(async () => {
-    setIsLoading(true);
-    setErrorMessage('');
+    setLoading(true);
+    setError('');
 
     try {
-      const options = {
-        page: 1,
-        limit: 100,
-      };
+      const [listResult, unreadResult] = await Promise.all([
+        notificationService.getNotifications({
+          page: currentPage,
+          limit: PAGE_SIZE,
+          unreadOnly: activeFilter === 'unread' ? true : undefined,
+        }),
+        notificationService.getUnreadCount(),
+      ]);
 
-      if (activeFilter === 'unread') {
-        options.unreadOnly = true;
+      if (!listResult || !Array.isArray(listResult.items)) {
+        throw new Error(
+          'The server returned an invalid notifications list.',
+        );
       }
 
-      if (activeFilter === 'read') {
-        options.unreadOnly = false;
-      }
-
-      const result = await notificationService.getNotifications(options);
-
-      setNotifications(result.items);
-      setPagination(result.pagination);
-    } catch (error) {
-      setNotifications([]);
-      setPagination(null);
-      setErrorMessage(getErrorMessage(error));
+      setNotifications(listResult.items);
+      setPagination(listResult.pagination);
+      setUnreadCount(unreadResult);
+    } catch (requestError) {
+      setError(
+        getErrorMessage(
+          requestError,
+          'Unable to load notifications. Please try again.',
+        ),
+      );
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
-  }, [activeFilter]);
+  }, [activeFilter, currentPage]);
 
   useEffect(() => {
     loadNotifications();
@@ -115,75 +252,93 @@ export default function StudentNotifications() {
     const query = searchQuery.trim().toLowerCase();
 
     return notifications.filter((notification) => {
-      const title = String(notification.title || '').toLowerCase();
-      const message = String(notification.message || '').toLowerCase();
-
       const matchesSearch =
-        !query || title.includes(query) || message.includes(query);
+        !query ||
+        notification.title?.toLowerCase().includes(query) ||
+        notification.message?.toLowerCase().includes(query) ||
+        notification.type?.toLowerCase().includes(query);
 
-      const isRead = isNotificationRead(notification);
+      const read = isNotificationRead(notification);
 
       const matchesFilter =
         activeFilter === 'all' ||
-        (activeFilter === 'unread' && !isRead) ||
-        (activeFilter === 'read' && isRead);
+        (activeFilter === 'unread' && !read) ||
+        (activeFilter === 'read' && read);
 
       return matchesSearch && matchesFilter;
     });
   }, [notifications, searchQuery, activeFilter]);
 
-  const unreadCount = useMemo(
-    () => notifications.filter(
-      (notification) => !isNotificationRead(notification),
-    ).length,
-    [notifications],
-  );
+  const totalNotifications =
+    pagination && Number.isSafeInteger(pagination.total)
+      ? pagination.total
+      : notifications.length;
 
-  async function handleSelectNotification(notification) {
-    setSelectedNotification(notification);
+  const totalPages =
+    pagination && Number.isSafeInteger(pagination.totalPages)
+      ? pagination.totalPages
+      : 1;
+
+  const handleFilterChange = (event) => {
+    setActiveFilter(event.target.value);
+    setCurrentPage(1);
+    setSuccessMessage('');
     setActionError('');
+  };
 
-    if (isNotificationRead(notification)) {
-      return;
-    }
-
+  const handleMarkAsRead = async (notification) => {
     const notificationId = getNotificationId(notification);
 
-    if (!notificationId) {
-      setActionError('This notification has no valid identifier.');
+    if (!notificationId || isNotificationRead(notification)) {
       return;
     }
 
-    try {
-      const updated = await notificationService.markAsRead(notificationId);
+    setMarkingId(notificationId);
+    setActionError('');
+    setSuccessMessage('');
 
-      const updatedNotification = {
-        ...notification,
-        ...updated,
-        readAt: updated?.readAt || new Date().toISOString(),
-      };
+    try {
+      await notificationService.markAsRead(notificationId);
+
+      const readAt = new Date().toISOString();
 
       setNotifications((current) =>
         current.map((item) =>
           getNotificationId(item) === notificationId
-            ? updatedNotification
+            ? { ...item, readAt }
             : item,
         ),
       );
 
-      setSelectedNotification(updatedNotification);
-    } catch (error) {
-      setActionError(getErrorMessage(error));
-    }
-  }
+      setSelectedNotification((current) =>
+        current &&
+        getNotificationId(current) === notificationId
+          ? { ...current, readAt }
+          : current,
+      );
 
-  async function handleMarkAllAsRead() {
-    if (unreadCount === 0 || isMarkingAllRead) {
+      setUnreadCount((current) => Math.max(0, current - 1));
+      setSuccessMessage('Notification marked as read.');
+    } catch (requestError) {
+      setActionError(
+        getErrorMessage(
+          requestError,
+          'Unable to mark this notification as read.',
+        ),
+      );
+    } finally {
+      setMarkingId('');
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    if (unreadCount === 0 || markingAll) {
       return;
     }
 
-    setIsMarkingAllRead(true);
+    setMarkingAll(true);
     setActionError('');
+    setSuccessMessage('');
 
     try {
       await notificationService.markAllAsRead();
@@ -191,318 +346,277 @@ export default function StudentNotifications() {
       const readAt = new Date().toISOString();
 
       setNotifications((current) =>
-        current.map((notification) => ({
-          ...notification,
-          readAt: notification.readAt || readAt,
-        })),
+        current.map((notification) =>
+          isNotificationRead(notification)
+            ? notification
+            : { ...notification, readAt },
+        ),
       );
 
       setSelectedNotification((current) =>
-        current
-          ? {
-              ...current,
-              readAt: current.readAt || readAt,
-            }
-          : null,
+        current && !isNotificationRead(current)
+          ? { ...current, readAt }
+          : current,
       );
-    } catch (error) {
-      setActionError(getErrorMessage(error));
-    } finally {
-      setIsMarkingAllRead(false);
-    }
-  }
 
-  function resetFilters() {
+      setUnreadCount(0);
+      setSuccessMessage('All notifications marked as read.');
+    } catch (requestError) {
+      setActionError(
+        getErrorMessage(
+          requestError,
+          'Unable to mark all notifications as read.',
+        ),
+      );
+    } finally {
+      setMarkingAll(false);
+    }
+  };
+
+  const resetFilters = () => {
     setSearchQuery('');
     setActiveFilter('all');
-  }
+    setCurrentPage(1);
+    setSuccessMessage('');
+    setActionError('');
+  };
 
   return (
     <div className="mx-auto w-full max-w-[1200px] space-y-6">
       <PageHeader
-        eyebrow="STUDENT WORKSPACE"
+        eyebrow="Student Workspace"
         title="Notifications"
         description="View important updates and notifications related to your academic activities."
         breadcrumbs={[
           { label: 'Student', to: '/student/dashboard' },
           { label: 'Notifications' },
         ]}
-        actions={
-          <button
-            type="button"
-            onClick={handleMarkAllAsRead}
-            disabled={unreadCount === 0 || isMarkingAllRead || isLoading}
-            className={[
-              'inline-flex min-h-10 items-center justify-center rounded-xl',
-              'border border-[#454650] px-4 py-2 text-sm font-semibold',
-              'text-[#CDB5F7] transition-colors hover:border-[#CDB5F7]',
-              'disabled:cursor-not-allowed disabled:opacity-50',
-              'focus-visible:outline-none focus-visible:ring-2',
-              'focus-visible:ring-[#CDB5F7]',
-            ].join(' ')}
-          >
-            {isMarkingAllRead ? 'Marking as read…' : 'Mark all as read'}
-          </button>
-        }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
-          <p className="text-sm text-[#A5A6B0]">
-            Loaded notifications
-          </p>
+        <StatCard
+          label="Total notifications"
+          value={totalNotifications}
+        />
 
-          <p className="mt-3 text-3xl font-semibold text-[#EAEAE6]">
-            {isLoading ? '—' : notifications.length}
-          </p>
-
-          <p className="mt-2 text-xs text-[#858590]">
-            {pagination?.totalItems !== undefined
-              ? `${pagination.totalItems} total in your inbox`
-              : 'Notifications returned by the server'}
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
-          <p className="text-sm text-[#A5A6B0]">
-            Unread notifications
-          </p>
-
-          <p className="mt-3 text-3xl font-semibold text-[#CDB5F7]">
-            {isLoading ? '—' : unreadCount}
-          </p>
-
-          <p className="mt-2 text-xs text-[#858590]">
-            Notifications that still need your attention
-          </p>
-        </div>
+        <StatCard
+          label="Unread notifications"
+          value={unreadCount}
+          accent
+        />
       </div>
 
-      {errorMessage && (
-        <section
-          role="alert"
-          className="rounded-xl border border-rose-400/20 bg-[#1D1F27] p-5"
-        >
-          <h2 className="font-semibold text-[#EAEAE6]">
-            Could not load notifications
-          </h2>
-
-          <p className="mt-2 text-sm text-rose-200">
-            {errorMessage}
-          </p>
-
-          <button
-            type="button"
-            onClick={loadNotifications}
-            className="mt-4 rounded-lg border border-[#454650] px-4 py-2 text-sm font-semibold text-[#CDB5F7] hover:border-[#CDB5F7]"
-          >
-            Retry
-          </button>
-        </section>
-      )}
-
       {actionError && (
-        <p
+        <div
           role="alert"
-          className="rounded-xl border border-rose-400/20 bg-[#1D1F27] p-4 text-sm text-rose-200"
+          className="rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-sm text-red-300"
         >
           {actionError}
-        </p>
+        </div>
       )}
 
-      <SectionCard
-        title="Your Notifications"
-        description="Search your notifications and filter them by read status."
-      >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_220px]">
-          <div>
-            <label
-              htmlFor="notification-search"
-              className="mb-2 block text-sm font-medium text-[#EAEAE6]"
-            >
-              Search notifications
-            </label>
-
-            <input
-              id="notification-search"
-              type="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search by title or message..."
-              className={[
-                'w-full rounded-xl border border-[#3B3C43]',
-                'bg-[#26272B] px-4 py-3 text-sm text-[#EAEAE6]',
-                'placeholder:text-[#777985] focus:border-[#CDB5F7]',
-                'focus:outline-none focus:ring-2 focus:ring-[#CDB5F7]/20',
-              ].join(' ')}
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="notification-filter"
-              className="mb-2 block text-sm font-medium text-[#EAEAE6]"
-            >
-              Read status
-            </label>
-
-            <select
-              id="notification-filter"
-              value={activeFilter}
-              onChange={(event) => setActiveFilter(event.target.value)}
-              className={[
-                'w-full rounded-xl border border-[#3B3C43]',
-                'bg-[#26272B] px-4 py-3 text-sm text-[#EAEAE6]',
-                'focus:border-[#CDB5F7] focus:outline-none',
-                'focus:ring-2 focus:ring-[#CDB5F7]/20',
-              ].join(' ')}
-            >
-              {FILTER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
+      {successMessage && (
+        <div
+          role="status"
+          className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-300"
+        >
+          {successMessage}
         </div>
+      )}
 
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[#343640] pt-4">
-          <p className="text-sm text-[#A5A6B0]" aria-live="polite">
-            {isLoading
-              ? 'Loading notifications…'
-              : `${filteredNotifications.length} notifications shown`}
-          </p>
-
-          {(searchQuery || activeFilter !== 'all') && (
+      {error && (
+        <SectionCard
+          title="Unable to load notifications"
+          description={error}
+        >
+          <div className="flex flex-wrap gap-3">
             <button
               type="button"
-              onClick={resetFilters}
-              className="rounded-lg px-3 py-2 text-sm font-medium text-[#CDB5F7] transition hover:bg-[#CDB5F7]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+              onClick={loadNotifications}
+              className="rounded-xl bg-[#CDB5F7] px-4 py-2.5 text-sm font-semibold text-[#211A2B] transition hover:bg-[#DDCCFC] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
             >
-              Clear filters
+              Try again
             </button>
-          )}
-        </div>
-      </SectionCard>
-
-      <SectionCard
-        title="Notification Inbox"
-        description="Select a notification to view its details."
-      >
-        {isLoading ? (
-          <LoadingState
-            message="Loading your notifications"
-            rows={3}
-          />
-        ) : filteredNotifications.length === 0 ? (
-          <EmptyState
-            title={
-              errorMessage
-                ? 'Notifications unavailable'
-                : searchQuery || activeFilter !== 'all'
-                  ? 'No matching notifications'
-                  : "You're all caught up"
-            }
-            description={
-              errorMessage
-                ? 'Retry loading the inbox to check for new notifications.'
-                : searchQuery || activeFilter !== 'all'
-                  ? 'Try changing your search term or read-status filter.'
-                  : 'New notifications for your account will appear here.'
-            }
-            icon="♧"
-            action={
-              errorMessage ? (
-                <button
-                  type="button"
-                  onClick={loadNotifications}
-                  className="rounded-xl border border-[#3B3C43] px-4 py-2.5 text-sm font-medium text-[#EAEAE6] hover:bg-[#26272B]"
-                >
-                  Retry
-                </button>
-              ) : (searchQuery || activeFilter !== 'all') ? (
-                <button
-                  type="button"
-                  onClick={resetFilters}
-                  className="rounded-xl border border-[#3B3C43] px-4 py-2.5 text-sm font-medium text-[#EAEAE6] hover:bg-[#26272B]"
-                >
-                  Reset filters
-                </button>
-              ) : null
-            }
-          />
-        ) : (
-          <div className="divide-y divide-[#343640]">
-            {filteredNotifications.map((notification) => {
-              const notificationId = getNotificationId(notification);
-              const isRead = isNotificationRead(notification);
-
-              return (
-                <button
-                  key={notificationId}
-                  type="button"
-                  onClick={() => handleSelectNotification(notification)}
-                  className={[
-                    'flex w-full items-start gap-4 rounded-xl px-3 py-4',
-                    'text-left transition hover:bg-[#26272B]',
-                    'focus-visible:outline-none focus-visible:ring-2',
-                    'focus-visible:ring-inset focus-visible:ring-[#CDB5F7]',
-                  ].join(' ')}
-                >
-                  <span
-                    aria-hidden="true"
-                    className={[
-                      'mt-2 h-2.5 w-2.5 shrink-0 rounded-full',
-                      isRead ? 'bg-[#777985]' : 'bg-[#CDB5F7]',
-                    ].join(' ')}
-                  />
-
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="break-words font-medium text-[#EAEAE6]">
-                        {notification.title}
-                      </span>
-
-                      {!isRead && (
-                        <span className="rounded-full bg-[#CDB5F7]/10 px-2 py-1 text-xs font-medium text-[#CDB5F7]">
-                          Unread
-                        </span>
-                      )}
-
-                      {notification.priority &&
-                        ['high', 'urgent'].includes(notification.priority) && (
-                          <span
-                            className={[
-                              'rounded-full border px-2 py-1 text-xs font-medium',
-                              getPriorityClass(notification.priority),
-                            ].join(' ')}
-                          >
-                            {notification.priority}
-                          </span>
-                        )}
-                    </span>
-
-                    <span className="mt-1 block break-words text-sm leading-6 text-[#A5A6B0]">
-                      {notification.message}
-                    </span>
-
-                    <span className="mt-2 block text-xs text-[#777985]">
-                      {formatDate(notification.createdAt)}
-                    </span>
-                  </span>
-
-                  <span
-                    aria-hidden="true"
-                    className="shrink-0 text-[#A5A6B0]"
-                  >
-                    →
-                  </span>
-                </button>
-              );
-            })}
           </div>
-        )}
-      </SectionCard>
+        </SectionCard>
+      )}
+
+      {!error && (
+        <>
+          <SectionCard
+            title="Your Notifications"
+            description="Search notifications and filter them by read status."
+          >
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-[1fr_220px]">
+              <div>
+                <label
+                  htmlFor="notification-search"
+                  className="mb-2 block text-sm font-medium text-[#EAEAE6]"
+                >
+                  Search notifications
+                </label>
+
+                <input
+                  id="notification-search"
+                  type="search"
+                  value={searchQuery}
+                  onChange={(event) => setSearchQuery(event.target.value)}
+                  placeholder="Search by title, message, or type..."
+                  className="w-full rounded-xl border border-[#3B3C43] bg-[#26272B] px-4 py-3 text-sm text-[#EAEAE6] placeholder:text-[#777985] focus:border-[#CDB5F7] focus:outline-none focus:ring-2 focus:ring-[#CDB5F7]/20"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="notification-filter"
+                  className="mb-2 block text-sm font-medium text-[#EAEAE6]"
+                >
+                  Read status
+                </label>
+
+                <select
+                  id="notification-filter"
+                  value={activeFilter}
+                  onChange={handleFilterChange}
+                  className="w-full rounded-xl border border-[#3B3C43] bg-[#26272B] px-4 py-3 text-sm text-[#EAEAE6] focus:border-[#CDB5F7] focus:outline-none focus:ring-2 focus:ring-[#CDB5F7]/20"
+                >
+                  {FILTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-5 flex flex-col gap-3 border-t border-[#343640] pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p
+                className="text-sm text-[#A5A6B0]"
+                aria-live="polite"
+              >
+                {loading
+                  ? 'Loading notifications...'
+                  : `${filteredNotifications.length} notifications shown on this page`}
+              </p>
+
+              <div className="flex flex-wrap gap-2">
+                {unreadCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAllAsRead}
+                    disabled={markingAll || loading}
+                    className="rounded-xl border border-[#454650] px-3 py-2 text-sm font-medium text-[#EAEAE6] transition hover:border-[#CDB5F7] hover:text-[#CDB5F7] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                  >
+                    {markingAll
+                      ? 'Marking all...'
+                      : 'Mark all as read'}
+                  </button>
+                )}
+
+                {(searchQuery || activeFilter !== 'all') && (
+                  <button
+                    type="button"
+                    onClick={resetFilters}
+                    className="rounded-xl px-3 py-2 text-sm font-medium text-[#CDB5F7] transition hover:bg-[#CDB5F7]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                  >
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="Notification Inbox"
+            description="Select a notification to view its details."
+          >
+            {loading ? (
+              <div
+                role="status"
+                aria-live="polite"
+                className="flex items-center gap-3 py-8 text-sm text-[#A5A6B0]"
+              >
+                <span
+                  aria-hidden="true"
+                  className="h-5 w-5 animate-spin rounded-full border-2 border-[#CDB5F7] border-r-transparent motion-reduce:animate-none"
+                />
+                Loading your notifications...
+              </div>
+            ) : filteredNotifications.length === 0 ? (
+              <EmptyState
+                title={
+                  searchQuery || activeFilter !== 'all'
+                    ? 'No matching notifications'
+                    : 'You are all caught up'
+                }
+                description={
+                  searchQuery || activeFilter !== 'all'
+                    ? 'Try changing your search term or read-status filter.'
+                    : 'Notifications will appear here when they become available for your account.'
+                }
+                icon="♧"
+                action={
+                  (searchQuery || activeFilter !== 'all') && (
+                    <button
+                      type="button"
+                      onClick={resetFilters}
+                      className="rounded-xl border border-[#3B3C43] px-4 py-2.5 text-sm font-medium text-[#EAEAE6] transition hover:bg-[#26272B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                    >
+                      Reset filters
+                    </button>
+                  )
+                }
+              />
+            ) : (
+              <div className="space-y-3">
+                {filteredNotifications.map((notification) => (
+                  <NotificationItem
+                    key={getNotificationId(notification)}
+                    notification={notification}
+                    onSelect={setSelectedNotification}
+                    onMarkAsRead={handleMarkAsRead}
+                    markingId={markingId}
+                  />
+                ))}
+              </div>
+            )}
+
+            {!loading && !error && totalPages > 1 && (
+              <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[#343640] pt-4">
+                <p className="text-sm text-[#A5A6B0]">
+                  Page {currentPage} of {totalPages}
+                </p>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCurrentPage((page) => Math.max(1, page - 1))
+                    }
+                    disabled={currentPage <= 1}
+                    className="rounded-xl border border-[#454650] px-4 py-2 text-sm font-medium text-[#EAEAE6] transition hover:border-[#CDB5F7] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                  >
+                    Previous
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCurrentPage((page) =>
+                        Math.min(totalPages, page + 1),
+                      )
+                    }
+                    disabled={currentPage >= totalPages}
+                    className="rounded-xl border border-[#454650] px-4 py-2 text-sm font-medium text-[#EAEAE6] transition hover:border-[#CDB5F7] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </SectionCard>
+        </>
+      )}
 
       {selectedNotification && (
         <div
@@ -537,31 +651,28 @@ export default function StudentNotifications() {
                 type="button"
                 onClick={() => setSelectedNotification(null)}
                 aria-label="Close notification details"
-                className="rounded-lg px-3 py-2 text-[#A5A6B0] hover:bg-[#343640] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                className="rounded-lg px-3 py-2 text-[#A5A6B0] transition hover:bg-[#343640] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
               >
                 ✕
               </button>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              {selectedNotification.type && (
-                <span className="rounded-full border border-[#454650] bg-[#26272B] px-2.5 py-1 text-xs capitalize text-[#A5A6B0]">
-                  {selectedNotification.type}
-                </span>
-              )}
+              <span className="rounded-full border border-[#454650] px-2.5 py-1 text-xs text-[#A5A6B0]">
+                {formatLabel(selectedNotification.type)}
+              </span>
 
               {selectedNotification.priority && (
                 <span
-                  className={[
-                    'rounded-full border px-2.5 py-1 text-xs font-medium',
-                    getPriorityClass(selectedNotification.priority),
-                  ].join(' ')}
+                  className={`rounded-full border px-2.5 py-1 text-xs ${getPriorityClasses(
+                    selectedNotification.priority,
+                  )}`}
                 >
-                  {selectedNotification.priority}
+                  {formatLabel(selectedNotification.priority)} priority
                 </span>
               )}
 
-              <span className="rounded-full border border-[#454650] bg-[#26272B] px-2.5 py-1 text-xs text-[#A5A6B0]">
+              <span className="rounded-full border border-[#454650] px-2.5 py-1 text-xs text-[#A5A6B0]">
                 {isNotificationRead(selectedNotification) ? 'Read' : 'Unread'}
               </span>
             </div>
@@ -571,10 +682,31 @@ export default function StudentNotifications() {
             </p>
 
             <p className="mt-4 text-xs text-[#777985]">
-              {formatDate(selectedNotification.createdAt)}
+              Received: {formatDate(selectedNotification.createdAt)}
             </p>
 
-            <div className="mt-6 flex justify-end">
+            {selectedNotification.readAt && (
+              <p className="mt-2 text-xs text-[#777985]">
+                Read: {formatDate(selectedNotification.readAt)}
+              </p>
+            )}
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              {!isNotificationRead(selectedNotification) && (
+                <button
+                  type="button"
+                  onClick={() => handleMarkAsRead(selectedNotification)}
+                  disabled={
+                    markingId === getNotificationId(selectedNotification)
+                  }
+                  className="rounded-xl border border-[#454650] px-4 py-2.5 text-sm font-medium text-[#EAEAE6] transition hover:border-[#CDB5F7] hover:text-[#CDB5F7] disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                >
+                  {markingId === getNotificationId(selectedNotification)
+                    ? 'Marking...'
+                    : 'Mark as read'}
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => setSelectedNotification(null)}

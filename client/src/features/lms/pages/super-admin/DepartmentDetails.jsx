@@ -107,6 +107,33 @@ function getHodEmail(hod) {
   return hod.email || '';
 }
 
+function getHodDepartmentId(hod) {
+  if (!hod || typeof hod === 'string') {
+    return '';
+  }
+
+  const department = hod.department;
+
+  if (typeof department === 'string') {
+    return department;
+  }
+
+  return department?._id || department?.id || '';
+}
+
+function getHodDepartmentName(hod) {
+  if (
+    !hod
+    || typeof hod !== 'object'
+    || !hod.department
+    || typeof hod.department !== 'object'
+  ) {
+    return '';
+  }
+
+  return hod.department.name || hod.department.code || '';
+}
+
 function formatDate(value) {
   if (!value) {
     return 'Not available';
@@ -264,6 +291,38 @@ export default function DepartmentDetails() {
 
     if (!hasAssignmentChanges || isSubmitting) {
       return;
+    }
+
+    const selectedHod = hods.find(
+      (hod) => (hod._id || hod.id) === selectedHodId,
+    );
+
+    const selectedHodDepartmentId = getHodDepartmentId(selectedHod);
+
+    /*
+     * An HOD assigned to another department can be selected here.
+     * Require explicit confirmation before submitting the transfer.
+     */
+    if (
+      selectedHodId
+      && selectedHodDepartmentId
+      && selectedHodDepartmentId !== departmentId
+    ) {
+      const previousDepartmentName = getHodDepartmentName(selectedHod);
+
+      const previousDepartmentLabel = previousDepartmentName
+        ? `the department "${previousDepartmentName}"`
+        : 'its current department';
+
+      const confirmedTransfer = window.confirm(
+        `${getHodName(selectedHod)} is currently assigned to ${previousDepartmentLabel}. `
+        + `Transfer this HOD to "${department.name || 'this department'}"? `
+        + 'The previous department will become unassigned, and neither the department nor HOD account will be deleted.',
+      );
+
+      if (!confirmedTransfer) {
+        return;
+      }
     }
 
     setAssignmentError('');
@@ -642,20 +701,13 @@ export default function DepartmentDetails() {
 
               {hods.map((hod) => {
                 const id = hod._id || hod.id;
-                const departmentValue = hod.department;
-                const assignedDepartmentId =
-                  typeof departmentValue === 'string'
-                    ? departmentValue
-                    : departmentValue?._id || departmentValue?.id || '';
+                const assignedDepartmentId = getHodDepartmentId(hod);
+                const assignedDepartmentName = getHodDepartmentName(hod);
 
-                const assignedDepartmentName =
-                  typeof departmentValue === 'object'
-                    ? departmentValue?.name
-                    : '';
-
-                const isAssignedElsewhere =
+                const isAssignedElsewhere = (
                   assignedDepartmentId
-                  && assignedDepartmentId !== departmentId;
+                  && assignedDepartmentId !== departmentId
+                );
 
                 const isCurrentHod = id === currentHodId;
 
@@ -663,14 +715,13 @@ export default function DepartmentDetails() {
                   <option
                     key={id}
                     value={id}
-                    disabled={Boolean(isAssignedElsewhere)}
                   >
                     {getHodName(hod)}
                     {hod.email ? ` — ${hod.email}` : ''}
                     {isCurrentHod
                       ? ' (Currently assigned)'
                       : isAssignedElsewhere
-                        ? ` (Assigned to ${assignedDepartmentName || 'another department'})`
+                        ? ` (Transfer from ${assignedDepartmentName || 'another department'})`
                         : ''}
                   </option>
                 );
@@ -678,9 +729,10 @@ export default function DepartmentDetails() {
             </select>
 
             <p className="mt-2 text-xs leading-5 text-[#92929F]">
-              Only active HOD accounts are listed. An HOD already assigned
-              to another department is disabled here; transfer them by
-              managing the assignment on their current department first.
+              Only active HOD accounts are listed. You can select an HOD
+              assigned to another department to transfer them here. A
+              confirmation will appear before the transfer is submitted;
+              the previous department will become unassigned.
             </p>
           </div>
 

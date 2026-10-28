@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import api from '../../../auth/services/api/axios.js';
@@ -20,7 +20,28 @@ function getErrorMessage(error) {
   return (
     error?.response?.data?.message ||
     error?.message ||
-    'Unable to create the HOD account. Please try again.'
+    'Unable to complete the request. Please try again.'
+  );
+}
+
+function normalizeDepartment(record) {
+  if (!record || typeof record !== 'object') {
+    return null;
+  }
+
+  return {
+    id: record.id || record._id || '',
+    name: record.name || '',
+    code: record.code || '',
+    status: record.status || '',
+    hod: record.hod || null,
+  };
+}
+
+function isAvailableDepartment(department) {
+  return (
+    department.status === 'ACTIVE' &&
+    !department.hod
   );
 }
 
@@ -30,7 +51,63 @@ export default function CreateHod() {
   const [form, setForm] = useState(INITIAL_FORM);
   const [errors, setErrors] = useState({});
   const [submitError, setSubmitError] = useState('');
+  const [departments, setDepartments] = useState([]);
+  const [departmentLoadError, setDepartmentLoadError] = useState('');
+  const [isLoadingDepartments, setIsLoadingDepartments] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const loadDepartments = useCallback(async () => {
+    setIsLoadingDepartments(true);
+    setDepartmentLoadError('');
+
+    try {
+      const response = await api.get('/v1/departments');
+      const records = response?.data?.data;
+
+      if (!Array.isArray(records)) {
+        throw new Error(
+          'The server returned an unexpected department list response.',
+        );
+      }
+
+      const normalizedDepartments = records
+        .map(normalizeDepartment)
+        .filter(Boolean);
+
+      setDepartments(normalizedDepartments);
+
+      setForm((current) => {
+        const selectedDepartment = normalizedDepartments.find(
+          (department) => department.id === current.departmentId,
+        );
+
+        if (
+          selectedDepartment &&
+          isAvailableDepartment(selectedDepartment)
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          departmentId: '',
+        };
+      });
+    } catch (error) {
+      setDepartments([]);
+      setDepartmentLoadError(getErrorMessage(error));
+    } finally {
+      setIsLoadingDepartments(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDepartments();
+  }, [loadDepartments]);
+
+  const availableDepartments = departments.filter(
+    isAvailableDepartment,
+  );
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -51,31 +128,55 @@ export default function CreateHod() {
   function validateForm() {
     const nextErrors = {};
 
-    if (!form.departmentId.trim()) {
-      nextErrors.departmentId = 'Department ID is required.';
+    const selectedDepartment = availableDepartments.find(
+      (department) => department.id === form.departmentId,
+    );
+
+    if (!form.departmentId) {
+      nextErrors.departmentId = 'Select a department.';
+    } else if (!selectedDepartment) {
+      nextErrors.departmentId =
+        'Select an active department without an assigned HOD.';
     }
 
-    if (!form.institutionalId.trim()) {
+    const institutionalId = form.institutionalId.trim();
+    const fullName = form.fullName.trim();
+    const email = form.email.trim();
+
+    if (!institutionalId) {
       nextErrors.institutionalId = 'Institutional ID is required.';
+    } else if (
+      institutionalId.length < 2 ||
+      institutionalId.length > 50
+    ) {
+      nextErrors.institutionalId =
+        'Institutional ID must contain between 2 and 50 characters.';
     }
 
-    if (!form.fullName.trim()) {
+    if (!fullName) {
       nextErrors.fullName = 'Full name is required.';
+    } else if (fullName.length < 2 || fullName.length > 100) {
+      nextErrors.fullName =
+        'Full name must contain between 2 and 100 characters.';
     }
 
-    if (!form.email.trim()) {
+    if (!email) {
       nextErrors.email = 'Email address is required.';
     } else if (
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
+      email.length > 254 ||
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
     ) {
       nextErrors.email = 'Enter a valid email address.';
     }
 
     if (!form.password) {
-      nextErrors.password = 'Password is required.';
-    } else if (form.password.length < 8) {
+      nextErrors.password = 'Initial password is required.';
+    } else if (
+      form.password.length < 8 ||
+      form.password.length > 72
+    ) {
       nextErrors.password =
-        'Password must contain at least 8 characters.';
+        'Password must contain between 8 and 72 characters.';
     }
 
     setErrors(nextErrors);
@@ -87,7 +188,7 @@ export default function CreateHod() {
     event.preventDefault();
     setSubmitError('');
 
-    if (!validateForm()) {
+    if (isSubmitting || !validateForm()) {
       return;
     }
 
@@ -96,12 +197,12 @@ export default function CreateHod() {
     try {
       await api.post(
         `/v1/provisioning/departments/${encodeURIComponent(
-          form.departmentId.trim(),
+          form.departmentId,
         )}/hod`,
         {
           institutionalId: form.institutionalId.trim(),
           fullName: form.fullName.trim(),
-          email: form.email.trim(),
+          email: form.email.trim().toLowerCase(),
           password: form.password,
         },
       );
@@ -143,7 +244,7 @@ export default function CreateHod() {
       <SectionCard
         eyebrow="ACCOUNT PROVISIONING"
         title="HOD information"
-        description="Provide the department identifier and the new HOD's institutional account details."
+        description="Select an available department and enter the new HOD's institutional account details."
       >
         <form
           onSubmit={handleSubmit}
@@ -159,18 +260,102 @@ export default function CreateHod() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-            <FormField
-              label="Department ID"
+          {departmentLoadError && (
+            <div
+              role="alert"
+              className="rounded-xl border border-[#B86D78]/40 bg-[#B86D78]/10 p-4"
+            >
+              <p className="text-sm leading-6 text-[#E9A5AE]">
+                Unable to load departments: {departmentLoadError}
+              </p>
+
+              <div className="mt-3">
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  onClick={loadDepartments}
+                  disabled={isLoadingDepartments || isSubmitting}
+                >
+                  Retry department loading
+                </ActionButton>
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label
+              htmlFor="departmentId"
+              className="mb-2 block text-sm font-medium text-[#EAEAE6]"
+            >
+              Department <span className="text-[#E9A5AE]">*</span>
+            </label>
+
+            <select
+              id="departmentId"
               name="departmentId"
               value={form.departmentId}
               onChange={handleChange}
-              placeholder="Enter the existing department ID"
-              required
-              error={errors.departmentId}
-              autoComplete="off"
-            />
+              disabled={
+                isLoadingDepartments ||
+                Boolean(departmentLoadError) ||
+                isSubmitting ||
+                availableDepartments.length === 0
+              }
+              aria-invalid={Boolean(errors.departmentId)}
+              aria-describedby={
+                errors.departmentId
+                  ? 'departmentId-error'
+                  : 'departmentId-help'
+              }
+              className="min-h-12 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-4 py-3 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="">
+                {isLoadingDepartments
+                  ? 'Loading departments...'
+                  : availableDepartments.length > 0
+                    ? 'Select a department'
+                    : 'No eligible departments available'}
+              </option>
 
+              {availableDepartments.map((department) => (
+                <option
+                  key={department.id}
+                  value={department.id}
+                >
+                  {department.name} ({department.code})
+                </option>
+              ))}
+            </select>
+
+            {errors.departmentId && (
+              <p
+                id="departmentId-error"
+                role="alert"
+                className="mt-2 text-xs leading-5 text-[#E9A5AE]"
+              >
+                {errors.departmentId}
+              </p>
+            )}
+
+            {!errors.departmentId && (
+              <p
+                id="departmentId-help"
+                className="mt-2 text-xs leading-5 text-[#92929F]"
+              >
+                Only active departments without an assigned HOD are shown.
+              </p>
+            )}
+
+            {!isLoadingDepartments &&
+              !departmentLoadError &&
+              departments.length === 0 && (
+                <p className="mt-2 text-xs leading-5 text-[#E5DF98]">
+                  Create a department first before provisioning its HOD.
+                </p>
+              )}
+          </div>
+
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <FormField
               label="Institutional ID"
               name="institutionalId"
@@ -180,6 +365,7 @@ export default function CreateHod() {
               required
               error={errors.institutionalId}
               autoComplete="off"
+              maxLength={50}
             />
 
             <FormField
@@ -191,7 +377,7 @@ export default function CreateHod() {
               required
               error={errors.fullName}
               autoComplete="name"
-              maxLength={120}
+              maxLength={100}
             />
 
             <FormField
@@ -207,7 +393,7 @@ export default function CreateHod() {
               maxLength={254}
             />
 
-            <div className="md:col-span-2">
+            <div>
               <FormField
                 label="Initial password"
                 name="password"
@@ -218,26 +404,25 @@ export default function CreateHod() {
                 required
                 error={errors.password}
                 autoComplete="new-password"
-                maxLength={128}
+                maxLength={72}
               />
 
               <p className="mt-2 text-xs leading-5 text-[#92929F]">
-                Use a strong password that meets your institution's
-                security requirements.
+                Choose a strong initial password. The HOD can update
+                their profile name after signing in.
               </p>
             </div>
           </div>
 
           <div className="rounded-xl border border-[#CDB5F7]/15 bg-[#CDB5F7]/5 p-4">
             <p className="text-sm font-medium text-[#CDB5F7]">
-              Before creating the account
+              Department assignment
             </p>
 
             <p className="mt-1 text-xs leading-5 text-[#A5A6B0]">
-              Ensure the department ID belongs to an existing department.
-              This form does not fetch department records because the
-              current backend does not expose a department listing
-              endpoint.
+              Each department can have only one assigned HOD. The server
+              validates department availability again when the account
+              is created.
             </p>
           </div>
 
@@ -254,7 +439,11 @@ export default function CreateHod() {
             <ActionButton
               type="submit"
               loading={isSubmitting}
-              disabled={isSubmitting}
+              disabled={
+                isSubmitting ||
+                isLoadingDepartments ||
+                Boolean(departmentLoadError)
+              }
             >
               Create HOD account
             </ActionButton>

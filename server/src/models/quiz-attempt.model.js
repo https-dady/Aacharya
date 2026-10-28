@@ -19,6 +19,12 @@ const quizAttemptAnswerSchema = new Schema(
       type: Number,
       default: null,
       min: 0,
+      validate: {
+        validator(value) {
+          return value === null || Number.isInteger(value);
+        },
+        message: 'Selected option index must be an integer.',
+      },
     },
 
     answeredAt: {
@@ -138,6 +144,7 @@ quizAttemptSchema.pre('validate', function validateQuizAttempt() {
   if (
     this.score !== null &&
     this.score !== undefined &&
+    this.totalMarks !== undefined &&
     this.score > this.totalMarks
   ) {
     this.invalidate(
@@ -155,12 +162,22 @@ quizAttemptSchema.pre('validate', function validateQuizAttempt() {
       'A submitted attempt must have a submission timestamp.',
     );
   }
+
+  if (
+    this.status === QUIZ_ATTEMPT_STATUSES.IN_PROGRESS &&
+    this.submittedAt
+  ) {
+    this.invalidate(
+      'submittedAt',
+      'An in-progress attempt cannot have a submission timestamp.',
+    );
+  }
 });
 
-export {
-  QUIZ_ATTEMPT_STATUSES,
-  QuizAttempt,
-};
-
-export const QuizAttempt =
+const QuizAttempt =
   models.QuizAttempt || model('QuizAttempt', quizAttemptSchema);
+
+export {
+  QuizAttempt,
+  QUIZ_ATTEMPT_STATUSES,
+};

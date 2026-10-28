@@ -48,19 +48,36 @@ export default function CreateDepartment() {
 
   function validateForm() {
     const nextErrors = {};
+    const normalizedName = form.name.trim();
+    const normalizedCode = form.code.trim();
+    const normalizedDescription = form.description.trim();
 
-    if (!form.name.trim()) {
+    if (!normalizedName) {
       nextErrors.name = 'Department name is required.';
+    } else if (normalizedName.length < 2) {
+      nextErrors.name =
+        'Department name must contain at least 2 characters.';
+    } else if (normalizedName.length > 120) {
+      nextErrors.name =
+        'Department name must not exceed 120 characters.';
     }
 
-    if (!form.code.trim()) {
+    if (!normalizedCode) {
       nextErrors.code = 'Department code is required.';
-    } else if (!/^[A-Za-z0-9_-]+$/.test(form.code.trim())) {
+    } else if (normalizedCode.length < 2) {
       nextErrors.code =
-        'Use only letters, numbers, hyphens or underscores.';
+        'Department code must contain at least 2 characters.';
+    } else if (normalizedCode.length > 20) {
+      nextErrors.code =
+        'Department code must not exceed 20 characters.';
+    } else if (
+      !/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(normalizedCode)
+    ) {
+      nextErrors.code =
+        'Use letters and numbers, with single hyphens between segments. Underscores and spaces are not allowed.';
     }
 
-    if (form.description.length > 500) {
+    if (normalizedDescription.length > 500) {
       nextErrors.description =
         'Description must not exceed 500 characters.';
     }
@@ -74,7 +91,7 @@ export default function CreateDepartment() {
     event.preventDefault();
     setSubmitError('');
 
-    if (!validateForm()) {
+    if (isSubmitting || !validateForm()) {
       return;
     }
 
@@ -158,7 +175,7 @@ export default function CreateDepartment() {
               name="code"
               value={form.code}
               onChange={handleChange}
-              placeholder="e.g. CSE"
+              placeholder="e.g. CSE or AI-DS"
               required
               error={errors.code}
               maxLength={20}

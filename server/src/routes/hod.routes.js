@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
 
-import { createHodController } from '../controllers/hod.controller.js';
+import {
+  createHodController,
+  getHodDetailsController,
+  listHodsController,
+} from '../controllers/hod.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
@@ -26,6 +31,35 @@ const createHodSchema = z.object({
   }).strict(),
 });
 
+const hodDetailsSchema = z.object({
+  params: z.object({
+    hodId: z.string().regex(
+      /^[a-f\d]{24}$/i,
+      'A valid HOD account ID is required.',
+    ),
+  }).strict(),
+});
+
+// List HOD accounts for the Super Admin directory.
+hodRouter.get(
+  '/hods',
+  authenticate,
+  authorize('SUPER_ADMIN'),
+  authRateLimiter,
+  listHodsController,
+);
+
+// Retrieve details for one HOD account.
+hodRouter.get(
+  '/hods/:hodId',
+  authenticate,
+  authorize('SUPER_ADMIN'),
+  authRateLimiter,
+  validate(hodDetailsSchema),
+  getHodDetailsController,
+);
+
+// Create an HOD account and assign it to a department.
 hodRouter.post(
   '/departments/:departmentId/hod',
   authenticate,

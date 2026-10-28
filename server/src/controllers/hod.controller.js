@@ -20,6 +20,93 @@ function createError(statusCode, code, message) {
   return error;
 }
 
+/**
+ * List HOD accounts for the Super Admin directory.
+ *
+ * Returns actual HOD user records and their associated department
+ * information. Password hashes and authentication secrets are not
+ * included in the selected fields.
+ */
+export async function listHodsController(req, res, next) {
+  try {
+    const currentUser = await User.findById(req.user?.id)
+      .select('role status')
+      .exec();
+
+    if (
+      !currentUser
+      || currentUser.status !== ACCOUNT_STATUSES.ACTIVE
+      || currentUser.role !== USER_ROLES.SUPER_ADMIN
+    ) {
+      return next(
+        createError(
+          currentUser ? 403 : 401,
+          currentUser ? 'FORBIDDEN' : 'UNAUTHORIZED',
+          'Only an active Super Admin can view HOD accounts.',
+        ),
+      );
+    }
+
+    const hods = await User.find({
+      role: USER_ROLES.HOD,
+    })
+      .select(
+        [
+          'institutionalId',
+          'fullName',
+          'email',
+          'role',
+          'status',
+          'department',
+          'isEmailVerified',
+          'createdAt',
+          'updatedAt',
+        ].join(' '),
+      )
+      .populate({
+        path: 'department',
+        select: 'name code status',
+      })
+      .sort({
+        createdAt: -1,
+        _id: -1,
+      })
+      .lean()
+      .exec();
+
+    const records = hods.map((hod) => ({
+      id: String(hod._id),
+      institutionalId: hod.institutionalId,
+      fullName: hod.fullName,
+      email: hod.email || '',
+      role: hod.role,
+      status: hod.status,
+      department: hod.department
+        ? {
+            id: String(hod.department._id),
+            name: hod.department.name,
+            code: hod.department.code,
+            status: hod.department.status,
+          }
+        : null,
+      isEmailVerified: hod.isEmailVerified,
+      createdAt: hod.createdAt,
+      updatedAt: hod.updatedAt,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: 'HOD accounts retrieved successfully.',
+      data: {
+        hods: records,
+        total: records.length,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 export async function createHodController(req, res, next) {
   let createdHodId = null;
 
@@ -138,8 +225,8 @@ export async function createHodController(req, res, next) {
 
     createdHodId = hod._id;
 
-    // Atomically assign the HOD only if the department is still
-    // active and does not already have an assigned HOD.
+    // Assign the HOD only if the department remains active and
+    // has not already received an HOD assignment.
     const assignedDepartment = await Department.findOneAndUpdate(
       {
         _id: department._id,
@@ -158,7 +245,10 @@ export async function createHodController(req, res, next) {
     ).exec();
 
     if (!assignedDepartment) {
-      await User.deleteOne({ _id: hod._id }).exec();
+      await User.deleteOne({
+        _id: hod._id,
+      }).exec();
+
       createdHodId = null;
 
       const latestDepartment = await Department.findById(
@@ -217,8 +307,8 @@ export async function createHodController(req, res, next) {
       },
     });
   } catch (error) {
-    // Compensating cleanup if account creation succeeded but
-    // the department assignment failed unexpectedly.
+    // Attempt cleanup if account creation succeeded but the
+    // department assignment failed unexpectedly.
     if (createdHodId) {
       try {
         await User.deleteOne({
@@ -236,6 +326,101 @@ export async function createHodController(req, res, next) {
         'An account with this institutional ID or email already exists.';
     }
 
+    return next(error);
+  }
+}
+export async function getHodDetailsController(req, res, next) {
+  try {
+    const currentUser = await User.findById(req.user?.id)
+      .select('role status')
+      .exec();
+
+    if (
+      !currentUser ||
+      currentUser.status !== ACCOUNT_STATUSES.ACTIVE ||
+      currentUser.role !== USER_ROLES.SUPER_ADMIN
+    ) {
+      return next(
+        createError(
+          currentUser ? 403 : 401,
+          currentUser ? 'FORBIDDEN' : 'UNAUTHORIZED',
+          'Only an active Super Admin can view HOD account details.',
+        ),
+      );
+    }
+
+    const { hodId } = req.params;
+
+    if (!mongoose.isValidObjectId(hodId)) {
+      return next(
+        createError(
+          400,
+          'INVALID_HOD_ID',
+          'A valid HOD account ID is required.',
+        ),
+      );
+    }
+
+    const hod = await User.findOne({
+      _id: hodId,
+      role: USER_ROLES.HOD,
+    })
+      .select(
+        [
+          'institutionalId',
+          'fullName',
+          'email',
+          'role',
+          'status',
+          'department',
+          'isEmailVerified',
+          'createdAt',
+          'updatedAt',
+        ].join(' '),
+      )
+      .populate({
+        path: 'department',
+        select: 'name code status',
+      })
+      .lean()
+      .exec();
+
+    if (!hod) {
+      return next(
+        createError(
+          404,
+          'HOD_NOT_FOUND',
+          'The requested HOD account was not found.',
+        ),
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'HOD account details retrieved successfully.',
+      data: {
+        hod: {
+          id: String(hod._id),
+          institutionalId: hod.institutionalId,
+          fullName: hod.fullName,
+          email: hod.email || '',
+          role: hod.role,
+          status: hod.status,
+          department: hod.department
+            ? {
+                id: String(hod.department._id),
+                name: hod.department.name,
+                code: hod.department.code,
+                status: hod.department.status,
+              }
+            : null,
+          isEmailVerified: hod.isEmailVerified,
+          createdAt: hod.createdAt,
+          updatedAt: hod.updatedAt,
+        },
+      },
+    });
+  } catch (error) {
     return next(error);
   }
 }

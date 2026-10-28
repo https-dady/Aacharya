@@ -1,5 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+
+import api from '../../../auth/services/api/axios.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import DataTable from '../../components/DataTable.jsx';
@@ -27,19 +29,74 @@ function SuccessIcon() {
   );
 }
 
+function normalizeDepartment(department) {
+  return {
+    id: String(department.id ?? department._id ?? ''),
+    name: department.name ?? '',
+    code: department.code ?? '',
+    description: department.description ?? '',
+    status: String(department.status ?? 'unknown').toLowerCase(),
+    hod: department.hod
+      ? {
+        id: String(department.hod.id ?? department.hod._id ?? ''),
+        fullName:
+          department.hod.fullName ??
+          department.hod.name ??
+          '',
+        institutionalId: department.hod.institutionalId ?? '',
+        email: department.hod.email ?? '',
+        status: department.hod.status ?? '',
+      }
+      : null,
+    createdAt: department.createdAt ?? null,
+    updatedAt: department.updatedAt ?? null,
+  };
+}
+
+function getErrorMessage(error) {
+  return (
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unable to load departments. Please try again.'
+  );
+}
+
 function DepartmentList() {
   const navigate = useNavigate();
   const location = useLocation();
 
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [departments, setDepartments] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
-  /*
-   * The current backend does not expose a department listing endpoint.
-   * Keep this empty until a supported GET endpoint is available.
-   * Do not insert fake department records.
-   */
-  const departments = [];
+  const loadDepartments = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError('');
+
+    try {
+      const response = await api.get('/v1/departments');
+      const body = response?.data;
+
+      if (!body?.success || !Array.isArray(body.data)) {
+        throw new Error(
+          'The server returned an invalid department directory response.',
+        );
+      }
+
+      setDepartments(body.data.map(normalizeDepartment));
+    } catch (error) {
+      setDepartments([]);
+      setLoadError(getErrorMessage(error));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDepartments();
+  }, [loadDepartments]);
 
   const notice =
     typeof location.state?.notice === 'string'
@@ -56,6 +113,7 @@ function DepartmentList() {
           department.name,
           department.code,
           department.description,
+          department.hod?.fullName,
         ].some((value) =>
           String(value ?? '')
             .toLowerCase()
@@ -73,6 +131,14 @@ function DepartmentList() {
       return matchesSearch && matchesStatus;
     });
   }, [departments, search, statusFilter]);
+
+  const activeDepartmentCount = departments.filter(
+    (department) => department.status === 'active',
+  ).length;
+
+  const inactiveDepartmentCount = departments.filter(
+    (department) => department.status === 'inactive',
+  ).length;
 
   const columns = [
     {
@@ -95,14 +161,17 @@ function DepartmentList() {
       key: 'code',
       header: 'Department code',
       accessor: 'code',
+      render: (value) => (
+        <span className="font-mono text-sm text-[#CDB5F7]">
+          {value || '—'}
+        </span>
+      ),
     },
     {
       key: 'hod',
       header: 'Head of Department',
       accessor: (department) =>
-        department.hod?.fullName ||
-        department.hod?.name ||
-        'Not assigned',
+        department.hod?.fullName || 'Not assigned',
     },
     {
       key: 'status',
@@ -120,9 +189,14 @@ function DepartmentList() {
           variant="ghost"
           size="sm"
           onClick={() =>
-            navigate('/super-admin/departments/details', {
-              state: { department },
-            })
+            navigate(
+              `/super-admin/departments/details?id=${encodeURIComponent(
+                department.id,
+              )}`,
+              {
+                state: { department },
+              },
+            )
           }
         >
           View details
@@ -147,13 +221,23 @@ function DepartmentList() {
           },
         ]}
         actions={
-          <ActionButton
-            onClick={() =>
-              navigate('/super-admin/departments/new')
-            }
-          >
-            Create department
-          </ActionButton>
+          <div className="flex flex-wrap gap-3">
+            <ActionButton
+              variant="secondary"
+              onClick={loadDepartments}
+              disabled={isLoading}
+            >
+              {isLoading ? 'Loading...' : 'Refresh'}
+            </ActionButton>
+
+            <ActionButton
+              onClick={() =>
+                navigate('/super-admin/departments/new')
+              }
+            >
+              Create department
+            </ActionButton>
+          </div>
         }
       />
 
@@ -166,9 +250,7 @@ function DepartmentList() {
             <SuccessIcon />
           </span>
 
-          <p className="min-w-0 flex-1 leading-6">
-            {notice}
-          </p>
+          <p className="min-w-0 flex-1 leading-6">{notice}</p>
 
           <button
             type="button"
@@ -186,49 +268,76 @@ function DepartmentList() {
         </div>
       )}
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {loadError && (
+        <div
+          role="alert"
+          className="mb-6 rounded-xl border border-red-400/30 bg-red-400/5 p-4"
+        >
+          <p className="text-sm leading-6 text-red-300">
+            {loadError}
+          </p>
+
+          <div className="mt-3">
+            <ActionButton
+              variant="secondary"
+              onClick={loadDepartments}
+              disabled={isLoading}
+            >
+              Try again
+            </ActionButton>
+          </div>
+        </div>
+      )}
+
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <SectionCard
           eyebrow="DIRECTORY"
-          title="Department records"
-          description="Departments available in the directory."
+          title="Total departments"
+          description="All department records returned by the server."
         >
           <p className="text-3xl font-semibold tracking-tight text-[#EAEAE6]">
-            {departments.length}
+            {isLoading ? '—' : departments.length}
           </p>
 
           <p className="mt-1 text-xs text-[#92929F]">
-            Records currently available to this page
+            {isLoading
+              ? 'Loading records...'
+              : 'Total registered departments'}
           </p>
         </SectionCard>
 
         <SectionCard
-          eyebrow="INSTITUTION SETUP"
-          title="Add a department"
-          description="Register a department using the supported creation workflow."
-          variant="elevated"
+          eyebrow="ACTIVE"
+          title="Active departments"
+          description="Departments currently marked active."
         >
-          <ActionButton
-            variant="secondary"
-            onClick={() =>
-              navigate('/super-admin/departments/new')
-            }
-          >
-            Create department
-          </ActionButton>
+          <p className="text-3xl font-semibold tracking-tight text-[#A6D8C1]">
+            {isLoading ? '—' : activeDepartmentCount}
+          </p>
+        </SectionCard>
+
+        <SectionCard
+          eyebrow="INACTIVE"
+          title="Inactive departments"
+          description="Departments currently marked inactive."
+        >
+          <p className="text-3xl font-semibold tracking-tight text-[#E5DF98]">
+            {isLoading ? '—' : inactiveDepartmentCount}
+          </p>
         </SectionCard>
       </div>
 
       <SectionCard
         eyebrow="DIRECTORY"
         title="All departments"
-        description="Search available departments by name or code and filter by status."
+        description="Search departments by name, code or HOD and filter by status."
       >
         <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end">
           <div className="min-w-0 flex-1">
             <SearchInput
               name="department-search"
               label="Search departments"
-              placeholder="Search by department name or code..."
+              placeholder="Search by department name, code or HOD..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -257,26 +366,69 @@ function DepartmentList() {
           </div>
         </div>
 
-        <DataTable
-          columns={columns}
-          data={filteredDepartments}
-          rowKey={(department) =>
-            department.id || department._id || department.code
-          }
-          ariaLabel="Department directory"
-          emptyTitle="Department directory is not connected yet"
-          emptyDescription="The current backend supports creating departments but does not expose a department listing endpoint. Newly created departments cannot appear in this directory until that endpoint is available."
-          emptyAction={
-            <ActionButton
-              onClick={() =>
-                navigate('/super-admin/departments/new')
-              }
-            >
-              Create department
-            </ActionButton>
-          }
-          minWidth="760px"
-        />
+        {isLoading ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="rounded-xl border border-[#343640] bg-[#26272B] p-8 text-center"
+          >
+            <p className="text-sm text-[#A5A6B0]">
+              Loading departments from the server...
+            </p>
+          </div>
+        ) : (
+          <DataTable
+            columns={columns}
+            data={filteredDepartments}
+            rowKey={(department) =>
+              department.id || department.code
+            }
+            ariaLabel="Department directory"
+            emptyTitle={
+              loadError
+                ? 'Department directory unavailable'
+                : departments.length === 0
+                  ? 'No departments found'
+                  : 'No matching departments'
+            }
+            emptyDescription={
+              loadError
+                ? 'The department directory could not be loaded. Retry the request or check the server connection.'
+                : departments.length === 0
+                  ? 'No department records are currently available. Create a department to get started.'
+                  : 'No departments match the current search and status filters.'
+            }
+            emptyAction={
+              loadError ? (
+                <ActionButton
+                  onClick={loadDepartments}
+                  disabled={isLoading}
+                >
+                  Try again
+                </ActionButton>
+              ) : departments.length === 0 ? (
+                <ActionButton
+                  onClick={() =>
+                    navigate('/super-admin/departments/new')
+                  }
+                >
+                  Create department
+                </ActionButton>
+              ) : (
+                <ActionButton
+                  variant="secondary"
+                  onClick={() => {
+                    setSearch('');
+                    setStatusFilter('all');
+                  }}
+                >
+                  Clear filters
+                </ActionButton>
+              )
+            }
+            minWidth="760px"
+          />
+        )}
       </SectionCard>
     </div>
   );

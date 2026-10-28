@@ -1,5 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+
+import api from '../../../auth/services/api/axios.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import DataTable from '../../components/DataTable.jsx';
@@ -70,26 +72,57 @@ function getAccountStatus(hod) {
     : 'Unknown';
 }
 
+function getErrorMessage(error) {
+  return (
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unable to load HOD accounts. Please try again.'
+  );
+}
+
 export default function HodList() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const [hods, setHods] = useState([]);
   const [search, setSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('all');
-
-  /*
-   * The current backend does not expose a GET endpoint
-   * for listing HOD accounts.
-   *
-   * Keep this empty until a real listing API is available.
-   * Do not insert mock or invented records.
-   */
-  const hods = [];
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   const notice =
     typeof location.state?.notice === 'string'
       ? location.state.notice
       : '';
+
+  const loadHods = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError('');
+
+    try {
+      const response = await api.get('/v1/provisioning/hods');
+
+      const payload = response?.data;
+      const records = payload?.data?.hods;
+
+      if (!Array.isArray(records)) {
+        throw new Error(
+          'The server returned an unexpected HOD directory response.',
+        );
+      }
+
+      setHods(records);
+    } catch (error) {
+      setHods([]);
+      setLoadError(getErrorMessage(error));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHods();
+  }, [loadHods]);
 
   const departments = useMemo(() => {
     const names = hods
@@ -128,9 +161,12 @@ export default function HodList() {
   }, [hods, search, departmentFilter]);
 
   function openHodDetails(hod) {
-    navigate('/super-admin/hods/details', {
-      state: { hod },
-    });
+    navigate(
+      `/super-admin/hods/details?id=${encodeURIComponent(hod.id || hod._id || '')}`,
+      {
+        state: { hod },
+      },
+    );
   }
 
   const columns = [
@@ -154,7 +190,7 @@ export default function HodList() {
     {
       key: 'institutionalId',
       header: 'Institutional ID',
-      accessor: 'institutionalId',
+      accessor: (hod) => hod.institutionalId || 'Not available',
     },
     {
       key: 'department',
@@ -242,6 +278,25 @@ export default function HodList() {
         </div>
       )}
 
+      {loadError && (
+        <div
+          role="alert"
+          className="mb-6 flex flex-col gap-3 rounded-xl border border-[#B86D78]/40 bg-[#B86D78]/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="text-sm leading-6 text-[#E9A5AE]">
+            {loadError}
+          </p>
+
+          <ActionButton
+            variant="secondary"
+            onClick={loadHods}
+            disabled={isLoading}
+          >
+            Retry
+          </ActionButton>
+        </div>
+      )}
+
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <SectionCard
           eyebrow="ACCOUNT DIRECTORY"
@@ -249,11 +304,13 @@ export default function HodList() {
           description="Accounts provisioned through the institutional administration workflow."
         >
           <p className="text-3xl font-semibold tracking-tight text-[#EAEAE6]">
-            {hods.length}
+            {isLoading ? '—' : hods.length}
           </p>
 
           <p className="mt-1 text-xs text-[#92929F]">
-            Records currently available in this directory
+            {isLoading
+              ? 'Loading account records...'
+              : 'Records available in this directory'}
           </p>
         </SectionCard>
 
@@ -302,7 +359,8 @@ export default function HodList() {
               onChange={(event) =>
                 setDepartmentFilter(event.target.value)
               }
-              className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+              disabled={isLoading || departments.length === 0}
+              className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <option value="all">All departments</option>
 
@@ -315,30 +373,59 @@ export default function HodList() {
           </div>
         </div>
 
-        <DataTable
-          columns={columns}
-          data={filteredHods}
-          rowKey={(hod) => hod.id || hod._id || hod.email}
-          ariaLabel="HOD account directory"
-          emptyTitle="HOD directory is not connected yet"
-          emptyDescription="The current backend does not expose an endpoint to retrieve HOD account records. You can create an HOD account, but the directory will remain empty until a supported listing endpoint is implemented."
-          emptyAction={
-            <ActionButton
-              onClick={() => navigate('/super-admin/hods/new')}
-            >
-              Create HOD account
-            </ActionButton>
-          }
-          minWidth="760px"
-        />
-
-        {hods.length > 0 && filteredHods.length === 0 && (
-          <p
+        {isLoading ? (
+          <div
             role="status"
-            className="mt-4 text-sm text-[#A5A6B0]"
+            aria-live="polite"
+            className="flex items-center gap-3 rounded-xl border border-[#343640] bg-[#1D1F27] p-6"
           >
-            No HOD accounts match the current search and department filter.
-          </p>
+            <span
+              aria-hidden="true"
+              className="h-5 w-5 animate-spin rounded-full border-2 border-[#CDB5F7]/30 border-t-[#CDB5F7]"
+            />
+
+            <p className="text-sm text-[#A5A6B0]">
+              Loading HOD accounts...
+            </p>
+          </div>
+        ) : (
+          <DataTable
+            columns={columns}
+            data={filteredHods}
+            rowKey={(hod) => hod.id || hod._id || hod.email}
+            ariaLabel="HOD account directory"
+            emptyTitle={
+              loadError
+                ? 'Unable to load HOD directory'
+                : hods.length === 0
+                  ? 'No HOD accounts found'
+                  : 'No matching HOD accounts'
+            }
+            emptyDescription={
+              loadError
+                ? 'Retry loading the directory after checking the server connection.'
+                : hods.length === 0
+                  ? 'No HOD accounts are currently available. Create an HOD account for an existing department to populate this directory.'
+                  : 'No HOD accounts match the current search and department filter.'
+            }
+            emptyAction={
+              loadError ? (
+                <ActionButton
+                  variant="secondary"
+                  onClick={loadHods}
+                >
+                  Retry
+                </ActionButton>
+              ) : hods.length === 0 ? (
+                <ActionButton
+                  onClick={() => navigate('/super-admin/hods/new')}
+                >
+                  Create HOD account
+                </ActionButton>
+              ) : null
+            }
+            minWidth="760px"
+          />
         )}
       </SectionCard>
     </div>

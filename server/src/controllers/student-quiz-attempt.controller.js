@@ -362,4 +362,4 @@ export async function getStudentQuizAttemptController(
   } catch (error) {
     return next(error);
   }
-}s
+}
