@@ -8,6 +8,7 @@ import {
 
 import { Batch } from '../models/batch.model.js';
 import { Section } from '../models/section.model.js';
+import { RefreshSession } from '../models/refresh-session.model.js';
 import { hashPassword } from '../services/auth/password.service.js';
 
 function createError(statusCode, code, message) {
@@ -15,6 +16,7 @@ function createError(statusCode, code, message) {
 
   error.statusCode = statusCode;
   error.code = code;
+  error.expose = true;
 
   return error;
 }
@@ -55,8 +57,8 @@ async function getActiveMentor(userId) {
   }
 
   if (
-    mentor.status !== ACCOUNT_STATUSES.ACTIVE ||
-    mentor.role !== USER_ROLES.MENTOR
+    mentor.status !== ACCOUNT_STATUSES.ACTIVE
+    || mentor.role !== USER_ROLES.MENTOR
   ) {
     throw createError(
       403,
@@ -475,32 +477,37 @@ export async function updateStudentController(req, res, next) {
         ? req.body.email.trim().toLowerCase()
         : '';
 
-      if (normalizedEmail) {
-        const existingEmail = await User.findOne({
-          email: normalizedEmail,
-          _id: {
-            $ne: student._id,
-          },
-        }).select('_id');
+      const currentEmail = student.email
+        ?.trim()
+        .toLowerCase() ?? '';
 
-        if (existingEmail) {
-          throw createError(
-            409,
-            'EMAIL_ALREADY_EXISTS',
-            'An account with this email address already exists.',
-          );
+      // Preserve verification when the email has not changed.
+      if (normalizedEmail !== currentEmail) {
+        if (normalizedEmail) {
+          const existingEmail = await User.findOne({
+            email: normalizedEmail,
+            _id: {
+              $ne: student._id,
+            },
+          }).select('_id');
+
+          if (existingEmail) {
+            throw createError(
+              409,
+              'EMAIL_ALREADY_EXISTS',
+              'An account with this email address already exists.',
+            );
+          }
+
+          updates.email = normalizedEmail;
+        } else {
+          updates.email = undefined;
         }
 
-        updates.email = normalizedEmail;
-      } else {
-        updates.email = undefined;
+        // An actual email change invalidates previous verification.
+        updates.isEmailVerified = false;
+        updates.emailVerifiedAt = null;
       }
-
-      /*
-       * Changing an email invalidates the previous verification.
-       */
-      updates.isEmailVerified = false;
-      updates.emailVerifiedAt = null;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -539,6 +546,10 @@ export async function updateStudentController(req, res, next) {
  *
  * Allowed statuses:
  * ACTIVE, SUSPENDED, DISABLED
+ *
+ * Every actual status change increments tokenVersion and revokes
+ * refresh sessions. This also prevents old sessions from becoming
+ * usable if the account is reactivated later.
  */
 export async function updateStudentStatusController(
   req,
@@ -581,13 +592,68 @@ export async function updateStudentStatusController(
       });
     }
 
-    student.status = status;
+    const statusUpdate = await User.updateOne(
+      {
+        _id: student._id,
+        role: USER_ROLES.STUDENT,
+        department: mentor.department,
+        assignedSections: section._id,
+        status: student.status,
+      },
+      {
+        $set: {
+          status,
+        },
+        $inc: {
+          tokenVersion: 1,
+        },
+      },
+      {
+        runValidators: true,
+      },
+    ).exec();
 
-    await student.save();
+    if (statusUpdate.modifiedCount !== 1) {
+      throw createError(
+        409,
+        'STUDENT_STATUS_CHANGED',
+        'The student account changed concurrently. Refresh and try again.',
+      );
+    }
+
+    // Invalidate all refresh-token families for this student.
+    const revokedAt = new Date();
+
+    await RefreshSession.updateMany(
+      {
+        user: student._id,
+        familyRevokedAt: null,
+      },
+      {
+        $set: {
+          familyRevokedAt: revokedAt,
+        },
+      },
+    ).exec();
+
+    await RefreshSession.updateMany(
+      {
+        user: student._id,
+        revokedAt: null,
+      },
+      {
+        $set: {
+          revokedAt,
+        },
+      },
+    ).exec();
+
+    // Keep the response consistent with the persisted status.
+    student.status = status;
 
     return res.status(200).json({
       success: true,
-      message: 'Student account status updated successfully.',
+      message: 'Student account status updated successfully. Existing sessions have been invalidated.',
       data: {
         student: normalizeStudent(student),
       },
