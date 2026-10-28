@@ -9,6 +9,10 @@ import {
   updateStudentStatusController,
 } from '../controllers/student.controller.js';
 
+import {
+  createStudentActivationController,
+} from '../controllers/student-activation.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
@@ -27,6 +31,10 @@ const studentParamsSchema = z.object({
 
 const studentDetailsParamsSchema = z.object({
   sectionId: objectIdSchema,
+  studentId: objectIdSchema,
+}).strict();
+
+const activationParamsSchema = z.object({
   studentId: objectIdSchema,
 }).strict();
 
@@ -65,14 +73,15 @@ const updateStudentSchema = z.object({
 
   body: z.object({
     fullName: z.string().trim().min(2).max(100).optional(),
+
     email: z.union([
       z.string().trim().email().max(254),
       z.literal(''),
     ]).optional(),
   }).strict().refine(
     (body) =>
-      body.fullName !== undefined ||
-      body.email !== undefined,
+      body.fullName !== undefined
+      || body.email !== undefined,
     {
       message: 'Provide at least one profile field to update.',
     },
@@ -89,6 +98,10 @@ const updateStudentStatusSchema = z.object({
       'DISABLED',
     ]),
   }).strict(),
+});
+
+const createStudentActivationSchema = z.object({
+  params: activationParamsSchema,
 });
 
 /*
@@ -122,6 +135,24 @@ studentRouter.get(
   authRateLimiter,
   validate(listStudentsSchema),
   listStudentsController,
+);
+
+/*
+ * Request a student activation email.
+ * POST /api/v1/provisioning/students/:studentId/activation
+ */
+studentRouter.post(
+  '/students/:studentId/activation',
+  authenticate,
+  authorize('MENTOR'),
+  authRateLimiter,
+  validate(createStudentActivationSchema),
+  auditEvent({
+    action: 'STUDENT_ACTIVATION_EMAIL_REQUEST',
+    resourceType: 'Student',
+    getResourceId: (req) => req.params.studentId,
+  }),
+  createStudentActivationController,
 );
 
 /*

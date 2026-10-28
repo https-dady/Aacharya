@@ -27,7 +27,6 @@ const authService = {
   async requestEmailVerification() {
     const response = await api.post(
       `${AUTH_BASE_URL}/email/verification/request`,
-      {},
     );
 
     return response.data;
@@ -71,6 +70,23 @@ const authService = {
       `${AUTH_BASE_URL}/password/reset/confirm`,
       {
         resetToken,
+        newPassword,
+      },
+    );
+
+    return response.data;
+  },
+
+  async activateStudentAccount({
+    challengeId,
+    activationToken,
+    newPassword,
+  }) {
+    const response = await api.post(
+      `${AUTH_BASE_URL}/student/activation/confirm`,
+      {
+        challengeId,
+        activationToken,
         newPassword,
       },
     );

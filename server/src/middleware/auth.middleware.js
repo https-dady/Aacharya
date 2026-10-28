@@ -64,7 +64,7 @@ export async function authenticate(req, res, next) {
 
   try {
     const user = await User.findById(payload.userId)
-      .select('_id role status +tokenVersion')
+      .select('_id role status isEmailVerified +tokenVersion')
       .lean()
       .exec();
 
@@ -105,6 +105,7 @@ export async function authenticate(req, res, next) {
       id: user._id.toString(),
       _id: user._id.toString(),
       role: user.role,
+      isEmailVerified: user.isEmailVerified === true,
     };
 
     return next();

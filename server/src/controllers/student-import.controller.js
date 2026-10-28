@@ -527,6 +527,7 @@ export async function importStudentsController(req, res, next) {
         assignedSections: [section._id],
         createdBy: activeMentor._id,
         isEmailVerified: false,
+        isAccountActivated: false,
       }));
 
       const createdStudents = await User.insertMany(students, {

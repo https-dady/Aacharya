@@ -21,10 +21,12 @@ function createError(statusCode, code, message) {
 }
 
 export async function createHodController(req, res, next) {
+  let createdHodId = null;
+
   try {
-    // Only an active Super Admin can provision HOD accounts.
     const currentUser = await User.findById(req.user?.id)
-      .select('role status');
+      .select('role status')
+      .exec();
 
     if (
       !currentUser
@@ -52,7 +54,7 @@ export async function createHodController(req, res, next) {
       );
     }
 
-    const department = await Department.findById(departmentId);
+    const department = await Department.findById(departmentId).exec();
 
     if (!department) {
       return next(
@@ -101,7 +103,9 @@ export async function createHodController(req, res, next) {
         { institutionalId: normalizedInstitutionalId },
         { email: normalizedEmail },
       ],
-    }).select('_id institutionalId email');
+    })
+      .select('_id institutionalId email')
+      .exec();
 
     if (existingUser) {
       const duplicateField =
@@ -132,14 +136,68 @@ export async function createHodController(req, res, next) {
       isEmailVerified: false,
     });
 
-    try {
-      department.hod = hod._id;
-      await department.save();
-    } catch (error) {
-      // Avoid leaving an unassigned HOD account if department linking fails.
-      await User.deleteOne({ _id: hod._id });
-      throw error;
+    createdHodId = hod._id;
+
+    // Atomically assign the HOD only if the department is still
+    // active and does not already have an assigned HOD.
+    const assignedDepartment = await Department.findOneAndUpdate(
+      {
+        _id: department._id,
+        status: 'ACTIVE',
+        hod: null,
+      },
+      {
+        $set: {
+          hod: hod._id,
+        },
+      },
+      {
+        new: true,
+        runValidators: true,
+      },
+    ).exec();
+
+    if (!assignedDepartment) {
+      await User.deleteOne({ _id: hod._id }).exec();
+      createdHodId = null;
+
+      const latestDepartment = await Department.findById(
+        department._id,
+      )
+        .select('status hod')
+        .lean()
+        .exec();
+
+      if (!latestDepartment) {
+        return next(
+          createError(
+            404,
+            'DEPARTMENT_NOT_FOUND',
+            'The requested department was not found.',
+          ),
+        );
+      }
+
+      if (latestDepartment.status !== 'ACTIVE') {
+        return next(
+          createError(
+            409,
+            'DEPARTMENT_INACTIVE',
+            'An HOD cannot be assigned to an inactive department.',
+          ),
+        );
+      }
+
+      return next(
+        createError(
+          409,
+          'HOD_ALREADY_ASSIGNED',
+          'This department already has an assigned HOD.',
+        ),
+      );
     }
+
+    createdHodId = null;
 
     return res.status(201).json({
       success: true,
@@ -152,13 +210,25 @@ export async function createHodController(req, res, next) {
           email: hod.email,
           role: hod.role,
           status: hod.status,
-          department: department.id,
+          department: assignedDepartment.id,
           isEmailVerified: hod.isEmailVerified,
           createdAt: hod.createdAt,
         },
       },
     });
   } catch (error) {
+    // Compensating cleanup if account creation succeeded but
+    // the department assignment failed unexpectedly.
+    if (createdHodId) {
+      try {
+        await User.deleteOne({
+          _id: createdHodId,
+        }).exec();
+      } catch (cleanupError) {
+        error.cleanupError = cleanupError;
+      }
+    }
+
     if (error?.code === 11000) {
       error.statusCode = 409;
       error.code = 'ACCOUNT_ALREADY_EXISTS';

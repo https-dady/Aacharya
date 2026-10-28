@@ -81,6 +81,19 @@ const userSchema = new Schema(
       index: true,
     },
 
+    /*
+     * Tracks whether an account has completed its initial activation.
+     *
+     * Existing accounts retain access by default. Provisioning code
+     * must explicitly set this to false for newly created students.
+     */
+    isAccountActivated: {
+      type: Boolean,
+      required: true,
+      default: true,
+      index: true,
+    },
+
     department: {
       type: Schema.Types.ObjectId,
       ref: 'Department',

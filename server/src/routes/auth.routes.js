@@ -12,6 +12,10 @@ import {
   confirmPasswordResetController,
 } from '../controllers/auth.controller.js';
 
+import {
+  activateStudentAccountController,
+} from '../controllers/student-activation.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
@@ -19,6 +23,10 @@ import { requireTrustedOrigin } from '../middleware/csrf.middleware.js';
 import { auditEvent } from '../middleware/audit.middleware.js';
 
 const authRouter = Router();
+
+const objectIdSchema = z
+  .string()
+  .regex(/^[a-f\d]{24}$/i);
 
 const loginSchema = z.object({
   body: z.object({
@@ -33,7 +41,7 @@ const emailVerificationSchema = z.object({
 
 const confirmEmailVerificationSchema = z.object({
   body: z.object({
-    challengeId: z.string().regex(/^[a-f\d]{24}$/i),
+    challengeId: objectIdSchema,
     otp: z.string().regex(/^\d{6}$/),
   }).strict(),
 });
@@ -46,7 +54,7 @@ const requestPasswordResetSchema = z.object({
 
 const verifyPasswordResetOtpSchema = z.object({
   body: z.object({
-    challengeId: z.string().regex(/^[a-f\d]{24}$/i),
+    challengeId: objectIdSchema,
     otp: z.string().regex(/^\d{6}$/),
   }).strict(),
 });
@@ -54,7 +62,15 @@ const verifyPasswordResetOtpSchema = z.object({
 const confirmPasswordResetSchema = z.object({
   body: z.object({
     resetToken: z.string().min(32).max(128),
-    newPassword: z.string().min(8).max(256),
+    newPassword: z.string().min(8).max(72),
+  }).strict(),
+});
+
+const activateStudentAccountSchema = z.object({
+  body: z.object({
+    challengeId: objectIdSchema,
+    activationToken: z.string().regex(/^[A-Za-z0-9_-]{40,60}$/),
+    newPassword: z.string().min(8).max(72),
   }).strict(),
 });
 
@@ -148,6 +164,27 @@ authRouter.post(
     resourceType: 'PasswordReset',
   }),
   confirmPasswordResetController,
+);
+
+/*
+ * Activate a student account with the single-use token delivered
+ * to the student's registered email address.
+ *
+ * POST /api/v1/auth/student/activation/confirm
+ *
+ * Public endpoint: the student has not established a session yet.
+ * Trusted-origin checks, request validation, and rate limiting apply.
+ */
+authRouter.post(
+  '/student/activation/confirm',
+  requireTrustedOrigin,
+  authRateLimiter,
+  validate(activateStudentAccountSchema),
+  auditEvent({
+    action: 'STUDENT_ACTIVATION_CONFIRM',
+    resourceType: 'StudentActivation',
+  }),
+  activateStudentAccountController,
 );
 
 export default authRouter;

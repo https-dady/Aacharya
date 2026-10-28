@@ -10,6 +10,8 @@ import {
   isSupportedRole,
 } from '../features/lms/config/role-navigation.js';
 
+import StudentActivation from '../features/auth/pages/StudentActivation.jsx';
+
 function normalizeRole(role) {
   return typeof role === 'string'
     ? role.trim().toUpperCase()
@@ -54,9 +56,9 @@ function RoleGuard({
   }
 
   if (
-    Array.isArray(roles) &&
-    roles.length > 0 &&
-    !roles.some(
+    Array.isArray(roles)
+    && roles.length > 0
+    && !roles.some(
       (role) => normalizeRole(role) === userRole,
     )
   ) {
@@ -88,8 +90,8 @@ function renderRoute(route, index) {
       path={path}
       element={protectedElement}
     >
-      {Array.isArray(children) &&
-        children.map(renderRoute)}
+      {Array.isArray(children)
+        && children.map(renderRoute)}
     </Route>
   );
 }
@@ -100,8 +102,16 @@ export default function AppRouter({
 }) {
   return (
     <Routes>
+      {/* Public route: student activates their account via email link. */}
+      <Route
+        path="/activate-account"
+        element={<StudentActivation />}
+      />
+
+      {/* Preserve all existing application routes and role guards. */}
       {routes.map(renderRoute)}
 
+      {/* Preserve the existing authentication fallback. */}
       <Route
         path="*"
         element={children}

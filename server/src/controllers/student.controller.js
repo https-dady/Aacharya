@@ -8,7 +8,6 @@ import {
 
 import { Batch } from '../models/batch.model.js';
 import { Section } from '../models/section.model.js';
-import { RefreshSession } from '../models/refresh-session.model.js';
 import { hashPassword } from '../services/auth/password.service.js';
 
 function createError(statusCode, code, message) {
@@ -16,7 +15,6 @@ function createError(statusCode, code, message) {
 
   error.statusCode = statusCode;
   error.code = code;
-  error.expose = true;
 
   return error;
 }
@@ -29,6 +27,7 @@ function normalizeStudent(student) {
     email: student.email ?? null,
     role: student.role,
     status: student.status,
+    isAccountActivated: student.isAccountActivated,
     department: student.department?.toString() ?? null,
     assignedBatches: (student.assignedBatches || []).map(
       (id) => id.toString(),
@@ -57,8 +56,8 @@ async function getActiveMentor(userId) {
   }
 
   if (
-    mentor.status !== ACCOUNT_STATUSES.ACTIVE
-    || mentor.role !== USER_ROLES.MENTOR
+    mentor.status !== ACCOUNT_STATUSES.ACTIVE ||
+    mentor.role !== USER_ROLES.MENTOR
   ) {
     throw createError(
       403,
@@ -156,7 +155,7 @@ async function getStudentInSection(
     department: departmentId,
     assignedSections: sectionId,
   }).select(
-    'institutionalId fullName email role status department assignedBatches assignedSections isEmailVerified createdAt updatedAt',
+    'institutionalId fullName email role status isAccountActivated department assignedBatches assignedSections isEmailVerified createdAt updatedAt',
   );
 
   if (!student) {
@@ -204,6 +203,9 @@ function getDuplicateKeyError(error) {
 
 /**
  * Create an individual student account.
+ *
+ * Newly provisioned students must complete account activation
+ * before they can sign in.
  */
 export async function createStudentController(req, res, next) {
   try {
@@ -268,6 +270,7 @@ export async function createStudentController(req, res, next) {
       passwordHash,
       role: USER_ROLES.STUDENT,
       status: ACCOUNT_STATUSES.ACTIVE,
+      isAccountActivated: false,
       department: section.department,
       assignedBatches: [section.batch],
       assignedSections: [section._id],
@@ -277,7 +280,7 @@ export async function createStudentController(req, res, next) {
 
     return res.status(201).json({
       success: true,
-      message: 'Student account created successfully.',
+      message: 'Student account created. Activation is required before sign-in.',
       data: {
         student: normalizeStudent(student),
       },
@@ -297,11 +300,8 @@ export async function createStudentController(req, res, next) {
 /**
  * List students belonging to a section assigned to the mentor.
  *
- * Supports:
- * - Pagination
- * - Search by name, institutional ID, or email
- * - Filtering by account status
- * - Sorting by most recently created
+ * Supports pagination, search, status filtering, and recent-first
+ * sorting.
  */
 export async function listStudentsController(req, res, next) {
   try {
@@ -333,21 +333,12 @@ export async function listStudentsController(req, res, next) {
         '\\$&',
       );
 
-      const searchRegex = new RegExp(
-        escapedSearch,
-        'i',
-      );
+      const searchRegex = new RegExp(escapedSearch, 'i');
 
       filter.$or = [
-        {
-          institutionalId: searchRegex,
-        },
-        {
-          fullName: searchRegex,
-        },
-        {
-          email: searchRegex,
-        },
+        { institutionalId: searchRegex },
+        { fullName: searchRegex },
+        { email: searchRegex },
       ];
     }
 
@@ -356,7 +347,7 @@ export async function listStudentsController(req, res, next) {
     const [students, total] = await Promise.all([
       User.find(filter)
         .select(
-          'institutionalId fullName email role status department assignedBatches assignedSections isEmailVerified createdAt updatedAt',
+          'institutionalId fullName email role status isAccountActivated department assignedBatches assignedSections isEmailVerified createdAt updatedAt',
         )
         .sort({
           createdAt: -1,
@@ -477,37 +468,29 @@ export async function updateStudentController(req, res, next) {
         ? req.body.email.trim().toLowerCase()
         : '';
 
-      const currentEmail = student.email
-        ?.trim()
-        .toLowerCase() ?? '';
+      if (normalizedEmail) {
+        const existingEmail = await User.findOne({
+          email: normalizedEmail,
+          _id: {
+            $ne: student._id,
+          },
+        }).select('_id');
 
-      // Preserve verification when the email has not changed.
-      if (normalizedEmail !== currentEmail) {
-        if (normalizedEmail) {
-          const existingEmail = await User.findOne({
-            email: normalizedEmail,
-            _id: {
-              $ne: student._id,
-            },
-          }).select('_id');
-
-          if (existingEmail) {
-            throw createError(
-              409,
-              'EMAIL_ALREADY_EXISTS',
-              'An account with this email address already exists.',
-            );
-          }
-
-          updates.email = normalizedEmail;
-        } else {
-          updates.email = undefined;
+        if (existingEmail) {
+          throw createError(
+            409,
+            'EMAIL_ALREADY_EXISTS',
+            'An account with this email address already exists.',
+          );
         }
 
-        // An actual email change invalidates previous verification.
-        updates.isEmailVerified = false;
-        updates.emailVerifiedAt = null;
+        updates.email = normalizedEmail;
+      } else {
+        updates.email = undefined;
       }
+
+      updates.isEmailVerified = false;
+      updates.emailVerifiedAt = null;
     }
 
     if (Object.keys(updates).length === 0) {
@@ -544,12 +527,7 @@ export async function updateStudentController(req, res, next) {
 /**
  * Change a student's account status.
  *
- * Allowed statuses:
- * ACTIVE, SUSPENDED, DISABLED
- *
- * Every actual status change increments tokenVersion and revokes
- * refresh sessions. This also prevents old sessions from becoming
- * usable if the account is reactivated later.
+ * Allowed statuses: ACTIVE, SUSPENDED, DISABLED.
  */
 export async function updateStudentStatusController(
   req,
@@ -572,9 +550,7 @@ export async function updateStudentStatusController(
 
     const { status } = req.body;
 
-    if (
-      !Object.values(ACCOUNT_STATUSES).includes(status)
-    ) {
+    if (!Object.values(ACCOUNT_STATUSES).includes(status)) {
       throw createError(
         422,
         'INVALID_ACCOUNT_STATUS',
@@ -592,68 +568,13 @@ export async function updateStudentStatusController(
       });
     }
 
-    const statusUpdate = await User.updateOne(
-      {
-        _id: student._id,
-        role: USER_ROLES.STUDENT,
-        department: mentor.department,
-        assignedSections: section._id,
-        status: student.status,
-      },
-      {
-        $set: {
-          status,
-        },
-        $inc: {
-          tokenVersion: 1,
-        },
-      },
-      {
-        runValidators: true,
-      },
-    ).exec();
-
-    if (statusUpdate.modifiedCount !== 1) {
-      throw createError(
-        409,
-        'STUDENT_STATUS_CHANGED',
-        'The student account changed concurrently. Refresh and try again.',
-      );
-    }
-
-    // Invalidate all refresh-token families for this student.
-    const revokedAt = new Date();
-
-    await RefreshSession.updateMany(
-      {
-        user: student._id,
-        familyRevokedAt: null,
-      },
-      {
-        $set: {
-          familyRevokedAt: revokedAt,
-        },
-      },
-    ).exec();
-
-    await RefreshSession.updateMany(
-      {
-        user: student._id,
-        revokedAt: null,
-      },
-      {
-        $set: {
-          revokedAt,
-        },
-      },
-    ).exec();
-
-    // Keep the response consistent with the persisted status.
     student.status = status;
+
+    await student.save();
 
     return res.status(200).json({
       success: true,
-      message: 'Student account status updated successfully. Existing sessions have been invalidated.',
+      message: 'Student account status updated successfully.',
       data: {
         student: normalizeStudent(student),
       },

@@ -34,6 +34,18 @@ function createAccountUnavailableError() {
   return error;
 }
 
+function createAccountActivationRequiredError() {
+  const error = new Error(
+    'Activate your student account before signing in.',
+  );
+
+  error.statusCode = 403;
+  error.code = 'ACCOUNT_ACTIVATION_REQUIRED';
+  error.expose = true;
+
+  return error;
+}
+
 export async function login(
   { institutionalId, password },
   metadata = {},
@@ -70,6 +82,13 @@ export async function login(
 
   if (user.status !== ACCOUNT_STATUSES.ACTIVE) {
     throw createAccountUnavailableError();
+  }
+
+  if (
+    user.role === 'STUDENT'
+    && user.isAccountActivated === false
+  ) {
+    throw createAccountActivationRequiredError();
   }
 
   const tokenVersion = user.tokenVersion ?? 0;
