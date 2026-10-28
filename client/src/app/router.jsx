@@ -49,6 +49,10 @@ function RoleGuard({
     return <Navigate to="/" replace />;
   }
 
+  if (user.isEmailVerified === false) {
+    return <Navigate to="/" replace />;
+  }
+
   if (
     Array.isArray(roles) &&
     roles.length > 0 &&
@@ -90,26 +94,6 @@ function renderRoute(route, index) {
   );
 }
 
-/**
- * Central application router.
- *
- * Route configuration can be supplied incrementally as
- * role-specific pages are implemented.
- *
- * Route configuration format:
- *
- * {
- *   id: 'super-admin-dashboard',
- *   path: '/super-admin/dashboard',
- *   roles: ['SUPER_ADMIN'],
- *   element: <SuperAdminDashboard />
- * }
- *
- * Nested routes can be supplied through the children property.
- *
- * The existing authentication UI remains available as the
- * fallback until authenticated routes are integrated into App.jsx.
- */
 export default function AppRouter({
   children,
   routes = [],

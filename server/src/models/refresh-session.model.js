@@ -36,6 +36,15 @@ const refreshSessionSchema = new Schema(
       default: null,
     },
 
+    // Records that the entire refresh-token family was revoked.
+    // This marker allows rotation logic to detect a family
+    // revocation even if a replacement session is created concurrently.
+    familyRevokedAt: {
+      type: Date,
+      default: null,
+      index: false,
+    },
+
     replacedByTokenHash: {
       type: String,
       default: null,

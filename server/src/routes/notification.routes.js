@@ -8,7 +8,10 @@ import {
 } from '../controllers/notification.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
+import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
+
+import { USER_ROLES } from '../models/user.model.js';
 
 import {
   listNotificationsSchema,
@@ -18,8 +21,12 @@ import {
 
 const router = Router();
 
-// All notification endpoints require authentication.
-router.use(authenticate);
+// Every notification endpoint requires authentication,
+// a supported role, and verified email.
+router.use(
+  authenticate,
+  authorize(...Object.values(USER_ROLES)),
+);
 
 // GET /api/v1/notifications/unread-count
 router.get(

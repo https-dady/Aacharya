@@ -5,12 +5,13 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
-    "lint": "eslint src",
-    "test": "node --test",
-    "check": "npm run lint && npm run test"
-  },
+  "dev": "nodemon src/server.js",
+  "start": "node src/server.js",
+  "bootstrap:super-admin": "node scripts/bootstrap-super-admin.js",
+  "lint": "eslint src",
+  "test": "node --test",
+  "check": "npm run lint && npm run test"
+},
   "keywords": [],
   "author": "",
   "license": "ISC",

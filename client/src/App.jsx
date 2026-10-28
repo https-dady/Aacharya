@@ -23,6 +23,15 @@ const INITIAL_RECOVERY_STATE = {
   resetToken: '',
 };
 
+const ROLE_DASHBOARD_PATHS = Object.freeze({
+  SUPER_ADMIN: '/super-admin/dashboard',
+  HOD: '/hod/dashboard',
+  FACULTY: '/faculty/dashboard',
+  MENTOR: '/mentor/dashboard',
+  STUDENT: '/student/dashboard',
+  ALUMNI: '/alumni/dashboard',
+});
+
 function getResponseData(response) {
   return response?.data ?? response;
 }
@@ -316,12 +325,14 @@ export default function App() {
         ? user.role.trim().toUpperCase()
         : '';
 
+    const dashboardPath = ROLE_DASHBOARD_PATHS[role];
+
     if (
-      role === 'SUPER_ADMIN' &&
+      dashboardPath &&
       user.isEmailVerified !== false &&
       (screen === 'login' || screen === 'authenticated')
     ) {
-      navigate('/super-admin/dashboard', {
+      navigate(dashboardPath, {
         replace: true,
       });
     }
@@ -549,7 +560,6 @@ export default function App() {
 
       setLoading(false);
       switchScreen('login');
-
       setSuccess('You have been signed out.');
     }
   }

@@ -2,6 +2,16 @@ import { USER_ROLES } from '../models/user.model.js';
 
 const ALLOWED_ROLES = new Set(Object.values(USER_ROLES));
 
+function createAuthorizationError(statusCode, code, message) {
+  const error = new Error(message);
+
+  error.statusCode = statusCode;
+  error.code = code;
+  error.expose = true;
+
+  return error;
+}
+
 export function authorize(...allowedRoles) {
   if (
     allowedRoles.length === 0
@@ -16,11 +26,13 @@ export function authorize(...allowedRoles) {
 
   return function authorizeRequest(req, res, next) {
     if (!req.user) {
-      const error = new Error('Authentication is required.');
-      error.statusCode = 401;
-      error.code = 'UNAUTHORIZED';
-      error.expose = true;
-      return next(error);
+      return next(
+        createAuthorizationError(
+          401,
+          'UNAUTHORIZED',
+          'Authentication is required.',
+        ),
+      );
     }
 
     const userRoles = Array.isArray(req.user.roles)
@@ -28,13 +40,23 @@ export function authorize(...allowedRoles) {
       : [req.user.role];
 
     if (!userRoles.some((role) => allowed.has(role))) {
-      const error = new Error(
-        'You do not have permission to perform this action.',
+      return next(
+        createAuthorizationError(
+          403,
+          'FORBIDDEN',
+          'You do not have permission to perform this action.',
+        ),
       );
-      error.statusCode = 403;
-      error.code = 'FORBIDDEN';
-      error.expose = true;
-      return next(error);
+    }
+
+    if (req.user.isEmailVerified !== true) {
+      return next(
+        createAuthorizationError(
+          403,
+          'EMAIL_VERIFICATION_REQUIRED',
+          'Verify your email address before accessing this resource.',
+        ),
+      );
     }
 
     return next();

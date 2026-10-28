@@ -364,6 +364,43 @@ export async function verifyPasswordResetOtp({
 }
 
 /**
+ * Revokes the user's existing refresh sessions after a successful
+ * password reset.
+ *
+ * First, persist a family-level revocation marker on every existing
+ * session for the user. Then revoke sessions that are still active.
+ *
+ * Keeping these operations separate preserves existing revocation
+ * timestamps while allowing refresh rotation to detect family
+ * revocation through familyRevokedAt.
+ */
+async function revokeUserRefreshSessions(userId, now) {
+  await RefreshSession.updateMany(
+    {
+      user: userId,
+      familyRevokedAt: null,
+    },
+    {
+      $set: {
+        familyRevokedAt: now,
+      },
+    },
+  );
+
+  await RefreshSession.updateMany(
+    {
+      user: userId,
+      revokedAt: null,
+    },
+    {
+      $set: {
+        revokedAt: now,
+      },
+    },
+  );
+}
+
+/**
  * Consumes a reset token, updates the password and revokes
  * existing refresh sessions.
  */
@@ -441,17 +478,7 @@ export async function resetPassword({
     throw invalidResetTokenError();
   }
 
-  await RefreshSession.updateMany(
-    {
-      user: user._id,
-      revokedAt: null,
-    },
-    {
-      $set: {
-        revokedAt: now,
-      },
-    },
-  );
+  await revokeUserRefreshSessions(user._id, now);
 
   return {
     success: true,

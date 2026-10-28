@@ -69,10 +69,31 @@ function serializeUser(user) {
   };
 }
 
+/**
+ * Revokes every session belonging to a refresh-token family.
+ *
+ * familyRevokedAt acts as a persistent family-level marker.
+ * This helps detect a concurrent family revocation even when
+ * a replacement session has just been created.
+ */
 async function revokeSessionFamily(familyId) {
   if (!familyId) {
     return;
   }
+
+  const revokedAt = new Date();
+
+  await RefreshSession.updateMany(
+    {
+      familyId,
+      familyRevokedAt: null,
+    },
+    {
+      $set: {
+        familyRevokedAt: revokedAt,
+      },
+    },
+  );
 
   await RefreshSession.updateMany(
     {
@@ -81,12 +102,33 @@ async function revokeSessionFamily(familyId) {
     },
     {
       $set: {
-        revokedAt: new Date(),
+        revokedAt,
       },
     },
   );
 }
 
+/**
+ * Checks whether any session in the family has been marked
+ * as revoked at the family level.
+ */
+async function hasRevokedFamily(familyId) {
+  const revokedSession = await RefreshSession.findOne({
+    familyId,
+    familyRevokedAt: {
+      $ne: null,
+    },
+  })
+    .select('_id')
+    .lean()
+    .exec();
+
+  return Boolean(revokedSession);
+}
+
+/**
+ * Creates a refresh session during login.
+ */
 export async function createRefreshSession(
   user,
   refreshToken,
@@ -125,6 +167,16 @@ export async function createRefreshSession(
   });
 }
 
+/**
+ * Rotates a refresh token.
+ *
+ * The current session is claimed atomically to prevent two
+ * concurrent requests from successfully rotating the same token.
+ *
+ * After creating the replacement session, the user state and
+ * family revocation marker are checked again to detect relevant
+ * concurrent password resets, account changes, or token reuse.
+ */
 export async function rotateRefreshSession(
   refreshToken,
   metadata = {},
@@ -149,7 +201,10 @@ export async function rotateRefreshSession(
     throw createSessionError();
   }
 
-  if (existingSession.revokedAt) {
+  if (
+    existingSession.revokedAt
+    || existingSession.familyRevokedAt
+  ) {
     await revokeSessionFamily(existingSession.familyId);
     throw createSessionError();
   }
@@ -178,14 +233,17 @@ export async function rotateRefreshSession(
   }
 
   /*
-   * Claim the current session atomically so concurrent requests
-   * cannot both rotate the same active refresh token.
+   * Atomically claim the current session.
+   * Only one concurrent request should successfully claim it.
    */
   const claimedSession = await RefreshSession.findOneAndUpdate(
     {
       _id: existingSession._id,
       revokedAt: null,
-      expiresAt: { $gt: now },
+      familyRevokedAt: null,
+      expiresAt: {
+        $gt: now,
+      },
     },
     {
       $set: {
@@ -229,6 +287,36 @@ export async function rotateRefreshSession(
         },
       },
     );
+
+    /*
+     * Re-read the user after creating the replacement session.
+     *
+     * A password reset or account-status change may have occurred
+     * after the initial user lookup. Reject the rotation if the
+     * account is no longer active or the token version changed.
+     */
+    const latestUser = await User.findById(payload.userId)
+      .select('+tokenVersion');
+
+    const latestTokenVersion = latestUser?.tokenVersion ?? 0;
+
+    if (
+      !latestUser
+      || latestUser.status !== ACCOUNT_STATUSES.ACTIVE
+      || latestTokenVersion !== currentTokenVersion
+    ) {
+      await revokeSessionFamily(claimedSession.familyId);
+      throw createSessionError();
+    }
+
+    /*
+     * A concurrent refresh-token reuse may have revoked this
+     * family while the replacement session was being created.
+     */
+    if (await hasRevokedFamily(claimedSession.familyId)) {
+      await revokeSessionFamily(claimedSession.familyId);
+      throw createSessionError();
+    }
   } catch (error) {
     await revokeSessionFamily(claimedSession.familyId);
     throw error;
@@ -242,6 +330,9 @@ export async function rotateRefreshSession(
   };
 }
 
+/**
+ * Revokes a presented refresh session during logout.
+ */
 export async function revokeRefreshSession(refreshToken) {
   if (
     typeof refreshToken !== 'string'

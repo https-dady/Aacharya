@@ -1,78 +1,115 @@
-import { recordAuditEvent } from '../services/audit/audit.service.js';
+import {
+  User,
+  ACCOUNT_STATUSES,
+} from '../models/user.model.js';
 
-/**
- * Attach an audit record to the completed HTTP response.
- * The final status determines SUCCESS/FAILURE, so a controller failure
- * cannot be recorded as a successful operation merely because the
- * middleware ran before the controller.
- *
- * For operations that require audit persistence to be transactional with
- * the business operation, call recordAuditEvent from the service layer
- * instead; response-finish auditing is necessarily post-response/best-effort.
- */
-export function auditEvent({
-  action,
-  resourceType,
-  getResourceId,
-  getMetadata,
-} = {}) {
-  if (typeof action !== 'string' || action.trim().length < 2) {
-    throw new TypeError('Audit action is required.');
-  }
+import {
+  verifyAccessToken,
+} from '../services/auth/token.service.js';
 
-  if (
-    typeof resourceType !== 'string'
-    || resourceType.trim().length < 2
-  ) {
-    throw new TypeError('Audit resourceType is required.');
-  }
+function createAuthError(statusCode, code, message) {
+  const error = new Error(message);
 
-  if (getResourceId !== undefined && typeof getResourceId !== 'function') {
-    throw new TypeError('getResourceId must be a function.');
-  }
+  error.statusCode = statusCode;
+  error.code = code;
+  error.expose = true;
 
-  if (getMetadata !== undefined && typeof getMetadata !== 'function') {
-    throw new TypeError('getMetadata must be a function.');
-  }
-
-  return function auditEventMiddleware(req, res, next) {
-    let resourceId;
-    let metadata;
-
-    try {
-      resourceId = getResourceId
-        ? getResourceId(req, res)
-        : req.params?.id ?? null;
-      metadata = getMetadata ? getMetadata(req, res) : undefined;
-    } catch (error) {
-      return next(error);
-    }
-
-    res.once('finish', () => {
-      const actor = req.user;
-      const outcome = res.statusCode >= 400
-        ? 'FAILURE'
-        : 'SUCCESS';
-
-      void recordAuditEvent({
-        actorId: actor?._id ?? actor?.id ?? null,
-        actorRole: actor?.role ?? 'SYSTEM',
-        action: action.trim(),
-        resourceType: resourceType.trim(),
-        resourceId: resourceId ?? null,
-        outcome,
-        requestId: req.id ?? req.requestId ?? null,
-        metadata,
-      }).catch((error) => {
-        req.log?.error?.(
-          { err: error, action, resourceType },
-          'Failed to persist audit event after response completion',
-        );
-      });
-    });
-
-    return next();
-  };
+  return error;
 }
 
-export default auditEvent;
+export async function authenticate(req, res, next) {
+  const authorization = req.get('authorization');
+
+  if (!authorization) {
+    return next(
+      createAuthError(
+        401,
+        'UNAUTHORIZED',
+        'Authentication is required.',
+      ),
+    );
+  }
+
+  const [scheme, token, ...extraParts] = authorization
+    .trim()
+    .split(/\s+/);
+
+  if (
+    scheme?.toLowerCase() !== 'bearer'
+    || !token
+    || extraParts.length > 0
+  ) {
+    return next(
+      createAuthError(
+        401,
+        'INVALID_TOKEN',
+        'A valid access token is required.',
+      ),
+    );
+  }
+
+  let payload;
+
+  try {
+    payload = verifyAccessToken(token);
+  } catch {
+    return next(
+      createAuthError(
+        401,
+        'INVALID_TOKEN',
+        'The access token is invalid or expired.',
+      ),
+    );
+  }
+
+  try {
+    const user = await User.findById(payload.userId)
+      .select('_id role status isEmailVerified +tokenVersion')
+      .lean()
+      .exec();
+
+    if (!user) {
+      return next(
+        createAuthError(
+          401,
+          'ACCOUNT_NOT_FOUND',
+          'The account associated with this token no longer exists.',
+        ),
+      );
+    }
+
+    if (user.status !== ACCOUNT_STATUSES.ACTIVE) {
+      return next(
+        createAuthError(
+          403,
+          'ACCOUNT_INACTIVE',
+          'Your account is suspended or disabled.',
+        ),
+      );
+    }
+
+    const currentTokenVersion = user.tokenVersion ?? 0;
+    const accessTokenVersion = payload.tokenVersion ?? 0;
+
+    if (accessTokenVersion !== currentTokenVersion) {
+      return next(
+        createAuthError(
+          401,
+          'TOKEN_REVOKED',
+          'Your session is no longer valid. Please log in again.',
+        ),
+      );
+    }
+
+    req.user = {
+      id: user._id.toString(),
+      _id: user._id.toString(),
+      role: user.role,
+      isEmailVerified: user.isEmailVerified === true,
+    };
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+}
