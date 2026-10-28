@@ -27,6 +27,7 @@ const authService = {
   async requestEmailVerification() {
     const response = await api.post(
       `${AUTH_BASE_URL}/email/verification/request`,
+      {},
     );
 
     return response.data;
