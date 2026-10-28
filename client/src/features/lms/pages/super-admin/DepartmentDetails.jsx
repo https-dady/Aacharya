@@ -1,4 +1,7 @@
-import { Link, useLocation } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+
+import api from '../../../auth/services/api/axios.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
@@ -50,29 +53,58 @@ function ArrowLeftIcon() {
   );
 }
 
-function InfoIcon() {
+function DetailField({ label, children }) {
   return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      className="h-5 w-5"
-    >
-      <circle
-        cx="12"
-        cy="12"
-        r="9"
-        stroke="currentColor"
-        strokeWidth="1.6"
-      />
-      <path
-        d="M12 11v5m0-8h.01"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
+    <div className="min-w-0 rounded-xl border border-[#383943] bg-[#26272B]/60 p-4">
+      <p className="text-xs font-medium text-[#92929F]">
+        {label}
+      </p>
+
+      <div className="mt-2 break-words text-sm font-medium leading-6 text-[#EAEAE6]">
+        {children || 'Not available'}
+      </div>
+    </div>
   );
+}
+
+function getErrorMessage(error, fallback) {
+  return (
+    error?.response?.data?.message
+    || error?.message
+    || fallback
+  );
+}
+
+function getHodId(hod) {
+  if (!hod) {
+    return '';
+  }
+
+  if (typeof hod === 'string') {
+    return hod;
+  }
+
+  return hod._id || hod.id || '';
+}
+
+function getHodName(hod) {
+  if (!hod) {
+    return 'Not assigned';
+  }
+
+  if (typeof hod === 'string') {
+    return hod;
+  }
+
+  return hod.fullName || hod.name || hod.email || 'HOD account';
+}
+
+function getHodEmail(hod) {
+  if (!hod || typeof hod === 'string') {
+    return '';
+  }
+
+  return hod.email || '';
 }
 
 function formatDate(value) {
@@ -93,48 +125,235 @@ function formatDate(value) {
   }).format(date);
 }
 
-function getHodName(hod) {
-  if (!hod) {
-    return 'Not assigned';
-  }
+function getResponseData(response) {
+  const body = response?.data;
 
-  if (typeof hod === 'string') {
-    return hod;
-  }
-
-  return hod.fullName || hod.name || hod.email || 'Not assigned';
+  return body?.data ?? body;
 }
 
-function DetailField({ label, children }) {
-  return (
-    <div className="min-w-0 rounded-xl border border-[#383943] bg-[#26272B]/60 p-4">
-      <p className="text-xs font-medium text-[#92929F]">
-        {label}
-      </p>
+function getHodCollection(response) {
+  const data = getResponseData(response);
 
-      <div className="mt-2 break-words text-sm font-medium leading-6 text-[#EAEAE6]">
-        {children || 'Not available'}
-      </div>
-    </div>
-  );
+  if (Array.isArray(data)) {
+    return data;
+  }
+
+  if (Array.isArray(data?.hods)) {
+    return data.hods;
+  }
+
+  if (Array.isArray(data?.users)) {
+    return data.users;
+  }
+
+  if (Array.isArray(data?.items)) {
+    return data.items;
+  }
+
+  return [];
 }
 
 export default function DepartmentDetails() {
-  const location = useLocation();
+  const [searchParams] = useSearchParams();
 
-  /*
-   * Department data must be supplied by a real navigation source.
-   * The current backend does not expose a department details GET endpoint.
-   */
-  const department = location.state?.department ?? null;
+  const departmentId = searchParams.get('id') || '';
 
-  if (!department) {
+  const [department, setDepartment] = useState(null);
+  const [hods, setHods] = useState([]);
+  const [selectedHodId, setSelectedHodId] = useState('');
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingHods, setIsLoadingHods] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [pageError, setPageError] = useState('');
+  const [hodListError, setHodListError] = useState('');
+  const [assignmentError, setAssignmentError] = useState('');
+  const [notice, setNotice] = useState('');
+
+  const loadDepartment = useCallback(async () => {
+    if (!departmentId) {
+      setDepartment(null);
+      setPageError(
+        'Department ID is missing. Return to the department directory and select a department.',
+      );
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setPageError('');
+
+    try {
+      const response = await api.get(
+        `/v1/departments/${encodeURIComponent(departmentId)}`,
+      );
+
+      const data = getResponseData(response);
+      const record = data?.department ?? data;
+
+      if (
+        !record
+        || typeof record !== 'object'
+        || !(record._id || record.id)
+      ) {
+        throw new Error(
+          'The server did not return a valid department record.',
+        );
+      }
+
+      setDepartment(record);
+      setSelectedHodId(getHodId(record.hod));
+    } catch (error) {
+      setDepartment(null);
+      setPageError(
+        getErrorMessage(
+          error,
+          'Unable to load department details.',
+        ),
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, [departmentId]);
+
+  const loadHods = useCallback(async () => {
+    setIsLoadingHods(true);
+    setHodListError('');
+
+    try {
+      const response = await api.get('/v1/provisioning/hods');
+      const records = getHodCollection(response);
+
+      setHods(records.filter((hod) => (
+        (hod._id || hod.id)
+        && hod.role === 'HOD'
+        && hod.status === 'ACTIVE'
+      )));
+    } catch (error) {
+      setHods([]);
+      setHodListError(
+        getErrorMessage(
+          error,
+          'Unable to load available HOD accounts.',
+        ),
+      );
+    } finally {
+      setIsLoadingHods(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDepartment();
+  }, [loadDepartment]);
+
+  useEffect(() => {
+    loadHods();
+  }, [loadHods]);
+
+  const currentHodId = getHodId(department?.hod);
+
+  const hasAssignmentChanges = selectedHodId !== currentHodId;
+
+  async function handleAssignmentSubmit(event) {
+    event.preventDefault();
+
+    if (!departmentId || !department) {
+      return;
+    }
+
+    if (!hasAssignmentChanges || isSubmitting) {
+      return;
+    }
+
+    setAssignmentError('');
+    setNotice('');
+    setIsSubmitting(true);
+
+    try {
+      await api.patch(
+        `/v1/departments/${encodeURIComponent(departmentId)}/hod`,
+        {
+          hodId: selectedHodId || null,
+        },
+      );
+
+      setNotice(
+        selectedHodId
+          ? 'Department HOD assignment updated successfully.'
+          : 'HOD assignment removed successfully.',
+      );
+
+      await Promise.all([
+        loadDepartment(),
+        loadHods(),
+      ]);
+    } catch (error) {
+      setAssignmentError(
+        getErrorMessage(
+          error,
+          'Unable to update the HOD assignment. Please try again.',
+        ),
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleRemoveAssignment() {
+    if (!departmentId || !currentHodId || isSubmitting) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Remove the current HOD assignment from this department? '
+      + 'The department and HOD account will not be deleted.',
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setSelectedHodId('');
+    setAssignmentError('');
+    setNotice('');
+    setIsSubmitting(true);
+
+    try {
+      await api.patch(
+        `/v1/departments/${encodeURIComponent(departmentId)}/hod`,
+        {
+          hodId: null,
+        },
+      );
+
+      setNotice('HOD assignment removed successfully.');
+
+      await Promise.all([
+        loadDepartment(),
+        loadHods(),
+      ]);
+    } catch (error) {
+      setSelectedHodId(currentHodId);
+
+      setAssignmentError(
+        getErrorMessage(
+          error,
+          'Unable to remove the HOD assignment. Please try again.',
+        ),
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  if (isLoading) {
     return (
       <div className="mx-auto w-full max-w-[1200px]">
         <PageHeader
           eyebrow="SUPER ADMINISTRATION"
           title="Department details"
-          description="Review academic department information and its administrative assignment."
+          description="Loading department information and administrative assignment."
           breadcrumbs={[
             {
               label: 'Dashboard',
@@ -150,38 +369,65 @@ export default function DepartmentDetails() {
           ]}
         />
 
-        <EmptyState
-          icon={<BuildingIcon className="h-7 w-7" />}
-          title="Department information unavailable"
-          description="No department record was provided to this page. The current backend does not provide a department-details endpoint, so the record cannot be loaded directly."
-          action={
-            <Link
-              to="/super-admin/departments"
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#CDB5F7] bg-[#CDB5F7] px-4 py-2.5 text-sm font-semibold text-[#14161C] transition-colors hover:bg-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7] focus-visible:ring-offset-2 focus-visible:ring-offset-[#14161C]"
-            >
-              <ArrowLeftIcon />
-              Back to departments
-            </Link>
-          }
+        <div
+          role="status"
+          className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-6 text-sm text-[#A5A6B0]"
+        >
+          Loading department details…
+        </div>
+      </div>
+    );
+  }
+
+  if (!department) {
+    return (
+      <div className="mx-auto w-full max-w-[1200px]">
+        <PageHeader
+          eyebrow="SUPER ADMINISTRATION"
+          title="Department details"
+          description="Review department information and manage its HOD assignment."
+          breadcrumbs={[
+            {
+              label: 'Dashboard',
+              to: '/super-admin/dashboard',
+            },
+            {
+              label: 'Departments',
+              to: '/super-admin/departments',
+            },
+            {
+              label: 'Department details',
+            },
+          ]}
         />
 
-        <div className="mt-5 flex items-start gap-3 rounded-xl border border-[#454650]/70 bg-[#1D1F27] p-4">
-          <span className="mt-0.5 shrink-0 text-[#E5DF98]">
-            <InfoIcon />
-          </span>
+        <SectionCard>
+          <EmptyState
+            icon={<BuildingIcon className="h-7 w-7" />}
+            title="Department details unavailable"
+            description={pageError || 'The requested department could not be loaded.'}
+            action={
+              <Link
+                to="/super-admin/departments"
+                className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-[#CDB5F7] bg-[#CDB5F7] px-4 py-2.5 text-sm font-semibold text-[#14161C] transition-colors hover:bg-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+              >
+                <ArrowLeftIcon />
+                Back to departments
+              </Link>
+            }
+          />
+        </SectionCard>
 
-          <div>
-            <p className="text-sm font-medium text-[#EAEAE6]">
-              Details integration pending
-            </p>
-
-            <p className="mt-1 text-xs leading-5 text-[#A5A6B0]">
-              A supported details endpoint and department identifier
-              are required before this page can load records directly.
-              No sample department information is displayed as real data.
-            </p>
+        {departmentId && (
+          <div className="mt-4">
+            <ActionButton
+              variant="secondary"
+              onClick={loadDepartment}
+            >
+              Retry loading
+            </ActionButton>
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -193,7 +439,7 @@ export default function DepartmentDetails() {
       <PageHeader
         eyebrow="SUPER ADMINISTRATION"
         title={departmentName}
-        description="Department information and administrative assignment."
+        description="Review department information and manage its administrative HOD assignment."
         breadcrumbs={[
           {
             label: 'Dashboard',
@@ -207,11 +453,7 @@ export default function DepartmentDetails() {
             label: departmentName,
           },
         ]}
-        actions={
-          <StatusBadge
-            status={department.status}
-          />
-        }
+        actions={<StatusBadge status={department.status} />}
       />
 
       <div className="mb-6">
@@ -223,6 +465,31 @@ export default function DepartmentDetails() {
           Back to departments
         </Link>
       </div>
+
+      {notice && (
+        <div
+          role="status"
+          className="mb-5 rounded-xl border border-[#5A8C78]/40 bg-[#5A8C78]/10 px-4 py-3 text-sm leading-6 text-[#A6D8C1]"
+        >
+          {notice}
+        </div>
+      )}
+
+      {pageError && (
+        <div
+          role="alert"
+          className="mb-5 rounded-xl border border-[#B86D78]/40 bg-[#B86D78]/10 px-4 py-3 text-sm leading-6 text-[#E9A5AE]"
+        >
+          {pageError}
+          <button
+            type="button"
+            onClick={loadDepartment}
+            className="ml-3 font-semibold underline underline-offset-2"
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       <section
         aria-label="Department overview"
@@ -242,10 +509,6 @@ export default function DepartmentDetails() {
               <p className="mt-2 break-all font-mono text-xl font-semibold tracking-wide text-[#EAEAE6]">
                 {department.code || 'Not available'}
               </p>
-
-              <p className="mt-2 text-xs leading-5 text-[#92929F]">
-                Institutional identifier for this department.
-              </p>
             </div>
           </div>
         </div>
@@ -260,7 +523,7 @@ export default function DepartmentDetails() {
           </div>
 
           <p className="mt-3 text-xs leading-5 text-[#92929F]">
-            Current status as supplied by the department record.
+            Current status reported by the department record.
           </p>
         </div>
       </section>
@@ -268,7 +531,7 @@ export default function DepartmentDetails() {
       <SectionCard
         eyebrow="DEPARTMENT RECORD"
         title="Department information"
-        description="Review the available information associated with this academic department."
+        description="Review the official information associated with this academic department."
         icon={<BuildingIcon />}
       >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -280,8 +543,8 @@ export default function DepartmentDetails() {
             {department.code}
           </DetailField>
 
-          <DetailField label="Head of Department">
-            {getHodName(department.hod)}
+          <DetailField label="Department status">
+            {department.status}
           </DetailField>
 
           <DetailField label="Created on">
@@ -299,55 +562,178 @@ export default function DepartmentDetails() {
       <SectionCard
         eyebrow="ADMINISTRATIVE ASSIGNMENT"
         title="Head of Department"
-        description="Review the HOD assignment associated with this department."
-        icon={<InfoIcon />}
+        description="Assign an active HOD, replace the current HOD, transfer an HOD from another department, or remove the assignment. Department and HOD accounts will not be deleted."
+        icon={<BuildingIcon />}
         className="mt-6"
       >
-        {department.hod ? (
-          <div className="rounded-xl border border-[#383943] bg-[#26272B]/60 p-4">
-            <p className="text-sm font-semibold text-[#EAEAE6]">
-              {getHodName(department.hod)}
-            </p>
-
-            {department.hod.email && (
-              <p className="mt-2 break-all text-sm text-[#A5A6B0]">
-                {department.hod.email}
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="rounded-xl border border-dashed border-[#454650] bg-[#26272B]/40 p-5">
-            <p className="text-sm font-medium text-[#EAEAE6]">
-              No HOD assigned
-            </p>
-
-            <p className="mt-1 text-sm leading-6 text-[#A5A6B0]">
-              This department record does not contain an HOD assignment.
-              HOD provisioning is managed separately.
-            </p>
-          </div>
-        )}
-      </SectionCard>
-
-      <div className="mt-6 flex flex-col gap-3 rounded-xl border border-[#454650]/70 bg-[#1D1F27] p-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-sm font-medium text-[#EAEAE6]">
-            Department record
+        <div className="mb-5 rounded-xl border border-[#383943] bg-[#26272B]/60 p-4">
+          <p className="text-xs font-medium text-[#92929F]">
+            Currently assigned HOD
           </p>
 
-          <p className="mt-1 text-xs leading-5 text-[#A5A6B0]">
-            This page currently displays supplied information only.
-            Saving edits requires a supported backend update operation.
+          <p className="mt-2 break-words text-sm font-semibold text-[#EAEAE6]">
+            {getHodName(department.hod)}
           </p>
+
+          {getHodEmail(department.hod) && (
+            <p className="mt-1 break-all text-sm text-[#A5A6B0]">
+              {getHodEmail(department.hod)}
+            </p>
+          )}
         </div>
 
-        <ActionButton
-          variant="secondary"
-          onClick={() => window.history.back()}
+        {assignmentError && (
+          <div
+            role="alert"
+            className="mb-5 rounded-xl border border-[#B86D78]/40 bg-[#B86D78]/10 px-4 py-3 text-sm leading-6 text-[#E9A5AE]"
+          >
+            {assignmentError}
+          </div>
+        )}
+
+        {hodListError && (
+          <div
+            role="alert"
+            className="mb-5 rounded-xl border border-[#B86D78]/40 bg-[#B86D78]/10 px-4 py-3 text-sm leading-6 text-[#E9A5AE]"
+          >
+            <p>{hodListError}</p>
+
+            <button
+              type="button"
+              onClick={loadHods}
+              className="mt-2 font-semibold underline underline-offset-2"
+            >
+              Retry loading HOD accounts
+            </button>
+          </div>
+        )}
+
+        <form
+          onSubmit={handleAssignmentSubmit}
+          className="space-y-5"
         >
-          Go back
-        </ActionButton>
-      </div>
+          <div>
+            <label
+              htmlFor="department-hod"
+              className="mb-2 block text-sm font-medium text-[#EAEAE6]"
+            >
+              Select HOD
+            </label>
+
+            <select
+              id="department-hod"
+              value={selectedHodId}
+              onChange={(event) => {
+                setSelectedHodId(event.target.value);
+                setAssignmentError('');
+                setNotice('');
+              }}
+              disabled={
+                isLoadingHods
+                || isSubmitting
+                || Boolean(hodListError)
+                || department.status !== 'ACTIVE'
+              }
+              className="min-h-12 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="">
+                No HOD assigned
+              </option>
+
+              {hods.map((hod) => {
+                const id = hod._id || hod.id;
+                const departmentValue = hod.department;
+                const assignedDepartmentId =
+                  typeof departmentValue === 'string'
+                    ? departmentValue
+                    : departmentValue?._id || departmentValue?.id || '';
+
+                const assignedDepartmentName =
+                  typeof departmentValue === 'object'
+                    ? departmentValue?.name
+                    : '';
+
+                const isAssignedElsewhere =
+                  assignedDepartmentId
+                  && assignedDepartmentId !== departmentId;
+
+                const isCurrentHod = id === currentHodId;
+
+                return (
+                  <option
+                    key={id}
+                    value={id}
+                    disabled={Boolean(isAssignedElsewhere)}
+                  >
+                    {getHodName(hod)}
+                    {hod.email ? ` — ${hod.email}` : ''}
+                    {isCurrentHod
+                      ? ' (Currently assigned)'
+                      : isAssignedElsewhere
+                        ? ` (Assigned to ${assignedDepartmentName || 'another department'})`
+                        : ''}
+                  </option>
+                );
+              })}
+            </select>
+
+            <p className="mt-2 text-xs leading-5 text-[#92929F]">
+              Only active HOD accounts are listed. An HOD already assigned
+              to another department is disabled here; transfer them by
+              managing the assignment on their current department first.
+            </p>
+          </div>
+
+          {department.status !== 'ACTIVE' && (
+            <p className="text-sm leading-6 text-[#E5DF98]">
+              HOD assignments cannot be changed while this department is inactive.
+            </p>
+          )}
+
+          <div className="flex flex-col-reverse gap-3 border-t border-[#383943] pt-5 sm:flex-row sm:flex-wrap sm:justify-end">
+            <ActionButton
+              type="button"
+              variant="secondary"
+              disabled={isSubmitting || !currentHodId}
+              onClick={handleRemoveAssignment}
+            >
+              Remove assignment
+            </ActionButton>
+
+            <ActionButton
+              type="button"
+              variant="secondary"
+              disabled={
+                isSubmitting
+                || isLoadingHods
+                || Boolean(hodListError)
+                || selectedHodId === currentHodId
+              }
+              onClick={() => {
+                setSelectedHodId(currentHodId);
+                setAssignmentError('');
+                setNotice('');
+              }}
+            >
+              Reset
+            </ActionButton>
+
+            <ActionButton
+              type="submit"
+              loading={isSubmitting}
+              disabled={
+                isSubmitting
+                || isLoadingHods
+                || Boolean(hodListError)
+                || !hasAssignmentChanges
+                || department.status !== 'ACTIVE'
+              }
+            >
+              Save HOD assignment
+            </ActionButton>
+          </div>
+        </form>
+      </SectionCard>
     </div>
   );
 }
