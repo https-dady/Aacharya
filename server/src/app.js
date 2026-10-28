@@ -16,6 +16,7 @@ import sectionRoutes from './routes/section.routes.js';
 import mentorRoutes from './routes/mentor.routes.js';
 import studentRoutes from './routes/student.routes.js';
 import studentImportRoutes from './routes/student-import.routes.js';
+import studentProfileRoutes from './routes/student-profile.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 
 import {
@@ -66,6 +67,7 @@ app.use(
         'req.body.newPassword',
         'req.body.otp',
         'req.body.token',
+        'req.body.activationToken',
         'req.body.accessToken',
         'req.body.refreshToken',
 
@@ -105,6 +107,9 @@ app.get('/api/v1/meta', (_req, res) => {
 
 // Authentication.
 app.use('/api/v1/auth', authRoutes);
+
+// Student self-profile.
+app.use('/api/v1/students', studentProfileRoutes);
 
 // Notifications.
 app.use('/api/v1/notifications', notificationRoutes);
