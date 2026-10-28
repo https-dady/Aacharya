@@ -16,8 +16,15 @@ import sectionRoutes from './routes/section.routes.js';
 import mentorRoutes from './routes/mentor.routes.js';
 import studentRoutes from './routes/student.routes.js';
 import studentImportRoutes from './routes/student-import.routes.js';
-import studentProfileRoutes from './routes/student-profile.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
+
+import studentProfileRoutes from './routes/student-profile.routes.js';
+import courseRoutes from './routes/course.routes.js';
+import studentAssignmentRoutes from './routes/student-assignment.routes.js';
+import studentQuizRoutes from './routes/student-quiz.routes.js';
+import studentQuizAttemptRoutes from './routes/student-quiz-attempt.routes.js';
+import studentQuizResultRoutes from './routes/student-quiz-result.routes.js';
+import studentAttendanceRoutes from './routes/student-attendance.routes.js';
 
 import {
   studentUploadErrorMiddleware,
@@ -53,36 +60,24 @@ app.use(cookieParser());
 app.use(
   pinoHttp({
     level: env.logLevel,
-
     redact: {
       paths: [
-        // Authentication headers and cookies.
         'req.headers.authorization',
         'req.headers.cookie',
-
-        // Passwords and authentication tokens.
         'req.body.password',
         'req.body.passwordHash',
         'req.body.currentPassword',
         'req.body.newPassword',
         'req.body.otp',
         'req.body.token',
-        'req.body.activationToken',
         'req.body.accessToken',
         'req.body.refreshToken',
-
-        // Password-reset credentials.
         'req.body.resetToken',
         'req.body.passwordResetToken',
-
-        // Email verification credentials.
         'req.body.verificationToken',
         'req.body.emailVerificationToken',
-
-        // Potentially sensitive bulk-import data.
         'req.body.csvContent',
       ],
-
       censor: '[REDACTED]',
     },
   }),
@@ -107,9 +102,6 @@ app.get('/api/v1/meta', (_req, res) => {
 
 // Authentication.
 app.use('/api/v1/auth', authRoutes);
-
-// Student self-profile.
-app.use('/api/v1/students', studentProfileRoutes);
 
 // Notifications.
 app.use('/api/v1/notifications', notificationRoutes);
@@ -137,6 +129,27 @@ app.use('/api/v1/provisioning', studentRoutes);
 
 // Bulk student import.
 app.use('/api/v1/provisioning', studentImportRoutes);
+
+// Student profile.
+app.use('/api/v1/student-profile', studentProfileRoutes);
+
+// Student courses.
+app.use('/api/v1/courses', courseRoutes);
+
+// Student assignments.
+app.use('/api/v1/assignments', studentAssignmentRoutes);
+
+// Student quizzes.
+app.use('/api/v1/quizzes', studentQuizRoutes);
+
+// Student quiz attempts: start, retrieve, answer, submit.
+app.use('/api/v1/quizzes', studentQuizAttemptRoutes);
+
+// Student quiz results.
+app.use('/api/v1/quiz-results', studentQuizResultRoutes);
+
+// Student attendance.
+app.use('/api/v1/attendance', studentAttendanceRoutes);
 
 // Error handling.
 app.use(studentUploadErrorMiddleware);

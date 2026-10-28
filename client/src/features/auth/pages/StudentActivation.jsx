@@ -1,19 +1,34 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { authService } from '../services/authService.js';
+import authService from '../services/authService.js';
 
 export default function StudentActivation() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const challengeId = searchParams.get('challengeId') ?? '';
-  const activationToken = searchParams.get('token') ?? '';
+  const [challengeId] = useState(
+    () => searchParams.get('challengeId') ?? '',
+  );
+
+  const [activationToken] = useState(
+    () => searchParams.get('token') ?? '',
+  );
 
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isActivated, setIsActivated] = useState(false);
+
+  useEffect(() => {
+    // Remove the sensitive activation token from the visible URL
+    // and browser history without navigating away from this page.
+    window.history.replaceState(
+      window.history.state,
+      '',
+      window.location.pathname,
+    );
+  }, []);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -51,6 +66,8 @@ export default function StudentActivation() {
       });
 
       setIsActivated(true);
+      setPassword('');
+      setConfirmPassword('');
     } catch (requestError) {
       const message =
         requestError?.response?.data?.message ||

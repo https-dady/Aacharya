@@ -1,35 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
-
-// Connect this collection to the authenticated student's results API.
-// Expected fields:
-// id, semester, subjectName, subjectCode, obtainedMarks,
-// totalMarks, grade, status: published | pending
-const results = [];
-
-const RESULT_FILTERS = [
-  { value: 'all', label: 'All Semesters' },
-];
-
-const RESULT_STATUSES = [
-  { value: 'all', label: 'All Results' },
-  { value: 'published', label: 'Published' },
-  { value: 'pending', label: 'Pending Publication' },
-];
-
-function normalizeStatus(status) {
-  const value = String(status || '').toLowerCase();
-
-  if (value === 'published' || value === 'pending') {
-    return value;
-  }
-
-  return 'unknown';
-}
+import studentQuizResultService from '../../services/studentQuizResultService.js';
 
 function formatMarks(value) {
   return typeof value === 'number' && Number.isFinite(value)
@@ -37,33 +12,34 @@ function formatMarks(value) {
     : '—';
 }
 
+function formatDate(value) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return '—';
+
+  return new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
+}
+
 function ResultStatusBadge({ status }) {
-  const normalizedStatus = normalizeStatus(status);
-
-  const styles = {
-    published:
-      'border-emerald-400/20 bg-emerald-400/10 text-emerald-300',
-    pending:
-      'border-amber-400/20 bg-amber-400/10 text-amber-300',
-    unknown:
-      'border-[#454650] bg-[#252630] text-[#A5A6B0]',
-  };
-
-  const labels = {
-    published: 'Published',
-    pending: 'Pending',
-    unknown: 'Unavailable',
-  };
+  const isSubmitted = status === 'published';
 
   return (
     <span
       className={[
         'inline-flex items-center rounded-full border px-2.5 py-1',
         'text-xs font-medium',
-        styles[normalizedStatus],
+        isSubmitted
+          ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300'
+          : 'border-[#454650] bg-[#252630] text-[#A5A6B0]',
       ].join(' ')}
     >
-      {labels[normalizedStatus]}
+      {isSubmitted ? 'Submitted' : 'Unavailable'}
     </span>
   );
 }
@@ -71,8 +47,8 @@ function ResultStatusBadge({ status }) {
 function ResultCard({ result }) {
   const hasValidMarks =
     typeof result.obtainedMarks === 'number' &&
-    Number.isFinite(result.obtainedMarks) &&
     typeof result.totalMarks === 'number' &&
+    Number.isFinite(result.obtainedMarks) &&
     Number.isFinite(result.totalMarks) &&
     result.totalMarks > 0;
 
@@ -85,15 +61,15 @@ function ResultCard({ result }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-[#858590]">
-            {result.subjectCode || 'Subject'}
+            {result.courseCode || 'Course'}
           </p>
 
           <h3 className="mt-2 break-words text-base font-semibold text-[#EAEAE6]">
-            {result.subjectName || 'Unnamed subject'}
+            {result.title || 'Quiz'}
           </h3>
 
-          <p className="mt-1 text-sm text-[#A5A6B0]">
-            {result.semester || 'Semester unavailable'}
+          <p className="mt-1 break-words text-sm text-[#A5A6B0]">
+            {result.courseName || 'Course unavailable'}
           </p>
         </div>
 
@@ -122,7 +98,7 @@ function ResultCard({ result }) {
         <div className="mt-5">
           <div className="mb-2 flex items-center justify-between gap-3">
             <span className="text-xs text-[#858590]">
-              Marks Percentage
+              Score Percentage
             </span>
 
             <span className="text-sm font-semibold text-[#CDB5F7]">
@@ -133,7 +109,7 @@ function ResultCard({ result }) {
           <div
             className="h-2 overflow-hidden rounded-full bg-[#30313A]"
             role="progressbar"
-            aria-label={`${result.subjectName} marks percentage`}
+            aria-label={`${result.title || 'Quiz'} score percentage`}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.min(100, Math.max(0, percentage))}
@@ -148,56 +124,62 @@ function ResultCard({ result }) {
         </div>
       )}
 
-      <div className="mt-5 flex items-center justify-between gap-4 border-t border-[#343640] pt-4">
-        <div>
-          <p className="text-xs text-[#858590]">Grade</p>
+      <div className="mt-5 border-t border-[#343640] pt-4">
+        <p className="text-xs text-[#858590]">Submitted On</p>
 
-          <p className="mt-1 text-lg font-semibold text-[#EAEAE6]">
-            {result.grade || '—'}
-          </p>
-        </div>
-
-        <span className="text-xs text-[#858590]">
-          {normalizeStatus(result.status) === 'published'
-            ? 'Official result'
-            : 'Awaiting publication'}
-        </span>
+        <p className="mt-1 text-sm font-medium text-[#EAEAE6]">
+          {formatDate(result.submittedAt)}
+        </p>
       </div>
     </article>
   );
 }
 
 export default function StudentResults() {
+  const [results, setResults] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedSemester, setSelectedSemester] = useState('all');
-  const [selectedStatus, setSelectedStatus] = useState('all');
+  const [selectedCourse, setSelectedCourse] = useState('all');
+  const [status, setStatus] = useState('idle');
+  const [errorMessage, setErrorMessage] = useState('');
 
-  const semesters = useMemo(() => {
-    const uniqueSemesters = [
-      ...new Set(
-        results
-          .map((result) => result.semester)
-          .filter(Boolean),
-      ),
-    ];
+  const loadResults = useCallback(async () => {
+    setStatus('loading');
+    setErrorMessage('');
 
-    return uniqueSemesters.sort((a, b) =>
-      String(a).localeCompare(String(b), undefined, {
-        numeric: true,
-      }),
-    );
+    try {
+      const data = await studentQuizResultService.getMyResults();
+
+      setResults(data);
+      setStatus('success');
+    } catch (error) {
+      setErrorMessage(
+        error?.response?.data?.message ||
+          error?.message ||
+          'Unable to load your quiz results. Please try again.',
+      );
+      setStatus('error');
+    }
   }, []);
 
-  const semesterFilters = useMemo(
-    () => [
-      ...RESULT_FILTERS,
-      ...semesters.map((semester) => ({
-        value: semester,
-        label: semester,
-      })),
-    ],
-    [semesters],
-  );
+  useEffect(() => {
+    loadResults();
+  }, [loadResults]);
+
+  const courses = useMemo(() => {
+    const uniqueCourses = new Map();
+
+    results.forEach((result) => {
+      const courseName = result.courseName?.trim();
+
+      if (courseName) {
+        uniqueCourses.set(courseName, courseName);
+      }
+    });
+
+    return [...uniqueCourses.values()].sort((a, b) =>
+      a.localeCompare(b),
+    );
+  }, [results]);
 
   const filteredResults = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -206,49 +188,34 @@ export default function StudentResults() {
       const matchesSearch =
         !query ||
         [
-          result.subjectName,
-          result.subjectCode,
-          result.semester,
-          result.grade,
+          result.title,
+          result.courseName,
+          result.courseCode,
         ].some((value) =>
           String(value || '').toLowerCase().includes(query),
         );
 
-      const matchesSemester =
-        selectedSemester === 'all' ||
-        result.semester === selectedSemester;
+      const matchesCourse =
+        selectedCourse === 'all' ||
+        result.courseName === selectedCourse;
 
-      const matchesStatus =
-        selectedStatus === 'all' ||
-        normalizeStatus(result.status) === selectedStatus;
-
-      return matchesSearch && matchesSemester && matchesStatus;
+      return matchesSearch && matchesCourse;
     });
-  }, [searchQuery, selectedSemester, selectedStatus]);
+  }, [results, searchQuery, selectedCourse]);
 
-  const publishedResults = results.filter(
-    (result) => normalizeStatus(result.status) === 'published',
-  );
-
-  const pendingResults = results.filter(
-    (result) => normalizeStatus(result.status) === 'pending',
-  );
-
-  const validMarks = publishedResults.filter(
+  const scoredResults = results.filter(
     (result) =>
       typeof result.obtainedMarks === 'number' &&
-      Number.isFinite(result.obtainedMarks) &&
       typeof result.totalMarks === 'number' &&
-      Number.isFinite(result.totalMarks) &&
       result.totalMarks > 0,
   );
 
-  const totalObtained = validMarks.reduce(
+  const totalObtained = scoredResults.reduce(
     (total, result) => total + result.obtainedMarks,
     0,
   );
 
-  const totalMaximum = validMarks.reduce(
+  const totalMaximum = scoredResults.reduce(
     (total, result) => total + result.totalMarks,
     0,
   );
@@ -259,28 +226,25 @@ export default function StudentResults() {
       : null;
 
   const hasActiveFilters =
-    searchQuery.trim() !== '' ||
-    selectedSemester !== 'all' ||
-    selectedStatus !== 'all';
+    searchQuery.trim() !== '' || selectedCourse !== 'all';
 
   function resetFilters() {
     setSearchQuery('');
-    setSelectedSemester('all');
-    setSelectedStatus('all');
+    setSelectedCourse('all');
   }
 
   const summaryCards = [
     {
-      label: 'Published Subjects',
-      value: publishedResults.length || '—',
-      description: 'Subjects with published results',
+      label: 'Submitted Quizzes',
+      value: results.length,
+      description: 'Quiz attempts submitted',
       color: 'text-emerald-300',
     },
     {
-      label: 'Pending Results',
-      value: pendingResults.length || '—',
-      description: 'Awaiting official publication',
-      color: 'text-amber-300',
+      label: 'Scored Quizzes',
+      value: scoredResults.length,
+      description: 'Attempts with recorded marks',
+      color: 'text-[#CDB5F7]',
     },
     {
       label: 'Overall Percentage',
@@ -288,13 +252,16 @@ export default function StudentResults() {
         overallPercentage === null
           ? '—'
           : `${overallPercentage.toFixed(1)}%`,
-      description: 'Calculated from available published marks',
-      color: 'text-[#CDB5F7]',
+      description: 'Weighted percentage from available scores',
+      color: 'text-[#E5DF98]',
     },
     {
-      label: 'CGPA',
-      value: '—',
-      description: 'Available when official CGPA data is connected',
+      label: 'Total Marks',
+      value:
+        scoredResults.length > 0
+          ? `${formatMarks(totalObtained)} / ${formatMarks(totalMaximum)}`
+          : '—',
+      description: 'Obtained marks against maximum marks',
       color: 'text-[#EAEAE6]',
     },
   ];
@@ -304,46 +271,66 @@ export default function StudentResults() {
       <PageHeader
         eyebrow="STUDENT WORKSPACE"
         title="My Results"
-        description="Review published academic results, subject-wise marks, grades, and semester performance."
+        description="Review your submitted quiz attempts, marks, and score percentages."
         breadcrumbs={[
           { label: 'Dashboard', to: '/student/dashboard' },
           { label: 'Results' },
         ]}
+        actions={
+          <button
+            type="button"
+            onClick={loadResults}
+            disabled={status === 'loading'}
+            className={[
+              'inline-flex min-h-10 items-center justify-center',
+              'rounded-xl border border-[#454650] px-4 py-2',
+              'text-sm font-semibold text-[#CDB5F7]',
+              'transition-colors hover:border-[#CDB5F7]',
+              'disabled:cursor-not-allowed disabled:opacity-50',
+            ].join(' ')}
+          >
+            {status === 'loading' ? 'Refreshing...' : 'Refresh Results'}
+          </button>
+        }
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {summaryCards.map((card) => (
-          <div
-            key={card.label}
-            className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5"
-          >
-            <p className="text-sm text-[#A5A6B0]">
-              {card.label}
-            </p>
+      {status === 'success' && (
+        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {summaryCards.map((card) => (
+            <div
+              key={card.label}
+              className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5"
+            >
+              <p className="text-sm text-[#A5A6B0]">
+                {card.label}
+              </p>
 
-            <p className={`mt-3 text-3xl font-semibold ${card.color}`}>
-              {card.value}
-            </p>
+              <p
+                className={`mt-3 break-words text-2xl font-semibold ${card.color}`}
+              >
+                {card.value}
+              </p>
 
-            <p className="mt-2 text-xs leading-5 text-[#858590]">
-              {card.description}
-            </p>
-          </div>
-        ))}
-      </div>
+              <p className="mt-2 text-xs leading-5 text-[#858590]">
+                {card.description}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
 
       <SectionCard
-        eyebrow="ACADEMIC RECORD"
+        eyebrow="QUIZ PERFORMANCE"
         title="Find Results"
-        description="Search your subjects and filter results by semester and publication status."
+        description="Search submitted quizzes and filter them by course."
       >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_200px_220px_auto]">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(200px,260px)_auto]">
           <div className="min-w-0">
             <label
               htmlFor="result-search"
               className="mb-2 block text-sm font-medium text-[#D1D1D8]"
             >
-              Search subjects
+              Search quizzes
             </label>
 
             <input
@@ -351,7 +338,7 @@ export default function StudentResults() {
               type="search"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Subject, code, grade..."
+              placeholder="Quiz title, course, code..."
               className={[
                 'min-h-11 w-full rounded-xl border border-[#454650]',
                 'bg-[#191A21] px-4 py-2.5 text-sm text-[#EAEAE6]',
@@ -364,18 +351,16 @@ export default function StudentResults() {
 
           <div className="min-w-0">
             <label
-              htmlFor="result-semester"
+              htmlFor="result-course"
               className="mb-2 block text-sm font-medium text-[#D1D1D8]"
             >
-              Semester
+              Course
             </label>
 
             <select
-              id="result-semester"
-              value={selectedSemester}
-              onChange={(event) =>
-                setSelectedSemester(event.target.value)
-              }
+              id="result-course"
+              value={selectedCourse}
+              onChange={(event) => setSelectedCourse(event.target.value)}
               className={[
                 'min-h-11 w-full rounded-xl border border-[#454650]',
                 'bg-[#191A21] px-3 py-2.5 text-sm text-[#EAEAE6]',
@@ -383,38 +368,11 @@ export default function StudentResults() {
                 'focus:ring-2 focus:ring-[#CDB5F7]/20',
               ].join(' ')}
             >
-              {semesterFilters.map((semester) => (
-                <option key={semester.value} value={semester.value}>
-                  {semester.label}
-                </option>
-              ))}
-            </select>
-          </div>
+              <option value="all">All Courses</option>
 
-          <div className="min-w-0">
-            <label
-              htmlFor="result-status"
-              className="mb-2 block text-sm font-medium text-[#D1D1D8]"
-            >
-              Publication status
-            </label>
-
-            <select
-              id="result-status"
-              value={selectedStatus}
-              onChange={(event) =>
-                setSelectedStatus(event.target.value)
-              }
-              className={[
-                'min-h-11 w-full rounded-xl border border-[#454650]',
-                'bg-[#191A21] px-3 py-2.5 text-sm text-[#EAEAE6]',
-                'focus:border-[#CDB5F7] focus:outline-none',
-                'focus:ring-2 focus:ring-[#CDB5F7]/20',
-              ].join(' ')}
-            >
-              {RESULT_STATUSES.map((status) => (
-                <option key={status.value} value={status.value}>
-                  {status.label}
+              {courses.map((course) => (
+                <option key={course} value={course}>
+                  {course}
                 </option>
               ))}
             </select>
@@ -428,8 +386,6 @@ export default function StudentResults() {
               className={[
                 'min-h-11 w-full rounded-xl border px-4 py-2.5',
                 'text-sm font-semibold transition-colors',
-                'focus-visible:outline-none focus-visible:ring-2',
-                'focus-visible:ring-[#CDB5F7]',
                 hasActiveFilters
                   ? 'border-[#454650] text-[#D1D1D8] hover:border-[#CDB5F7]'
                   : 'cursor-not-allowed border-[#343640] text-[#666772]',
@@ -448,36 +404,80 @@ export default function StudentResults() {
               id="results-list-heading"
               className="text-lg font-semibold text-[#EAEAE6]"
             >
-              Subject Results
+              Quiz Results
             </h2>
 
             <p className="mt-1 text-sm text-[#858590]">
-              Your available academic result records.
+              Marks from your submitted quiz attempts.
             </p>
           </div>
 
-          <span className="rounded-full border border-[#343640] bg-[#1D1F27] px-3 py-1.5 text-xs text-[#A5A6B0]">
-            {filteredResults.length} displayed
-          </span>
+          {status === 'success' && (
+            <span className="rounded-full border border-[#343640] bg-[#1D1F27] px-3 py-1.5 text-xs text-[#A5A6B0]">
+              {filteredResults.length} displayed
+            </span>
+          )}
         </div>
 
-        {filteredResults.length > 0 ? (
+        {status === 'loading' && (
+          <div
+            className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-8 text-center"
+            role="status"
+            aria-live="polite"
+          >
+            <p className="text-sm text-[#A5A6B0]">
+              Loading your quiz results...
+            </p>
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div
+            className="rounded-2xl border border-red-400/20 bg-red-400/5 p-6"
+            role="alert"
+          >
+            <h3 className="font-semibold text-[#EAEAE6]">
+              Could not load results
+            </h3>
+
+            <p className="mt-2 text-sm leading-6 text-[#A5A6B0]">
+              {errorMessage}
+            </p>
+
+            <button
+              type="button"
+              onClick={loadResults}
+              className={[
+                'mt-4 inline-flex min-h-10 items-center justify-center',
+                'rounded-xl border border-[#454650] px-4 py-2',
+                'text-sm font-semibold text-[#CDB5F7]',
+                'transition-colors hover:border-[#CDB5F7]',
+              ].join(' ')}
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        {status === 'success' && filteredResults.length > 0 && (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filteredResults.map((result) => (
               <ResultCard key={result.id} result={result} />
             ))}
           </div>
-        ) : (
+        )}
+
+        {status === 'success' && filteredResults.length === 0 && (
           <EmptyState
             title={
               hasActiveFilters
                 ? 'No matching results'
-                : 'No results published yet'
+                : 'No quiz results yet'
             }
             description={
               hasActiveFilters
-                ? 'No results match your selected semester, publication status, or search query. Try adjusting the filters.'
-                : 'Your subject-wise marks and grades will appear here when official result records become available.'
+                ? 'No submitted quiz results match your search or selected course. Try adjusting the filters.'
+                : 'Your submitted quiz scores will appear here when results are available.'
             }
             icon={
               <span aria-hidden="true" className="text-2xl">
@@ -494,8 +494,6 @@ export default function StudentResults() {
                     'rounded-xl border border-[#454650] px-4 py-2',
                     'text-sm font-semibold text-[#CDB5F7]',
                     'transition-colors hover:border-[#CDB5F7]',
-                    'focus-visible:outline-none focus-visible:ring-2',
-                    'focus-visible:ring-[#CDB5F7]',
                   ].join(' ')}
                 >
                   Clear filters
@@ -516,8 +514,8 @@ export default function StudentResults() {
         </h3>
 
         <p className="mt-2 max-w-2xl text-sm leading-6 text-[#A5A6B0]">
-          Your mentor can help you review attendance, identify subjects
-          that need attention, and plan your academic follow-up.
+          Your mentor can help you review your progress and plan your
+          academic follow-up.
         </p>
 
         <Link

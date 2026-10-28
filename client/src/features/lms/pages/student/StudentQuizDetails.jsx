@@ -1,163 +1,332 @@
-import { Link, useParams } from "react-router-dom";
-import PageHeader from "../../components/PageHeader.jsx";
-import SectionCard from "../../components/SectionCard.jsx";
-import EmptyState from "../../components/EmptyState.jsx";
+import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+
+import PageHeader from '../../components/PageHeader.jsx';
+import SectionCard from '../../components/SectionCard.jsx';
+import EmptyState from '../../components/EmptyState.jsx';
+import studentQuizService from '../../services/studentQuizService.js';
+
+function getErrorMessage(error) {
+  return (
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unable to load quiz details. Please try again.'
+  );
+}
+
+function formatDate(value) {
+  if (!value) return 'Not specified';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Not specified';
+  }
+
+  return date.toLocaleString('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
+function getStatusLabel(status) {
+  const labels = {
+    available: 'Available',
+    upcoming: 'Upcoming',
+    closed: 'Closed',
+    in_progress: 'In Progress',
+    submitted: 'Submitted',
+  };
+
+  return labels[status] || 'Unavailable';
+}
+
+function getStatusClasses(status) {
+  if (status === 'available') {
+    return 'border-emerald-400/30 bg-emerald-400/10 text-emerald-300';
+  }
+
+  if (status === 'upcoming') {
+    return 'border-[#E5DF98]/30 bg-[#E5DF98]/10 text-[#E5DF98]';
+  }
+
+  return 'border-[#454650] bg-[#252630] text-[#A5A6B0]';
+}
 
 export default function StudentQuizDetails() {
   const { quizId } = useParams();
+  const navigate = useNavigate();
 
-  // Quiz data will be connected to the backend later.
-  const quiz = null;
+  const [quiz, setQuiz] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const loadQuiz = useCallback(async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await studentQuizService.getMyQuizById(quizId);
+
+      setQuiz(result);
+
+      if (!result) {
+        setError(
+          'This quiz is not available in your student quiz list.',
+        );
+      }
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }, [quizId]);
+
+  useEffect(() => {
+    loadQuiz();
+  }, [loadQuiz]);
+
+  function handleStartQuiz() {
+    if (!quiz?.id || quiz.status !== 'available') {
+      return;
+    }
+
+    navigate(`/student/quizzes/${quiz.id}/attempt`);
+  }
+
+  if (loading) {
+    return (
+      <div className="mx-auto w-full max-w-[1100px]">
+        <PageHeader
+          eyebrow="STUDENT WORKSPACE"
+          title="Quiz Details"
+          description="Loading quiz information."
+          breadcrumbs={[
+            { label: 'Dashboard', to: '/student/dashboard' },
+            { label: 'Quizzes', to: '/student/quizzes' },
+            { label: 'Details' },
+          ]}
+        />
+
+        <div
+          className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-8 text-center"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#454650] border-t-[#CDB5F7]" />
+
+          <p className="mt-4 text-sm text-[#A5A6B0]">
+            Fetching quiz details...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !quiz) {
+    return (
+      <div className="mx-auto w-full max-w-[1100px]">
+        <PageHeader
+          eyebrow="STUDENT WORKSPACE"
+          title="Quiz Details"
+          description="We could not load this quiz."
+          breadcrumbs={[
+            { label: 'Dashboard', to: '/student/dashboard' },
+            { label: 'Quizzes', to: '/student/quizzes' },
+          ]}
+        />
+
+        <SectionCard title="Quiz unavailable">
+          <EmptyState
+            title="Quiz not found"
+            description={
+              error ||
+              'This quiz is not currently available to your account.'
+            }
+          />
+
+          <div className="mt-5 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={loadQuiz}
+              className="rounded-xl bg-[#CDB5F7] px-4 py-2.5 text-sm font-semibold text-[#14161C] transition hover:bg-[#D9C8FA]"
+            >
+              Try Again
+            </button>
+
+            <Link
+              to="/student/quizzes"
+              className="rounded-xl border border-[#454650] px-4 py-2.5 text-sm font-medium text-[#EAEAE6] transition hover:bg-[#252630]"
+            >
+              Back to Quizzes
+            </Link>
+          </div>
+        </SectionCard>
+      </div>
+    );
+  }
+
+  const canStart = quiz.status === 'available';
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-[1100px] space-y-6">
       <PageHeader
-        title="Quiz Details"
-        description="Review quiz information, instructions, and attempt availability."
+        eyebrow="STUDENT WORKSPACE"
+        title={quiz.title}
+        description={
+          quiz.description ||
+          'Review the quiz information before starting your attempt.'
+        }
+        breadcrumbs={[
+          { label: 'Dashboard', to: '/student/dashboard' },
+          { label: 'Quizzes', to: '/student/quizzes' },
+          { label: 'Details' },
+        ]}
       />
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Link
-          to="/student/quizzes"
-          className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 transition hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
-        >
-          <span aria-hidden="true">←</span>
-          Back to Quizzes
-        </Link>
-
-        <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-300">
-          Awaiting quiz data
-        </span>
-      </div>
 
       <SectionCard
         title="Quiz Overview"
-        description="Quiz reference and assessment information."
+        description="Review the schedule and assessment details."
+        action={
+          <span
+            className={[
+              'inline-flex rounded-lg border px-3 py-1.5 text-xs font-semibold',
+              getStatusClasses(quiz.status),
+            ].join(' ')}
+          >
+            {getStatusLabel(quiz.status)}
+          </span>
+        }
       >
-        {quiz ? (
-          <div className="space-y-4">
-            <div>
-              <h2 className="text-xl font-semibold text-slate-900 dark:text-white">
-                {quiz.title}
-              </h2>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+            <p className="text-sm text-[#A5A6B0]">Course</p>
 
-              {quiz.description && (
-                <p className="mt-2 text-sm leading-6 text-slate-600 dark:text-slate-300">
-                  {quiz.description}
-                </p>
-              )}
-            </div>
-
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <DetailItem
-                label="Duration"
-                value={
-                  Number.isFinite(quiz.durationMinutes)
-                    ? `${quiz.durationMinutes} minutes`
-                    : "Not specified"
-                }
-              />
-
-              <DetailItem
-                label="Total marks"
-                value={
-                  Number.isFinite(quiz.totalMarks)
-                    ? String(quiz.totalMarks)
-                    : "Not specified"
-                }
-              />
-
-              <DetailItem
-                label="Attempts allowed"
-                value={
-                  Number.isFinite(quiz.attemptsAllowed)
-                    ? String(quiz.attemptsAllowed)
-                    : "Not specified"
-                }
-              />
-
-              <DetailItem
-                label="Availability"
-                value={quiz.status || "Not specified"}
-              />
-            </div>
-          </div>
-        ) : (
-          <EmptyState
-            title="Quiz information is not available yet"
-            description="The quiz record, schedule, duration, and assessment details will appear here when the quiz data is connected."
-          />
-        )}
-      </SectionCard>
-
-      <SectionCard
-        title="Instructions"
-        description="Review the assessment rules before starting an attempt."
-      >
-        {quiz?.instructions ? (
-          <div className="whitespace-pre-wrap text-sm leading-7 text-slate-600 dark:text-slate-300">
-            {quiz.instructions}
-          </div>
-        ) : (
-          <EmptyState
-            title="Instructions pending"
-            description="The faculty-provided quiz instructions will appear here when available."
-          />
-        )}
-      </SectionCard>
-
-      <SectionCard
-        title="Attempt Status"
-        description="Your attempt eligibility and submission status."
-      >
-        <div className="space-y-4">
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/50">
-            <p className="text-sm font-medium text-slate-900 dark:text-white">
-              {quiz ? "Attempt information" : "Attempt unavailable"}
+            <p className="mt-2 font-semibold text-[#EAEAE6]">
+              {quiz.courseName || 'Not specified'}
             </p>
 
-            <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
-              {quiz
-                ? "Attempt eligibility will be determined from the quiz schedule, availability, and your recorded attempts."
-                : "You cannot start an attempt until the quiz information and eligibility have been verified."}
+            {quiz.courseCode && (
+              <p className="mt-1 text-xs text-[#777884]">
+                {quiz.courseCode}
+              </p>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+            <p className="text-sm text-[#A5A6B0]">Duration</p>
+
+            <p className="mt-2 font-semibold text-[#EAEAE6]">
+              {quiz.durationMinutes > 0
+                ? `${quiz.durationMinutes} minutes`
+                : 'Not specified'}
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-3">
-            <Link
-              to="/student/quizzes"
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              Browse Quizzes
-            </Link>
+          <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+            <p className="text-sm text-[#A5A6B0]">Total Marks</p>
 
-            <Link
-              to="/student/results"
-              className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
-            >
-              View Results
-            </Link>
+            <p className="mt-2 font-semibold text-[#EAEAE6]">
+              {Number.isFinite(quiz.totalMarks)
+                ? quiz.totalMarks
+                : 'Not specified'}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+            <p className="text-sm text-[#A5A6B0]">Starts At</p>
+
+            <p className="mt-2 text-sm font-medium leading-6 text-[#EAEAE6]">
+              {formatDate(quiz.startAt)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+            <p className="text-sm text-[#A5A6B0]">Ends At</p>
+
+            <p className="mt-2 text-sm font-medium leading-6 text-[#EAEAE6]">
+              {formatDate(quiz.endAt)}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+            <p className="text-sm text-[#A5A6B0]">Assessment Type</p>
+
+            <p className="mt-2 font-semibold text-[#EAEAE6]">
+              Multiple Choice
+            </p>
           </div>
         </div>
       </SectionCard>
 
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Quiz reference: {quizId}
-      </p>
-    </div>
-  );
-}
+      <SectionCard
+        title="Before You Begin"
+        description="Keep these points in mind during your attempt."
+      >
+        <ul className="space-y-3 text-sm leading-6 text-[#A5A6B0]">
+          <li className="flex gap-3">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#CDB5F7]" />
+            Your attempt timer starts when the server creates your attempt.
+          </li>
 
-function DetailItem({ label, value }) {
-  return (
-    <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-700">
-      <p className="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
-        {label}
-      </p>
+          <li className="flex gap-3">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#CDB5F7]" />
+            Your answers are saved through the quiz API.
+          </li>
 
-      <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
-        {value}
-      </p>
+          <li className="flex gap-3">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#CDB5F7]" />
+            After submission, the server calculates your score.
+          </li>
+
+          <li className="flex gap-3">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#CDB5F7]" />
+            If you already have an active attempt, the server may resume it.
+          </li>
+        </ul>
+      </SectionCard>
+
+      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-[#343640] bg-[#1D1F27] p-5 sm:flex-row sm:items-center">
+        <div>
+          <p className="font-semibold text-[#EAEAE6]">
+            {canStart ? 'Ready to begin?' : 'Quiz not available yet'}
+          </p>
+
+          <p className="mt-1 text-sm leading-6 text-[#A5A6B0]">
+            {canStart
+              ? 'Start your attempt when you are ready.'
+              : quiz.status === 'upcoming'
+                ? 'You can start when the quiz availability window opens.'
+                : 'The quiz is not currently available for a new attempt.'}
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleStartQuiz}
+          disabled={!canStart}
+          className="inline-flex min-h-11 items-center justify-center rounded-xl bg-[#CDB5F7] px-5 py-2.5 text-sm font-semibold text-[#14161C] transition hover:bg-[#D9C8FA] disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Start Quiz
+        </button>
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        <Link
+          to="/student/quizzes"
+          className="inline-flex items-center rounded-xl border border-[#454650] px-4 py-2.5 text-sm font-medium text-[#EAEAE6] transition hover:bg-[#252630]"
+        >
+          Back to Quizzes
+        </Link>
+
+        <Link
+          to="/student/results"
+          className="inline-flex items-center rounded-xl border border-[#454650] px-4 py-2.5 text-sm font-medium text-[#EAEAE6] transition hover:bg-[#252630]"
+        >
+          View Results
+        </Link>
+      </div>
     </div>
   );
 }

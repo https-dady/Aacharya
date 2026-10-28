@@ -107,6 +107,7 @@ import StudentNotifications from "../features/lms/pages/student/StudentNotificat
 import StudentAnnouncements from "../features/lms/pages/student/StudentAnnouncements.jsx";
 import StudentAcademicOverview from "../features/lms/pages/student/StudentAcademicOverview.jsx";
 import StudentCareerResources from "../features/lms/pages/student/StudentCareerResources.jsx";
+import StudentQuizAttempt from "../features/lms/pages/student/StudentQuizAttempt.jsx";
 
 // Alumni pages
 import AlumniDashboard from "../features/lms/pages/alumni/AlumniDashboard.jsx";
@@ -602,6 +603,11 @@ export const applicationRoutes = [
   id: "student-career-resources",
   path: "career/resources",
   element: <StudentCareerResources />,
+},
+{
+  id: "student-quiz-attempt",
+  path: "quizzes/:quizId/attempt",
+  element: <StudentQuizAttempt />,
 },
   ],
 },

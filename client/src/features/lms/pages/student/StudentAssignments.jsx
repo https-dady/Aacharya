@@ -1,15 +1,16 @@
-import { useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { Link } from 'react-router-dom';
 
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
 
-// Connect this collection to the authenticated student's assignments API.
-// Expected fields:
-// id, title, description, courseName, courseCode, dueDate,
-// status: pending | submitted | graded | overdue
-const assignments = [];
+import studentAssignmentService from '../../services/studentAssignmentService.js';
 
 const ASSIGNMENT_FILTERS = [
   { value: 'all', label: 'All Assignments' },
@@ -26,6 +27,12 @@ function normalizeStatus(status) {
     return value;
   }
 
+  // The backend publishes assignments, but submission tracking is
+  // not connected yet. Do not incorrectly label published as submitted.
+  if (value === 'published') {
+    return 'pending';
+  }
+
   return 'unknown';
 }
 
@@ -33,14 +40,14 @@ function getEffectiveStatus(assignment) {
   const status = normalizeStatus(assignment.status);
 
   if (
-    status === 'pending' &&
-    assignment.dueDate
+    status === 'pending'
+    && assignment.dueDate
   ) {
     const dueDate = new Date(assignment.dueDate);
 
     if (
-      !Number.isNaN(dueDate.getTime()) &&
-      dueDate.getTime() < Date.now()
+      !Number.isNaN(dueDate.getTime())
+      && dueDate.getTime() < Date.now()
     ) {
       return 'overdue';
     }
@@ -65,6 +72,18 @@ function formatDueDate(value) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(date);
+}
+
+function normalizeAssignment(assignment) {
+  return {
+    ...assignment,
+    id: String(assignment.id || assignment._id || ''),
+    title: assignment.title || 'Untitled assignment',
+    description: assignment.description || '',
+    courseName: assignment.courseName || assignment.course?.title || '',
+    courseCode: assignment.courseCode || assignment.course?.code || '',
+    status: normalizeStatus(assignment.status),
+  };
 }
 
 function StatusBadge({ status }) {
@@ -144,33 +163,98 @@ function AssignmentCard({ assignment }) {
           </p>
         </div>
 
-        <div className="mt-5 border-t border-[#343640] pt-4">
-          <Link
-            to={`/student/assignments/${encodeURIComponent(assignment.id)}`}
-            className={[
-              'inline-flex min-h-10 w-full items-center justify-center',
-              'rounded-xl border border-[#454650] px-4 py-2',
-              'text-sm font-semibold text-[#CDB5F7]',
-              'transition-colors hover:border-[#CDB5F7]',
-              'hover:bg-[#CDB5F7]/10',
-              'focus-visible:outline-none focus-visible:ring-2',
-              'focus-visible:ring-[#CDB5F7]',
-            ].join(' ')}
+        <div className="mt-4">
+          <p className="text-xs text-[#858590]">Total marks</p>
+
+          <p className="mt-1 text-sm text-[#D1D1D8]">
+            {assignment.totalMarks ?? 'Not specified'}
+          </p>
+        </div>
+
+        {Array.isArray(assignment.attachments)
+          && assignment.attachments.length > 0 && (
+            <div className="mt-4">
+              <p className="mb-2 text-xs text-[#858590]">
+                Attachments
+              </p>
+
+              <ul className="space-y-2">
+                {assignment.attachments.map((attachment, index) => (
+                  <li key={`${attachment.name}-${index}`}>
+                    <a
+                      href={attachment.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="break-words text-sm text-[#CDB5F7] underline-offset-4 hover:underline"
+                    >
+                      {attachment.name || 'View attachment'}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+        <div className="mt-auto border-t border-[#343640] pt-4">
+          <span
+            className="inline-flex min-h-10 w-full cursor-not-allowed items-center justify-center rounded-xl border border-[#343640] px-4 py-2 text-sm font-semibold text-[#858590]"
+            title="Assignment submission details are not connected yet."
           >
-            View Assignment
-            <span className="ml-2" aria-hidden="true">
-              →
-            </span>
-          </Link>
+            Submission Details Not Available
+          </span>
         </div>
       </div>
     </article>
   );
 }
 
+function AssignmentSummaryCard({ card }) {
+  return (
+    <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
+      <p className="text-sm text-[#A5A6B0]">
+        {card.label}
+      </p>
+
+      <p className={`mt-3 text-3xl font-semibold ${card.color}`}>
+        {card.value}
+      </p>
+
+      <p className="mt-2 text-xs text-[#858590]">
+        {card.description}
+      </p>
+    </div>
+  );
+}
+
 export default function StudentAssignments() {
+  const [assignments, setAssignments] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
+
+  const loadAssignments = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const result = await studentAssignmentService.getMyAssignments();
+
+      setAssignments(result.map(normalizeAssignment));
+    } catch (error) {
+      setErrorMessage(
+        error?.message
+          || 'Unable to load your assignments. Please try again.',
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAssignments();
+  }, [loadAssignments]);
 
   const filteredAssignments = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -178,8 +262,8 @@ export default function StudentAssignments() {
     return assignments
       .filter((assignment) => {
         const matchesSearch =
-          !query ||
-          [
+          !query
+          || [
             assignment.title,
             assignment.description,
             assignment.courseName,
@@ -189,8 +273,8 @@ export default function StudentAssignments() {
           );
 
         const matchesStatus =
-          selectedStatus === 'all' ||
-          getEffectiveStatus(assignment) === selectedStatus;
+          selectedStatus === 'all'
+          || getEffectiveStatus(assignment) === selectedStatus;
 
         return matchesSearch && matchesStatus;
       })
@@ -205,7 +289,7 @@ export default function StudentAssignments() {
 
         return dateA - dateB;
       });
-  }, [searchQuery, selectedStatus]);
+  }, [assignments, searchQuery, selectedStatus]);
 
   const summary = useMemo(() => {
     const result = {
@@ -224,10 +308,11 @@ export default function StudentAssignments() {
     });
 
     return result;
-  }, []);
+  }, [assignments]);
 
   const hasActiveFilters =
-    searchQuery.trim() !== '' || selectedStatus !== 'all';
+    searchQuery.trim() !== ''
+    || selectedStatus !== 'all';
 
   function resetFilters() {
     setSearchQuery('');
@@ -266,7 +351,7 @@ export default function StudentAssignments() {
       <PageHeader
         eyebrow="STUDENT WORKSPACE"
         title="My Assignments"
-        description="Track coursework, review deadlines, and monitor your assignment submission status."
+        description="Track coursework, review deadlines, and monitor assignment availability."
         breadcrumbs={[
           { label: 'Dashboard', to: '/student/dashboard' },
           { label: 'Assignments' },
@@ -275,27 +360,7 @@ export default function StudentAssignments() {
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {summaryCards.map((card) => (
-          <div
-            key={card.label}
-            className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5"
-          >
-            <p className="text-sm text-[#A5A6B0]">
-              {card.label}
-            </p>
-
-            <p
-              className={`mt-3 text-3xl font-semibold ${card.color}`}
-              aria-label={`${card.label} assignments: ${
-                assignments.length ? card.value : 'data unavailable'
-              }`}
-            >
-              {assignments.length ? card.value : '—'}
-            </p>
-
-            <p className="mt-2 text-xs text-[#858590]">
-              {card.description}
-            </p>
-          </div>
+          <AssignmentSummaryCard key={card.label} card={card} />
         ))}
       </div>
 
@@ -334,7 +399,7 @@ export default function StudentAssignments() {
               htmlFor="assignment-status"
               className="mb-2 block text-sm font-medium text-[#D1D1D8]"
             >
-              Submission status
+              Assignment status
             </label>
 
             <select
@@ -384,20 +449,58 @@ export default function StudentAssignments() {
               id="assignment-list-heading"
               className="text-lg font-semibold text-[#EAEAE6]"
             >
-              All Assignments
+              Published Assignments
             </h2>
 
             <p className="mt-1 text-sm text-[#858590]">
-              Review the assignments associated with your courses.
+              Assignments published for your academic batch or section.
             </p>
           </div>
 
-          <span className="rounded-full border border-[#343640] bg-[#1D1F27] px-3 py-1.5 text-xs text-[#A5A6B0]">
-            {filteredAssignments.length} displayed
-          </span>
+          {!isLoading && !errorMessage && (
+            <span className="rounded-full border border-[#343640] bg-[#1D1F27] px-3 py-1.5 text-xs text-[#A5A6B0]">
+              {filteredAssignments.length} displayed
+            </span>
+          )}
         </div>
 
-        {filteredAssignments.length > 0 ? (
+        {isLoading ? (
+          <div
+            role="status"
+            aria-live="polite"
+            className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-8 text-center text-sm text-[#A5A6B0]"
+          >
+            Loading your assignments...
+          </div>
+        ) : errorMessage ? (
+          <div
+            role="alert"
+            className="rounded-2xl border border-rose-400/20 bg-rose-400/5 p-6"
+          >
+            <h3 className="font-semibold text-rose-300">
+              Unable to load assignments
+            </h3>
+
+            <p className="mt-2 break-words text-sm text-[#D1D1D8]">
+              {errorMessage}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => void loadAssignments()}
+              className={[
+                'mt-4 inline-flex min-h-10 items-center justify-center',
+                'rounded-xl border border-[#454650] px-4 py-2',
+                'text-sm font-semibold text-[#CDB5F7]',
+                'transition-colors hover:border-[#CDB5F7]',
+                'focus-visible:outline-none focus-visible:ring-2',
+                'focus-visible:ring-[#CDB5F7]',
+              ].join(' ')}
+            >
+              Try again
+            </button>
+          </div>
+        ) : filteredAssignments.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filteredAssignments.map((assignment) => (
               <AssignmentCard
@@ -416,7 +519,7 @@ export default function StudentAssignments() {
             description={
               hasActiveFilters
                 ? 'No assignments match your current search or status filter. Try adjusting the filters.'
-                : 'Assignments published for your enrolled courses will appear here when your assignment data is available.'
+                : 'Assignments published for your courses will appear here when they are assigned to your batch or section.'
             }
             icon={
               <span aria-hidden="true" className="text-2xl">
@@ -469,7 +572,9 @@ export default function StudentAssignments() {
           ].join(' ')}
         >
           View Quizzes
-          <span className="ml-2" aria-hidden="true">→</span>
+          <span className="ml-2" aria-hidden="true">
+            →
+          </span>
         </Link>
       </div>
     </div>

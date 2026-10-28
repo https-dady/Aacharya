@@ -1,20 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import useAuth from '../../../auth/context/useAuth.js';
+import studentProfileService from '../../services/studentProfileService.js';
 
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
+import LoadingState from '../../components/LoadingState.jsx';
 
 function getInitials(name) {
   if (!name || typeof name !== 'string') return 'ST';
 
   const parts = name.trim().split(/\s+/).filter(Boolean);
 
-  return parts
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join('');
+  return (
+    parts
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join('') || 'ST'
+  );
 }
 
 function getText(value) {
@@ -23,6 +27,22 @@ function getText(value) {
   }
 
   return String(value);
+}
+
+function formatDate(value) {
+  if (!value) return 'Not available';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Not available';
+  }
+
+  return new Intl.DateTimeFormat('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  }).format(date);
 }
 
 function ProfileField({ label, value }) {
@@ -39,416 +59,346 @@ function ProfileField({ label, value }) {
   );
 }
 
-function EditableField({
-  label,
-  name,
-  value,
-  onChange,
-  type = 'text',
-  placeholder,
-  required = false,
-}) {
-  return (
-    <div className="min-w-0">
-      <label
-        htmlFor={name}
-        className="mb-2 block text-sm font-medium text-[#D1D1D8]"
-      >
-        {label}
-        {required && (
-          <span className="ml-1 text-rose-300" aria-hidden="true">
-            *
-          </span>
-        )}
-      </label>
+function getErrorMessage(error) {
+  if (error?.response?.status === 401) {
+    return 'Your session may have expired. Please sign in again.';
+  }
 
-      <input
-        id={name}
-        name={name}
-        type={type}
-        value={value}
-        onChange={onChange}
-        placeholder={placeholder}
-        required={required}
-        autoComplete={name === 'phone' ? 'tel' : 'off'}
-        className={[
-          'min-h-11 w-full rounded-xl border border-[#454650]',
-          'bg-[#191A21] px-4 py-2.5 text-sm text-[#EAEAE6]',
-          'placeholder:text-[#777884]',
-          'focus:border-[#CDB5F7] focus:outline-none',
-          'focus:ring-2 focus:ring-[#CDB5F7]/20',
-        ].join(' ')}
-      />
-    </div>
+  if (error?.response?.status === 403) {
+    return 'Your student account is not currently active.';
+  }
+
+  if (error?.response?.status === 404) {
+    return 'No student profile was found for your account.';
+  }
+
+  return (
+    error?.message ||
+    'Unable to load your profile. Please try again.'
   );
 }
 
 export default function StudentProfile() {
   const { user } = useAuth();
 
+  const [profile, setProfile] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const loadProfile = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const result = await studentProfileService.getMyProfile();
+
+      setProfile(result);
+    } catch (error) {
+      setProfile(null);
+      setErrorMessage(getErrorMessage(error));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProfile();
+  }, [loadProfile]);
+
   const displayName =
+    profile?.fullName ||
     user?.fullName ||
     user?.name ||
     'Student';
 
-  const email = user?.email || '';
+  const email = profile?.email || user?.email || '';
 
-  const academicDetails = useMemo(
-    () => [
-      {
-        label: 'Role',
-        value: user?.role,
-      },
-      {
-        label: 'Department',
-        value: user?.departmentName || user?.department?.name,
-      },
-      {
-        label: 'Student ID',
-        value: user?.studentId || user?.enrollmentNumber,
-      },
-      {
-        label: 'Batch',
-        value: user?.batchName || user?.batch?.name,
-      },
-      {
-        label: 'Section',
-        value: user?.sectionName || user?.section?.name,
-      },
-      {
-        label: 'Semester',
-        value: user?.semester,
-      },
-    ],
-    [user],
-  );
+  const departmentName =
+    profile?.department?.name || 'Not available';
 
-  const [isEditing, setIsEditing] = useState(false);
+  const batches = Array.isArray(profile?.batches)
+    ? profile.batches
+    : [];
 
-  const [form, setForm] = useState({
-    fullName:
-      typeof user?.fullName === 'string'
-        ? user.fullName
-        : typeof user?.name === 'string'
-          ? user.name
-          : '',
-    phone:
-      typeof user?.phone === 'string'
-        ? user.phone
-        : '',
-  });
+  const sections = Array.isArray(profile?.sections)
+    ? profile.sections
+    : [];
 
-  const [notice, setNotice] = useState('');
+  const batchNames = batches.length
+    ? batches.map((batch) => batch.name).filter(Boolean).join(', ')
+    : 'Not assigned';
 
-  function handleChange(event) {
-    const { name, value } = event.target;
+  const sectionNames = sections.length
+    ? sections
+        .map((section) => {
+          const sectionName = section.name || section.code;
+          const batchName = section.batch?.name;
 
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
+          if (sectionName && batchName) {
+            return `${sectionName} (${batchName})`;
+          }
 
-    setNotice('');
-  }
+          return sectionName;
+        })
+        .filter(Boolean)
+        .join(', ')
+    : 'Not assigned';
 
-  function handleCancel() {
-    setForm({
-      fullName:
-        typeof user?.fullName === 'string'
-          ? user.fullName
-          : typeof user?.name === 'string'
-            ? user.name
-            : '',
-      phone:
-        typeof user?.phone === 'string'
-          ? user.phone
-          : '',
-    });
-
-    setIsEditing(false);
-    setNotice('');
-  }
-
-  function handleSubmit(event) {
-    event.preventDefault();
-
-    // Profile-update API contract is not yet integrated.
-    // Do not report success or pretend changes were persisted.
-    setNotice(
-      'Profile updates are not connected yet. Your changes have not been saved.',
-    );
-  }
+  const academicDetails = [
+    {
+      label: 'Student ID',
+      value: profile?.institutionalId,
+    },
+    {
+      label: 'Role',
+      value: profile?.role,
+    },
+    {
+      label: 'Department',
+      value: departmentName,
+    },
+    {
+      label: 'Assigned Batches',
+      value: batchNames,
+    },
+    {
+      label: 'Assigned Sections',
+      value: sectionNames,
+    },
+  ];
 
   return (
     <div className="mx-auto w-full max-w-[1200px]">
       <PageHeader
         eyebrow="STUDENT WORKSPACE"
         title="My Profile"
-        description="Review your personal information, academic details, and account information."
+        description="Review your personal information, academic placement, and account status."
         breadcrumbs={[
-          { label: 'Dashboard', to: '/student/dashboard' },
-          { label: 'My Profile' },
+          {
+            label: 'Dashboard',
+            to: '/student/dashboard',
+          },
+          {
+            label: 'My Profile',
+          },
         ]}
       />
 
-      <section className="mb-6 overflow-hidden rounded-2xl border border-[#343640] bg-[#1D1F27]">
-        <div className="h-28 bg-gradient-to-r from-[#302744] via-[#252431] to-[#1D1F27]" />
-
-        <div className="px-5 pb-6 sm:px-7">
-          <div className="-mt-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div className="flex min-w-0 items-end gap-4">
-              <div
-                className={[
-                  'flex h-20 w-20 shrink-0 items-center justify-center',
-                  'rounded-2xl border-4 border-[#1D1F27]',
-                  'bg-[#CDB5F7] text-2xl font-bold text-[#20172D]',
-                ].join(' ')}
-                aria-label={`Initials: ${getInitials(displayName)}`}
-              >
-                {getInitials(displayName)}
-              </div>
-
-              <div className="min-w-0 pb-1">
-                <h2 className="break-words text-xl font-semibold text-[#EAEAE6]">
-                  {displayName}
-                </h2>
-
-                <p className="mt-1 break-words text-sm text-[#A5A6B0]">
-                  {email || 'Email unavailable'}
-                </p>
-
-                <span className="mt-2 inline-flex rounded-full border border-[#CDB5F7]/20 bg-[#CDB5F7]/10 px-2.5 py-1 text-xs font-medium text-[#CDB5F7]">
-                  {getText(user?.role)}
-                </span>
-              </div>
-            </div>
-
-            {!isEditing && (
-              <button
-                type="button"
-                onClick={() => {
-                  setNotice('');
-                  setIsEditing(true);
-                }}
-                className={[
-                  'inline-flex min-h-10 items-center justify-center',
-                  'rounded-xl border border-[#454650] px-4 py-2',
-                  'text-sm font-semibold text-[#CDB5F7]',
-                  'transition-colors hover:border-[#CDB5F7]',
-                  'hover:bg-[#CDB5F7]/10',
-                  'focus-visible:outline-none focus-visible:ring-2',
-                  'focus-visible:ring-[#CDB5F7]',
-                ].join(' ')}
-              >
-                Edit Profile
-              </button>
-            )}
-          </div>
+      {isLoading && (
+        <div className="mb-6 rounded-2xl border border-[#343640] bg-[#1D1F27] p-6">
+          <LoadingState />
         </div>
-      </section>
-
-      {isEditing && (
-        <SectionCard
-          eyebrow="PERSONAL INFORMATION"
-          title="Edit Profile"
-          description="Review your details. Saving changes requires the profile-update API to be integrated."
-        >
-          <form onSubmit={handleSubmit}>
-            <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              <EditableField
-                label="Full Name"
-                name="fullName"
-                value={form.fullName}
-                onChange={handleChange}
-                placeholder="Enter your full name"
-                required
-              />
-
-              <div className="min-w-0">
-                <label
-                  htmlFor="profile-email"
-                  className="mb-2 block text-sm font-medium text-[#D1D1D8]"
-                >
-                  Email Address
-                </label>
-
-                <input
-                  id="profile-email"
-                  type="email"
-                  value={email}
-                  readOnly
-                  className={[
-                    'min-h-11 w-full rounded-xl border border-[#343640]',
-                    'bg-[#252630] px-4 py-2.5 text-sm text-[#858590]',
-                    'cursor-not-allowed',
-                  ].join(' ')}
-                />
-
-                <p className="mt-2 text-xs text-[#858590]">
-                  Email changes are managed through the account process.
-                </p>
-              </div>
-
-              <EditableField
-                label="Phone Number"
-                name="phone"
-                type="tel"
-                value={form.phone}
-                onChange={handleChange}
-                placeholder="Enter your phone number"
-              />
-            </div>
-
-            {notice && (
-              <p
-                role="status"
-                className="mt-5 rounded-xl border border-amber-400/20 bg-amber-400/5 p-4 text-sm leading-6 text-amber-200"
-              >
-                {notice}
-              </p>
-            )}
-
-            <div className="mt-6 flex flex-wrap gap-3 border-t border-[#343640] pt-5">
-              <button
-                type="submit"
-                className={[
-                  'inline-flex min-h-11 items-center justify-center',
-                  'rounded-xl bg-[#CDB5F7] px-5 py-2.5',
-                  'text-sm font-semibold text-[#20172D]',
-                  'transition-colors hover:bg-[#DDCCFA]',
-                  'focus-visible:outline-none focus-visible:ring-2',
-                  'focus-visible:ring-[#CDB5F7]',
-                ].join(' ')}
-              >
-                Save Changes
-              </button>
-
-              <button
-                type="button"
-                onClick={handleCancel}
-                className={[
-                  'inline-flex min-h-11 items-center justify-center',
-                  'rounded-xl border border-[#454650] px-5 py-2.5',
-                  'text-sm font-semibold text-[#D1D1D8]',
-                  'transition-colors hover:border-[#777884]',
-                  'focus-visible:outline-none focus-visible:ring-2',
-                  'focus-visible:ring-[#CDB5F7]',
-                ].join(' ')}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </SectionCard>
       )}
 
-      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <SectionCard
-          eyebrow="ACCOUNT"
-          title="Personal Information"
-          description="Information associated with your authenticated account."
+      {!isLoading && errorMessage && (
+        <section
+          className="mb-6 rounded-2xl border border-rose-400/20 bg-[#1D1F27] p-6"
+          aria-live="polite"
         >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <ProfileField
-              label="Full Name"
-              value={displayName}
-            />
+          <h2 className="text-base font-semibold text-[#EAEAE6]">
+            Unable to load your profile
+          </h2>
 
-            <ProfileField
-              label="Email Address"
-              value={email}
-            />
+          <p className="mt-2 text-sm leading-6 text-rose-200">
+            {errorMessage}
+          </p>
 
-            <ProfileField
-              label="Phone Number"
-              value={user?.phone}
-            />
+          <button
+            type="button"
+            onClick={loadProfile}
+            className={[
+              'mt-4 inline-flex min-h-10 items-center justify-center',
+              'rounded-xl bg-[#CDB5F7] px-4 py-2',
+              'text-sm font-semibold text-[#20172D]',
+              'transition-colors hover:bg-[#DDCCFA]',
+              'focus-visible:outline-none focus-visible:ring-2',
+              'focus-visible:ring-[#CDB5F7]',
+            ].join(' ')}
+          >
+            Retry
+          </button>
+        </section>
+      )}
 
-            <ProfileField
-              label="Account Role"
-              value={user?.role}
+      {!isLoading && profile && (
+        <>
+          <section className="mb-6 overflow-hidden rounded-2xl border border-[#343640] bg-[#1D1F27]">
+            <div className="h-28 bg-gradient-to-r from-[#302744] via-[#252431] to-[#1D1F27]" />
+
+            <div className="px-5 pb-6 sm:px-7">
+              <div className="-mt-10 flex flex-col gap-4 sm:flex-row sm:items-end">
+                <div className="flex min-w-0 items-end gap-4">
+                  <div
+                    className={[
+                      'flex h-20 w-20 shrink-0 items-center justify-center',
+                      'rounded-2xl border-4 border-[#1D1F27]',
+                      'bg-[#CDB5F7] text-2xl font-bold text-[#20172D]',
+                    ].join(' ')}
+                    aria-label={`Initials: ${getInitials(displayName)}`}
+                  >
+                    {getInitials(displayName)}
+                  </div>
+
+                  <div className="min-w-0 pb-1">
+                    <h2 className="break-words text-xl font-semibold text-[#EAEAE6]">
+                      {displayName}
+                    </h2>
+
+                    <p className="mt-1 break-words text-sm text-[#A5A6B0]">
+                      {email || 'Email unavailable'}
+                    </p>
+
+                    <span className="mt-2 inline-flex rounded-full border border-[#CDB5F7]/20 bg-[#CDB5F7]/10 px-2.5 py-1 text-xs font-medium text-[#CDB5F7]">
+                      {getText(profile.role)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+            <SectionCard
+              eyebrow="ACCOUNT"
+              title="Personal Information"
+              description="Information retrieved from your authenticated student account."
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <ProfileField
+                  label="Full Name"
+                  value={profile.fullName}
+                />
+
+                <ProfileField
+                  label="Email Address"
+                  value={profile.email}
+                />
+
+                <ProfileField
+                  label="Student ID"
+                  value={profile.institutionalId}
+                />
+
+                <ProfileField
+                  label="Account Role"
+                  value={profile.role}
+                />
+              </div>
+            </SectionCard>
+
+            <SectionCard
+              eyebrow="ACADEMICS"
+              title="Academic Information"
+              description="Your department, batches, and sections assigned by your institution."
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {academicDetails.map((detail) => (
+                  <ProfileField
+                    key={detail.label}
+                    label={detail.label}
+                    value={detail.value}
+                  />
+                ))}
+              </div>
+            </SectionCard>
+          </div>
+
+          <div className="mt-6">
+            <SectionCard
+              eyebrow="ACCOUNT SECURITY"
+              title="Account Status"
+              description="Current activation and verification information for your account."
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <ProfileField
+                  label="Account Status"
+                  value={profile.status}
+                />
+
+                <ProfileField
+                  label="Account Activated"
+                  value={
+                    typeof profile.isAccountActivated === 'boolean'
+                      ? profile.isAccountActivated
+                        ? 'Yes'
+                        : 'No'
+                      : undefined
+                  }
+                />
+
+                <ProfileField
+                  label="Email Verified"
+                  value={
+                    typeof profile.isEmailVerified === 'boolean'
+                      ? profile.isEmailVerified
+                        ? 'Yes'
+                        : 'No'
+                      : undefined
+                  }
+                />
+
+                <ProfileField
+                  label="Email Verified On"
+                  value={formatDate(profile.emailVerifiedAt)}
+                />
+
+                <ProfileField
+                  label="Account Created"
+                  value={formatDate(profile.createdAt)}
+                />
+
+                <ProfileField
+                  label="Last Profile Update"
+                  value={formatDate(profile.updatedAt)}
+                />
+              </div>
+            </SectionCard>
+          </div>
+
+          <div className="mt-6">
+            <EmptyState
+              title="Need academic assistance?"
+              description="Review your attendance or academic results to keep track of your progress."
+              icon={
+                <span aria-hidden="true" className="text-2xl">
+                  ↗
+                </span>
+              }
+              action={
+                <div className="flex flex-wrap justify-center gap-3">
+                  <a
+                    href="/student/attendance"
+                    className={[
+                      'inline-flex min-h-10 items-center justify-center',
+                      'rounded-xl border border-[#454650] px-4 py-2',
+                      'text-sm font-semibold text-[#CDB5F7]',
+                      'transition-colors hover:border-[#CDB5F7]',
+                      'focus-visible:outline-none focus-visible:ring-2',
+                      'focus-visible:ring-[#CDB5F7]',
+                    ].join(' ')}
+                  >
+                    View Attendance
+                  </a>
+
+                  <a
+                    href="/student/results"
+                    className={[
+                      'inline-flex min-h-10 items-center justify-center',
+                      'rounded-xl border border-[#454650] px-4 py-2',
+                      'text-sm font-semibold text-[#CDB5F7]',
+                      'transition-colors hover:border-[#CDB5F7]',
+                      'focus-visible:outline-none focus-visible:ring-2',
+                      'focus-visible:ring-[#CDB5F7]',
+                    ].join(' ')}
+                  >
+                    View Results
+                  </a>
+                </div>
+              }
             />
           </div>
-        </SectionCard>
-
-        <SectionCard
-          eyebrow="ACADEMICS"
-          title="Academic Information"
-          description="Your department and academic placement details."
-        >
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {academicDetails.map((detail) => (
-              <ProfileField
-                key={detail.label}
-                label={detail.label}
-                value={detail.value}
-              />
-            ))}
-          </div>
-        </SectionCard>
-      </div>
-
-      <div className="mt-6">
-        <SectionCard
-          eyebrow="ACCOUNT SECURITY"
-          title="Account Information"
-          description="Your profile is displayed using the currently authenticated user context."
-        >
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
-              <p className="text-sm font-medium text-[#EAEAE6]">
-                Authentication
-              </p>
-
-              <p className="mt-2 text-sm leading-6 text-[#A5A6B0]">
-                Your account identity is supplied by the existing
-                authentication context.
-              </p>
-            </div>
-
-            <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
-              <p className="text-sm font-medium text-[#EAEAE6]">
-                Profile Updates
-              </p>
-
-              <p className="mt-2 text-sm leading-6 text-[#A5A6B0]">
-                Editing is available as a local form preview. Changes
-                cannot be persisted until an approved backend endpoint
-                is integrated.
-              </p>
-            </div>
-          </div>
-        </SectionCard>
-      </div>
-
-      <div className="mt-6">
-        <EmptyState
-          title="Need academic assistance?"
-          description="Review your attendance or academic results to keep track of your progress."
-          icon={
-            <span aria-hidden="true" className="text-2xl">
-              ↗
-            </span>
-          }
-          action={
-            <div className="flex flex-wrap justify-center gap-3">
-              <a
-                href="/student/attendance"
-                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-semibold text-[#CDB5F7] transition-colors hover:border-[#CDB5F7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
-              >
-                View Attendance
-              </a>
-
-              <a
-                href="/student/results"
-                className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-semibold text-[#CDB5F7] transition-colors hover:border-[#CDB5F7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
-              >
-                View Results
-              </a>
-            </div>
-          }
-        />
-      </div>
+        </>
+      )}
     </div>
   );
 }

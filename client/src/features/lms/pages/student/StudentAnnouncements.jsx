@@ -1,14 +1,76 @@
-import { useMemo, useState } from "react";
-import PageHeader from "../../components/PageHeader.jsx";
-import SectionCard from "../../components/SectionCard.jsx";
-import EmptyState from "../../components/EmptyState.jsx";
+import { useCallback, useEffect, useMemo, useState } from 'react';
+
+import PageHeader from '../../components/PageHeader.jsx';
+import SectionCard from '../../components/SectionCard.jsx';
+import EmptyState from '../../components/EmptyState.jsx';
+import LoadingState from '../../components/LoadingState.jsx';
+
+import notificationService from '../../services/notificationService.js';
+
+function formatDate(value) {
+  if (!value) return 'Date unavailable';
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Date unavailable';
+  }
+
+  return new Intl.DateTimeFormat('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function getErrorMessage(error) {
+  if (error?.response?.status === 401) {
+    return 'Your session may have expired. Please sign in again.';
+  }
+
+  if (error?.response?.status === 403) {
+    return 'Your account does not currently have access to announcements.';
+  }
+
+  return (
+    error?.message ||
+    'Unable to load official announcements. Please try again.'
+  );
+}
 
 export default function StudentAnnouncements() {
-  const [searchQuery, setSearchQuery] = useState("");
+  const [announcements, setAnnouncements] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedAnnouncement, setSelectedAnnouncement] = useState(null);
 
-  // Backend integration pending. Do not display fabricated announcements.
-  const announcements = [];
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const loadAnnouncements = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const result = await notificationService.getNotifications({
+        page: 1,
+        limit: 100,
+        type: 'announcement',
+      });
+
+      setAnnouncements(result.items);
+    } catch (error) {
+      setAnnouncements([]);
+      setErrorMessage(getErrorMessage(error));
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAnnouncements();
+  }, [loadAnnouncements]);
 
   const filteredAnnouncements = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -19,24 +81,28 @@ export default function StudentAnnouncements() {
       [
         announcement.title,
         announcement.message,
-        announcement.category,
-      ].some((value) => value?.toLowerCase().includes(query))
+        announcement.type,
+      ].some(
+        (value) =>
+          typeof value === 'string' &&
+          value.toLowerCase().includes(query),
+      ),
     );
   }, [announcements, searchQuery]);
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-[1200px] space-y-6">
       <PageHeader
-        eyebrow="Student Workspace"
+        eyebrow="STUDENT WORKSPACE"
         title="Official Announcements"
-        description="Read official academic and institutional announcements relevant to your account."
+        description="Read official announcements and institutional updates available to your account."
         breadcrumbs={[
-          { label: "Student", to: "/student/dashboard" },
-          { label: "Official Announcements" },
+          { label: 'Student', to: '/student/dashboard' },
+          { label: 'Official Announcements' },
         ]}
       />
 
-      <div className="rounded-2xl border border-[#343640] bg-[#202126] p-5 sm:p-6">
+      <section className="rounded-2xl border border-[#343640] bg-[#202126] p-5 sm:p-6">
         <div className="flex items-start gap-4">
           <div
             aria-hidden="true"
@@ -49,63 +115,105 @@ export default function StudentAnnouncements() {
             <h2 className="font-semibold text-[#EAEAE6]">
               Institutional updates
             </h2>
+
             <p className="mt-1 text-sm leading-6 text-[#A5A6B0]">
-              Official announcements published for eligible recipients will
-              appear here. Email delivery and in-app notifications are separate
-              channels.
+              Announcements returned by the server for your authenticated
+              account will appear here.
             </p>
           </div>
         </div>
-      </div>
+      </section>
+
+      {errorMessage && (
+        <section
+          role="alert"
+          className="rounded-xl border border-rose-400/20 bg-[#202126] p-5"
+        >
+          <h2 className="font-semibold text-[#EAEAE6]">
+            Unable to load announcements
+          </h2>
+
+          <p className="mt-2 text-sm text-rose-200">
+            {errorMessage}
+          </p>
+
+          <button
+            type="button"
+            onClick={loadAnnouncements}
+            className="mt-4 rounded-xl border border-[#454650] px-4 py-2 text-sm font-semibold text-[#CDB5F7] transition hover:border-[#CDB5F7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+          >
+            Retry
+          </button>
+        </section>
+      )}
 
       <SectionCard
         title="Announcements"
-        description="Search and open announcements published for your account."
+        description="Search and open official announcements available to your account."
       >
-        <div>
-          <label
-            htmlFor="announcement-search"
-            className="mb-2 block text-sm font-medium text-[#EAEAE6]"
-          >
-            Search announcements
-          </label>
-
-          <input
-            id="announcement-search"
-            type="search"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="Search by title, content, or category..."
-            className="w-full rounded-xl border border-[#3B3C43] bg-[#26272B] px-4 py-3 text-sm text-[#EAEAE6] placeholder:text-[#777985] focus:border-[#CDB5F7] focus:outline-none focus:ring-2 focus:ring-[#CDB5F7]/20"
-          />
-        </div>
-
-        <p
-          className="mt-4 text-sm text-[#A5A6B0]"
-          aria-live="polite"
+        <label
+          htmlFor="announcement-search"
+          className="mb-2 block text-sm font-medium text-[#EAEAE6]"
         >
-          {filteredAnnouncements.length} announcements available
+          Search announcements
+        </label>
+
+        <input
+          id="announcement-search"
+          type="search"
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Search by title or content..."
+          className={[
+            'w-full rounded-xl border border-[#3B3C43]',
+            'bg-[#26272B] px-4 py-3 text-sm text-[#EAEAE6]',
+            'placeholder:text-[#777985] focus:border-[#CDB5F7]',
+            'focus:outline-none focus:ring-2 focus:ring-[#CDB5F7]/20',
+          ].join(' ')}
+        />
+
+        <p className="mt-4 text-sm text-[#A5A6B0]" aria-live="polite">
+          {isLoading
+            ? 'Loading announcements…'
+            : `${filteredAnnouncements.length} announcements available`}
         </p>
 
         <div className="mt-5 border-t border-[#343640] pt-5">
-          {filteredAnnouncements.length === 0 ? (
+          {isLoading ? (
+            <LoadingState
+              message="Loading official announcements"
+              rows={3}
+            />
+          ) : filteredAnnouncements.length === 0 ? (
             <EmptyState
               title={
-                searchQuery
-                  ? "No matching announcements"
-                  : "No official announcements yet"
+                errorMessage
+                  ? 'Announcements unavailable'
+                  : searchQuery
+                    ? 'No matching announcements'
+                    : 'No official announcements yet'
               }
               description={
-                searchQuery
-                  ? "Try another search term."
-                  : "Official announcements will appear here when they are published and made available to your account."
+                errorMessage
+                  ? 'Retry to check whether announcements are available.'
+                  : searchQuery
+                    ? 'Try another search term.'
+                    : 'Official announcements will appear here when they are published for your account.'
               }
               icon="§"
               action={
-                searchQuery ? (
+                errorMessage ? (
                   <button
                     type="button"
-                    onClick={() => setSearchQuery("")}
+                    onClick={loadAnnouncements}
+                    className="rounded-xl border border-[#3B3C43] px-4 py-2.5 text-sm font-medium text-[#EAEAE6] transition hover:bg-[#26272B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                  >
+                    Retry
+                  </button>
+                ) : searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
                     className="rounded-xl border border-[#3B3C43] px-4 py-2.5 text-sm font-medium text-[#EAEAE6] transition hover:bg-[#26272B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
                   >
                     Clear search
@@ -115,42 +223,42 @@ export default function StudentAnnouncements() {
             />
           ) : (
             <div className="space-y-3">
-              {filteredAnnouncements.map((announcement) => (
-                <article
-                  key={announcement.id}
-                  className="rounded-xl border border-[#343640] bg-[#26272B] p-4 sm:p-5"
-                >
-                  <div className="flex flex-wrap items-center gap-2">
-                    {announcement.category && (
-                      <span className="rounded-full bg-[#CDB5F7]/10 px-3 py-1 text-xs font-medium text-[#CDB5F7]">
-                        {announcement.category}
-                      </span>
-                    )}
+              {filteredAnnouncements.map((announcement) => {
+                const id = announcement.id || announcement._id;
 
-                    {announcement.publishedAt && (
-                      <span className="text-xs text-[#777985]">
-                        {announcement.publishedAt}
-                      </span>
-                    )}
-                  </div>
-
-                  <h3 className="mt-3 font-semibold text-[#EAEAE6]">
-                    {announcement.title}
-                  </h3>
-
-                  <p className="mt-2 line-clamp-3 text-sm leading-6 text-[#A5A6B0]">
-                    {announcement.message}
-                  </p>
-
-                  <button
-                    type="button"
-                    onClick={() => setSelectedAnnouncement(announcement)}
-                    className="mt-4 rounded-lg border border-[#CDB5F7]/30 px-3 py-2 text-sm font-medium text-[#CDB5F7] transition hover:bg-[#CDB5F7]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                return (
+                  <article
+                    key={id}
+                    className="rounded-xl border border-[#343640] bg-[#26272B] p-4 sm:p-5"
                   >
-                    Read announcement
-                  </button>
-                </article>
-              ))}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-[#CDB5F7]/10 px-3 py-1 text-xs font-medium capitalize text-[#CDB5F7]">
+                        {announcement.type || 'Announcement'}
+                      </span>
+
+                      <span className="text-xs text-[#777985]">
+                        {formatDate(announcement.createdAt)}
+                      </span>
+                    </div>
+
+                    <h3 className="mt-3 break-words font-semibold text-[#EAEAE6]">
+                      {announcement.title || 'Untitled announcement'}
+                    </h3>
+
+                    <p className="mt-2 line-clamp-3 break-words text-sm leading-6 text-[#A5A6B0]">
+                      {announcement.message}
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAnnouncement(announcement)}
+                      className="mt-4 rounded-lg border border-[#CDB5F7]/30 px-3 py-2 text-sm font-medium text-[#CDB5F7] transition hover:bg-[#CDB5F7]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                    >
+                      Read announcement
+                    </button>
+                  </article>
+                );
+              })}
             </div>
           )}
         </div>
@@ -172,23 +280,21 @@ export default function StudentAnnouncements() {
             className="w-full max-w-2xl rounded-t-2xl border border-[#343640] bg-[#202126] p-6 shadow-2xl sm:rounded-2xl"
           >
             <div className="flex items-start justify-between gap-4">
-              <div>
+              <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-wider text-[#CDB5F7]">
                   Official announcement
                 </p>
 
                 <h2
                   id="announcement-detail-title"
-                  className="mt-2 text-xl font-semibold text-[#EAEAE6]"
+                  className="mt-2 break-words text-xl font-semibold text-[#EAEAE6]"
                 >
-                  {selectedAnnouncement.title}
+                  {selectedAnnouncement.title || 'Untitled announcement'}
                 </h2>
 
-                {selectedAnnouncement.publishedAt && (
-                  <p className="mt-2 text-xs text-[#777985]">
-                    Published {selectedAnnouncement.publishedAt}
-                  </p>
-                )}
+                <p className="mt-2 text-xs text-[#777985]">
+                  Published {formatDate(selectedAnnouncement.createdAt)}
+                </p>
               </div>
 
               <button
@@ -201,14 +307,12 @@ export default function StudentAnnouncements() {
               </button>
             </div>
 
-            {selectedAnnouncement.category && (
-              <span className="mt-4 inline-flex rounded-full bg-[#CDB5F7]/10 px-3 py-1 text-xs font-medium text-[#CDB5F7]">
-                {selectedAnnouncement.category}
-              </span>
-            )}
+            <span className="mt-4 inline-flex rounded-full bg-[#CDB5F7]/10 px-3 py-1 text-xs font-medium capitalize text-[#CDB5F7]">
+              {selectedAnnouncement.type || 'Announcement'}
+            </span>
 
             <div className="mt-5 max-h-[55vh] overflow-y-auto">
-              <p className="whitespace-pre-wrap text-sm leading-7 text-[#C4C5CD]">
+              <p className="whitespace-pre-wrap break-words text-sm leading-7 text-[#C4C5CD]">
                 {selectedAnnouncement.message}
               </p>
             </div>

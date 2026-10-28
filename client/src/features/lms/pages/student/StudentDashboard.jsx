@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import useAuth from '../../../auth/context/useAuth.js';
@@ -5,6 +6,9 @@ import useAuth from '../../../auth/context/useAuth.js';
 import EmptyState from '../../components/EmptyState.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
+import LoadingState from '../../components/LoadingState.jsx';
+
+import studentProfileService from '../../services/studentProfileService.js';
 
 const STUDENT_SECTIONS = [
   {
@@ -78,7 +82,12 @@ const DASHBOARD_METRICS = [
   },
 ];
 
-function getDisplayName(user) {
+function getDisplayName(user, profile) {
+  const profileName =
+    typeof profile?.fullName === 'string'
+      ? profile.fullName.trim()
+      : '';
+
   const fullName =
     typeof user?.fullName === 'string'
       ? user.fullName.trim()
@@ -89,7 +98,15 @@ function getDisplayName(user) {
       ? user.name.trim()
       : '';
 
-  return fullName || name || 'Student';
+  return profileName || fullName || name || 'Student';
+}
+
+function getText(value) {
+  if (value === null || value === undefined || value === '') {
+    return 'Not available';
+  }
+
+  return String(value);
 }
 
 function DashboardMetric({ metric }) {
@@ -183,9 +200,134 @@ function StudentQuickLink({ section }) {
   );
 }
 
+function StudentAcademicSummary({ profile }) {
+  const batches = Array.isArray(profile?.batches)
+    ? profile.batches
+    : [];
+
+  const sections = Array.isArray(profile?.sections)
+    ? profile.sections
+    : [];
+
+  const batchNames = batches.length
+    ? batches.map((batch) => batch.name || batch.code).filter(Boolean).join(', ')
+    : 'Not assigned';
+
+  const sectionNames = sections.length
+    ? sections
+        .map((section) => section.name || section.code)
+        .filter(Boolean)
+        .join(', ')
+    : 'Not assigned';
+
+  return (
+    <SectionCard
+      eyebrow="YOUR ACCOUNT"
+      title="Academic Placement"
+      description="Your current institutional and academic assignment details."
+      action={
+        <Link
+          to="/student/profile"
+          className={[
+            'inline-flex min-h-9 items-center justify-center',
+            'rounded-lg border border-[#454650] px-3 py-2',
+            'text-xs font-semibold text-[#CDB5F7]',
+            'transition-colors hover:border-[#CDB5F7]',
+            'focus-visible:outline-none focus-visible:ring-2',
+            'focus-visible:ring-[#CDB5F7]',
+          ].join(' ')}
+        >
+          View profile
+        </Link>
+      }
+    >
+      <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="min-w-0 rounded-xl border border-[#343640] bg-[#191A21] p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[#858590]">
+            Student ID
+          </p>
+
+          <p className="mt-2 break-words text-sm font-semibold text-[#EAEAE6]">
+            {getText(profile?.institutionalId)}
+          </p>
+        </div>
+
+        <div className="min-w-0 rounded-xl border border-[#343640] bg-[#191A21] p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[#858590]">
+            Department
+          </p>
+
+          <p className="mt-2 break-words text-sm font-semibold text-[#EAEAE6]">
+            {getText(profile?.department?.name)}
+          </p>
+        </div>
+
+        <div className="min-w-0 rounded-xl border border-[#343640] bg-[#191A21] p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[#858590]">
+            Assigned Batches
+          </p>
+
+          <p className="mt-2 break-words text-sm font-semibold text-[#EAEAE6]">
+            {batchNames}
+          </p>
+        </div>
+
+        <div className="min-w-0 rounded-xl border border-[#343640] bg-[#191A21] p-4">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-[#858590]">
+            Assigned Sections
+          </p>
+
+          <p className="mt-2 break-words text-sm font-semibold text-[#EAEAE6]">
+            {sectionNames}
+          </p>
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
 export default function StudentDashboard() {
   const { user } = useAuth();
-  const displayName = getDisplayName(user);
+
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState('');
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadProfile() {
+      setProfileLoading(true);
+      setProfileError('');
+
+      try {
+        const result = await studentProfileService.getMyProfile();
+
+        if (isMounted) {
+          setProfile(result);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setProfileError(
+            error?.message ||
+              'Student profile information is temporarily unavailable.',
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setProfileLoading(false);
+        }
+      }
+    }
+
+    loadProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const displayName = getDisplayName(user, profile);
 
   return (
     <div className="mx-auto w-full max-w-[1200px]">
@@ -211,6 +353,43 @@ export default function StudentDashboard() {
           />
         ))}
       </section>
+
+      {profileLoading && (
+        <div className="mb-6">
+          <LoadingState
+            message="Loading your academic placement"
+            rows={2}
+          />
+        </div>
+      )}
+
+      {!profileLoading && profile && (
+        <div className="mb-6">
+          <StudentAcademicSummary profile={profile} />
+        </div>
+      )}
+
+      {!profileLoading && profileError && !profile && (
+        <div
+          role="status"
+          className="mb-6 rounded-xl border border-[#343640] bg-[#1D1F27] p-4"
+        >
+          <p className="text-sm text-[#A5A6B0]">
+            Academic placement information is unavailable right now.
+          </p>
+
+          <p className="mt-1 text-xs text-[#858590]">
+            {profileError}
+          </p>
+
+          <Link
+            to="/student/profile"
+            className="mt-3 inline-flex text-sm font-semibold text-[#CDB5F7] hover:underline"
+          >
+            Open My Profile
+          </Link>
+        </div>
+      )}
 
       <div className="grid min-w-0 grid-cols-1 gap-6 xl:grid-cols-[1.35fr_1fr]">
         <SectionCard
@@ -239,10 +418,7 @@ export default function StudentDashboard() {
               title="No upcoming activities available"
               description="Your upcoming classes, assignment deadlines, and assessments will appear here when the relevant academic data is connected."
               icon={
-                <span
-                  aria-hidden="true"
-                  className="text-2xl"
-                >
+                <span aria-hidden="true" className="text-2xl">
                   ◷
                 </span>
               }
@@ -274,10 +450,7 @@ export default function StudentDashboard() {
               title="Progress data not available"
               description="Attendance percentages, assessment performance, and academic progress will be displayed once actual student records are available."
               icon={
-                <span
-                  aria-hidden="true"
-                  className="text-2xl"
-                >
+                <span aria-hidden="true" className="text-2xl">
                   ↗
                 </span>
               }

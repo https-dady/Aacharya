@@ -1,16 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
-
-// Connect this collection to the authenticated student's quiz API.
-// Expected fields:
-// id, title, description, courseName, courseCode,
-// startAt, endAt, durationMinutes, totalMarks,
-// status: upcoming | available | in_progress | submitted | closed
-const quizzes = [];
+import studentQuizService from '../../services/studentQuizService.js';
 
 const QUIZ_FILTERS = [
   { value: 'all', label: 'All Quizzes' },
@@ -241,9 +235,84 @@ function QuizCard({ quiz }) {
   );
 }
 
+function LoadingState() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-8 text-center"
+    >
+      <div
+        className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-[#454650] border-t-[#CDB5F7]"
+        aria-hidden="true"
+      />
+
+      <p className="mt-4 text-sm text-[#D1D1D8]">
+        Loading your quizzes...
+      </p>
+    </div>
+  );
+}
+
+function ErrorState({ message, onRetry }) {
+  return (
+    <div
+      role="alert"
+      className="rounded-2xl border border-rose-400/20 bg-rose-400/5 p-6"
+    >
+      <h3 className="font-semibold text-rose-300">
+        Unable to load quizzes
+      </h3>
+
+      <p className="mt-2 break-words text-sm leading-6 text-[#A5A6B0]">
+        {message}
+      </p>
+
+      <button
+        type="button"
+        onClick={onRetry}
+        className={[
+          'mt-4 inline-flex min-h-10 items-center justify-center',
+          'rounded-xl border border-[#CDB5F7]/40 px-4 py-2',
+          'text-sm font-semibold text-[#CDB5F7]',
+          'transition-colors hover:bg-[#CDB5F7]/10',
+          'focus-visible:outline-none focus-visible:ring-2',
+          'focus-visible:ring-[#CDB5F7]',
+        ].join(' ')}
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
 export default function StudentQuizzes() {
+  const [quizzes, setQuizzes] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  const loadQuizzes = useCallback(async () => {
+    setIsLoading(true);
+    setError('');
+
+    try {
+      const data = await studentQuizService.getMyQuizzes();
+      setQuizzes(data);
+    } catch (requestError) {
+      setError(
+        requestError?.message ||
+          'Something went wrong while loading your quizzes.',
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadQuizzes();
+  }, [loadQuizzes]);
 
   const filteredQuizzes = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
@@ -278,14 +347,12 @@ export default function StudentQuizzes() {
 
         return dateA - dateB;
       });
-  }, [searchQuery, selectedStatus]);
+  }, [quizzes, searchQuery, selectedStatus]);
 
   const summary = useMemo(() => {
     const result = {
       available: 0,
       upcoming: 0,
-      in_progress: 0,
-      submitted: 0,
       closed: 0,
     };
 
@@ -298,7 +365,7 @@ export default function StudentQuizzes() {
     });
 
     return result;
-  }, []);
+  }, [quizzes]);
 
   const hasActiveFilters =
     searchQuery.trim() !== '' || selectedStatus !== 'all';
@@ -312,7 +379,7 @@ export default function StudentQuizzes() {
     {
       label: 'Available Now',
       value: summary.available,
-      description: 'Quizzes available to attempt',
+      description: 'Quizzes currently available',
       color: 'text-emerald-300',
     },
     {
@@ -322,15 +389,15 @@ export default function StudentQuizzes() {
       color: 'text-violet-300',
     },
     {
-      label: 'In Progress',
-      value: summary.in_progress,
-      description: 'Attempts in progress',
-      color: 'text-sky-300',
+      label: 'Closed',
+      value: summary.closed,
+      description: 'Quizzes no longer available',
+      color: 'text-[#A5A6B0]',
     },
     {
-      label: 'Submitted',
-      value: summary.submitted,
-      description: 'Completed submissions',
+      label: 'Total Quizzes',
+      value: quizzes.length,
+      description: 'Published quizzes for your account',
       color: 'text-[#CDB5F7]',
     },
   ];
@@ -358,7 +425,7 @@ export default function StudentQuizzes() {
             </p>
 
             <p className={`mt-3 text-3xl font-semibold ${card.color}`}>
-              {quizzes.length ? card.value : '—'}
+              {isLoading ? '—' : card.value}
             </p>
 
             <p className="mt-2 text-xs text-[#858590]">
@@ -462,11 +529,15 @@ export default function StudentQuizzes() {
           </div>
 
           <span className="rounded-full border border-[#343640] bg-[#1D1F27] px-3 py-1.5 text-xs text-[#A5A6B0]">
-            {filteredQuizzes.length} displayed
+            {isLoading ? 'Loading...' : `${filteredQuizzes.length} displayed`}
           </span>
         </div>
 
-        {filteredQuizzes.length > 0 ? (
+        {isLoading ? (
+          <LoadingState />
+        ) : error ? (
+          <ErrorState message={error} onRetry={loadQuizzes} />
+        ) : filteredQuizzes.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filteredQuizzes.map((quiz) => (
               <QuizCard key={quiz.id} quiz={quiz} />
@@ -482,7 +553,7 @@ export default function StudentQuizzes() {
             description={
               hasActiveFilters
                 ? 'No quizzes match your current search or status filter. Try adjusting your selections.'
-                : 'Quizzes published for your enrolled courses will appear here when assessment data is available.'
+                : 'Published quizzes assigned to your department, batch, and section will appear here.'
             }
             icon={
               <span aria-hidden="true" className="text-2xl">

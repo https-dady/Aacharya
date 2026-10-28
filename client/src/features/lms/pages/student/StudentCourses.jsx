@@ -1,9 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+
+import studentCourseService from '../../services/studentCourseService.js';
 
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
+import LoadingState from '../../components/LoadingState.jsx';
 
 const COURSE_CATEGORIES = [
   { value: 'all', label: 'All Courses' },
@@ -13,17 +16,10 @@ const COURSE_CATEGORIES = [
 
 const COURSE_STATUSES = [
   { value: 'all', label: 'All Statuses' },
-  { value: 'active', label: 'In Progress' },
-  { value: 'completed', label: 'Completed' },
+  { value: 'active', label: 'Active Courses' },
 ];
 
-// Connect this collection to the student courses API later.
-// Do not populate it with fabricated course records.
-const enrolledCourses = [];
-
 function CourseCard({ course }) {
-  const isCompleted = course.status === 'completed';
-
   return (
     <article className="flex min-w-0 flex-col rounded-2xl border border-[#343640] bg-[#191A21] transition-colors hover:border-[#CDB5F7]/35">
       <div className="border-b border-[#343640] p-5">
@@ -32,15 +28,8 @@ function CourseCard({ course }) {
             {course.code || 'Course'}
           </span>
 
-          <span
-            className={[
-              'rounded-full border px-2.5 py-1 text-[11px] font-medium',
-              isCompleted
-                ? 'border-emerald-400/20 bg-emerald-400/10 text-emerald-300'
-                : 'border-[#E5DF98]/20 bg-[#E5DF98]/10 text-[#E5DF98]',
-            ].join(' ')}
-          >
-            {isCompleted ? 'Completed' : 'In Progress'}
+          <span className="rounded-full border border-[#E5DF98]/20 bg-[#E5DF98]/10 px-2.5 py-1 text-[11px] font-medium text-[#E5DF98]">
+            Active
           </span>
         </div>
 
@@ -60,21 +49,21 @@ function CourseCard({ course }) {
           <div className="min-w-0">
             <dt className="text-xs text-[#858590]">Faculty</dt>
             <dd className="mt-1 break-words text-sm text-[#D1D1D8]">
-              {course.facultyName || 'Not available'}
+              {course.facultyName || 'Not assigned'}
             </dd>
           </div>
 
           <div className="min-w-0">
             <dt className="text-xs text-[#858590]">Semester</dt>
             <dd className="mt-1 break-words text-sm text-[#D1D1D8]">
-              {course.semester || 'Not available'}
+              {course.semester || 'Not specified'}
             </dd>
           </div>
 
           <div className="min-w-0">
             <dt className="text-xs text-[#858590]">Category</dt>
             <dd className="mt-1 text-sm capitalize text-[#D1D1D8]">
-              {course.category || 'Not available'}
+              {course.category || 'Not specified'}
             </dd>
           </div>
 
@@ -87,38 +76,70 @@ function CourseCard({ course }) {
         </dl>
 
         {course.id && (
-          <Link
-            to={`/student/courses/${encodeURIComponent(course.id)}`}
-            className={[
-              'mt-auto inline-flex min-h-10 items-center justify-center',
-              'rounded-xl border border-[#454650] px-4 py-2',
-              'text-sm font-semibold text-[#CDB5F7]',
-              'transition-colors hover:border-[#CDB5F7]',
-              'hover:bg-[#CDB5F7]/10',
-              'focus-visible:outline-none focus-visible:ring-2',
-              'focus-visible:ring-[#CDB5F7]',
-            ].join(' ')}
-          >
-            View Course
-            <span className="ml-2" aria-hidden="true">
-              →
+          <div className="mt-auto">
+            <span
+              className="inline-flex min-h-10 w-full cursor-not-allowed items-center justify-center rounded-xl border border-[#343640] px-4 py-2 text-sm font-semibold text-[#858590]"
+              title="Detailed course pages are not connected yet."
+            >
+              Course Details
             </span>
-          </Link>
+          </div>
         )}
       </div>
     </article>
   );
 }
 
+function CourseMetric({ label, value, description }) {
+  return (
+    <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
+      <p className="text-sm text-[#A5A6B0]">{label}</p>
+
+      <p className="mt-3 text-3xl font-semibold text-[#EAEAE6]">
+        {value}
+      </p>
+
+      <p className="mt-2 text-xs leading-5 text-[#858590]">
+        {description}
+      </p>
+    </div>
+  );
+}
+
 export default function StudentCourses() {
+  const [courses, setCourses] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState('');
+
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
 
+  const loadCourses = useCallback(async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+
+    try {
+      const result = await studentCourseService.getMyCourses();
+
+      setCourses(result);
+    } catch (error) {
+      setErrorMessage(
+        error?.message || 'Unable to load your courses. Please try again.',
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCourses();
+  }, [loadCourses]);
+
   const filteredCourses = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
 
-    return enrolledCourses.filter((course) => {
+    return courses.filter((course) => {
       const matchesSearch =
         !query ||
         [
@@ -140,12 +161,16 @@ export default function StudentCourses() {
 
       return matchesSearch && matchesCategory && matchesStatus;
     });
-  }, [searchQuery, selectedCategory, selectedStatus]);
+  }, [courses, searchQuery, selectedCategory, selectedStatus]);
 
   const hasActiveFilters =
     searchQuery.trim() !== '' ||
     selectedCategory !== 'all' ||
     selectedStatus !== 'all';
+
+  const activeCourseCount = courses.filter(
+    (course) => course.status === 'active',
+  ).length;
 
   function resetFilters() {
     setSearchQuery('');
@@ -158,38 +183,29 @@ export default function StudentCourses() {
       <PageHeader
         eyebrow="STUDENT WORKSPACE"
         title="My Courses"
-        description="Explore your enrolled subjects, access course information, and continue your learning."
+        description="Explore the courses assigned to your academic batch and section."
         breadcrumbs={[
           { label: 'Dashboard', to: '/student/dashboard' },
           { label: 'My Courses' },
         ]}
       />
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
-          <p className="text-sm text-[#A5A6B0]">Enrolled Courses</p>
-          <p className="mt-3 text-3xl font-semibold text-[#EAEAE6]">—</p>
-          <p className="mt-2 text-xs text-[#858590]">
-            Awaiting enrolled course data
-          </p>
-        </div>
+      <section
+        aria-label="Course overview"
+        className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2"
+      >
+        <CourseMetric
+          label="Assigned Courses"
+          value={isLoading ? '—' : courses.length}
+          description="Courses returned by your student account"
+        />
 
-        <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
-          <p className="text-sm text-[#A5A6B0]">In Progress</p>
-          <p className="mt-3 text-3xl font-semibold text-[#EAEAE6]">—</p>
-          <p className="mt-2 text-xs text-[#858590]">
-            Active course information
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
-          <p className="text-sm text-[#A5A6B0]">Completed</p>
-          <p className="mt-3 text-3xl font-semibold text-[#EAEAE6]">—</p>
-          <p className="mt-2 text-xs text-[#858590]">
-            Completed course records
-          </p>
-        </div>
-      </div>
+        <CourseMetric
+          label="Active Courses"
+          value={isLoading ? '—' : activeCourseCount}
+          description="Courses currently marked active"
+        />
+      </section>
 
       <SectionCard
         eyebrow="COURSE DIRECTORY"
@@ -232,9 +248,7 @@ export default function StudentCourses() {
             <select
               id="course-category"
               value={selectedCategory}
-              onChange={(event) =>
-                setSelectedCategory(event.target.value)
-              }
+              onChange={(event) => setSelectedCategory(event.target.value)}
               className={[
                 'min-h-11 w-full rounded-xl border border-[#454650]',
                 'bg-[#191A21] px-3 py-2.5 text-sm text-[#EAEAE6]',
@@ -305,20 +319,55 @@ export default function StudentCourses() {
               id="enrolled-courses-heading"
               className="text-lg font-semibold text-[#EAEAE6]"
             >
-              Enrolled Courses
+              Assigned Courses
             </h2>
 
             <p className="mt-1 text-sm text-[#858590]">
-              Your registered academic subjects.
+              Courses assigned to your academic batch or section.
             </p>
           </div>
 
-          <span className="rounded-full border border-[#343640] bg-[#1D1F27] px-3 py-1.5 text-xs text-[#A5A6B0]">
-            {filteredCourses.length} displayed
-          </span>
+          {!isLoading && !errorMessage && (
+            <span className="rounded-full border border-[#343640] bg-[#1D1F27] px-3 py-1.5 text-xs text-[#A5A6B0]">
+              {filteredCourses.length} displayed
+            </span>
+          )}
         </div>
 
-        {filteredCourses.length > 0 ? (
+        {isLoading ? (
+          <LoadingState
+            message="Loading your courses..."
+            rows={3}
+            variant="cards"
+          />
+        ) : errorMessage ? (
+          <EmptyState
+            title="Unable to load courses"
+            description={errorMessage}
+            icon={
+              <span aria-hidden="true" className="text-2xl">
+                !
+              </span>
+            }
+            action={
+              <button
+                type="button"
+                onClick={loadCourses}
+                className={[
+                  'inline-flex min-h-10 items-center justify-center',
+                  'rounded-xl border border-[#454650] px-4 py-2',
+                  'text-sm font-semibold text-[#CDB5F7]',
+                  'transition-colors hover:border-[#CDB5F7]',
+                  'hover:bg-[#CDB5F7]/10',
+                  'focus-visible:outline-none focus-visible:ring-2',
+                  'focus-visible:ring-[#CDB5F7]',
+                ].join(' ')}
+              >
+                Try again
+              </button>
+            }
+          />
+        ) : filteredCourses.length > 0 ? (
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
             {filteredCourses.map((course) => (
               <CourseCard key={course.id} course={course} />
@@ -329,12 +378,12 @@ export default function StudentCourses() {
             title={
               hasActiveFilters
                 ? 'No matching courses'
-                : 'No enrolled courses available'
+                : 'No assigned courses yet'
             }
             description={
               hasActiveFilters
-                ? 'No courses match your current search and filter selections. Try changing your search or resetting the filters.'
-                : 'Your enrolled courses will appear here once your student account is connected to the course records.'
+                ? 'No courses match your search or filters. Try different keywords or reset your filters.'
+                : 'Courses assigned to your department, batch, or section will appear here once they are available.'
             }
             icon={
               <span aria-hidden="true" className="text-2xl">
@@ -369,6 +418,7 @@ export default function StudentCourses() {
           <h3 className="text-sm font-semibold text-[#EAEAE6]">
             Looking for your class schedule?
           </h3>
+
           <p className="mt-1 text-sm text-[#A5A6B0]">
             Visit your timetable to review your weekly schedule.
           </p>
@@ -387,7 +437,9 @@ export default function StudentCourses() {
           ].join(' ')}
         >
           Open Timetable
-          <span className="ml-2" aria-hidden="true">→</span>
+          <span className="ml-2" aria-hidden="true">
+            →
+          </span>
         </Link>
       </div>
     </div>

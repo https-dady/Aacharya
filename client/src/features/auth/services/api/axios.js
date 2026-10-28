@@ -109,12 +109,15 @@ async function performRequest(path, options = {}) {
     delete requestOptions.skipAuthorization;
     delete requestOptions.params;
 
-    const response = await fetch(buildRequestUrl(path, options.params), {
-      ...requestOptions,
-      headers,
-      credentials: 'include',
-      signal: controller.signal,
-    });
+    const response = await fetch(
+      buildRequestUrl(path, options.params),
+      {
+        ...requestOptions,
+        headers,
+        credentials: 'include',
+        signal: controller.signal,
+      },
+    );
 
     return await parseResponse(response);
   } catch (error) {
@@ -179,18 +182,20 @@ async function refreshAccessToken() {
   return refreshPromise;
 }
 
+function isAuthEntryPoint(path) {
+  return /\/v1\/auth\/(?:login|refresh|password\/reset\/(?:request|verify|confirm)|student\/activation\/confirm)$/
+    .test(path);
+}
+
 async function requestWithRefresh(path, options = {}) {
   try {
     return await performRequest(path, options);
   } catch (error) {
     const isUnauthorized = error?.response?.status === 401;
 
-    const isAuthEntryPoint =
-      /\/v1\/auth\/(login|refresh)$/.test(path);
-
     if (
       !isUnauthorized ||
-      isAuthEntryPoint ||
+      isAuthEntryPoint(path) ||
       options.skipAuthorization
     ) {
       throw error;
