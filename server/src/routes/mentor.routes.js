@@ -67,22 +67,25 @@ const listMentorsSchema = z.object({
   }).strict(),
 });
 
+// Read-only mentor listing.
+// Authentication, HOD authorization, and validation remain enforced.
+// The global API rate limiter still applies.
 mentorRouter.get(
   '/mentors',
   authenticate,
   authorize('HOD'),
-  authRateLimiter,
   validate(listMentorsSchema),
   listMentorsController,
 );
 
+// Updating mentor assignments changes system state.
+// Retain the stricter rate limiter and audit logging.
 mentorRouter.patch(
   '/faculty/:facultyId/mentor',
   authenticate,
   authorize('HOD'),
   authRateLimiter,
   validate(assignMentorSchema),
-
   auditEvent({
     action: 'MENTOR_ASSIGNMENT_UPDATE',
     resourceType: 'FacultyMentorAssignment',
@@ -94,7 +97,6 @@ mentorRouter.patch(
       sectionCount: req.body.sectionIds.length,
     }),
   }),
-
   assignMentorController,
 );
 

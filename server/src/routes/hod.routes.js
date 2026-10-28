@@ -41,25 +41,27 @@ const hodDetailsSchema = z.object({
 });
 
 // List HOD accounts for the Super Admin directory.
+// Authentication and authorization remain mandatory.
+// The global API rate limiter still applies.
 hodRouter.get(
   '/hods',
   authenticate,
   authorize('SUPER_ADMIN'),
-  authRateLimiter,
   listHodsController,
 );
 
 // Retrieve details for one HOD account.
+// Authentication and authorization remain mandatory.
+// The global API rate limiter still applies.
 hodRouter.get(
   '/hods/:hodId',
   authenticate,
   authorize('SUPER_ADMIN'),
-  authRateLimiter,
   validate(hodDetailsSchema),
   getHodDetailsController,
 );
 
-// Create an HOD account and assign it to a department.
+// Creating an HOD changes system state, so retain the stricter limiter.
 hodRouter.post(
   '/departments/:departmentId/hod',
   authenticate,

@@ -68,10 +68,10 @@ const departmentHodAssignmentSchema = z.object({
 departmentRouter.use(
   authenticate,
   authorize('SUPER_ADMIN'),
-  authRateLimiter,
 );
 
 // List departments.
+// Read-only requests use the global API rate limiter.
 departmentRouter.get(
   '/',
   listDepartmentsController,
@@ -85,8 +85,10 @@ departmentRouter.get(
 );
 
 // Assign, replace, transfer, or remove a department's HOD.
+// Keep the stricter limiter on this state-changing operation.
 departmentRouter.patch(
   '/:departmentId/hod',
+  authRateLimiter,
   validate(departmentHodAssignmentSchema),
   auditEvent({
     action: 'DEPARTMENT_HOD_ASSIGNMENT_UPDATE',
@@ -101,8 +103,10 @@ departmentRouter.patch(
 );
 
 // Create a department.
+// Keep the stricter limiter on this state-changing operation.
 departmentRouter.post(
   '/',
+  authRateLimiter,
   validate(createDepartmentSchema),
   auditEvent({
     action: 'DEPARTMENT_CREATE',

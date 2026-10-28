@@ -75,15 +75,19 @@ const listSectionsSchema = z.object({
   }).strict(),
 });
 
+// Read-only section listing.
+// Authentication, HOD authorization, and validation remain enforced.
+// The global API rate limiter still applies.
 sectionRouter.get(
   '/batches/:batchId/sections',
   authenticate,
   authorize('HOD'),
-  authRateLimiter,
   validate(listSectionsSchema),
   listSectionsController,
 );
 
+// Creating a section changes system state.
+// Keep the stricter rate limiter and audit logging.
 sectionRouter.post(
   '/batches/:batchId/sections',
   authenticate,

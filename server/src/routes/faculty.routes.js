@@ -55,15 +55,19 @@ const listFacultySchema = z.object({
   }).strict(),
 });
 
+// Read-only faculty listing.
+// Authentication, HOD authorization, and query validation remain enforced.
+// The global API rate limiter still applies.
 facultyRouter.get(
   '/',
   authenticate,
   authorize('HOD'),
-  authRateLimiter,
   validate(listFacultySchema),
   listFacultyController,
 );
 
+// Creating a faculty account is a state-changing operation.
+// Keep the stricter rate limiter and audit event.
 facultyRouter.post(
   '/',
   authenticate,
@@ -73,7 +77,7 @@ facultyRouter.post(
   auditEvent({
     action: 'FACULTY_ACCOUNT_CREATE',
     resourceType: 'FacultyAccount',
-    getMetadata: (req) => ({
+    getMetadata: () => ({
       targetRole: USER_ROLES.FACULTY,
     }),
   }),

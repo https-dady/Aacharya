@@ -82,15 +82,19 @@ const listBatchesSchema = z.object({
   }).strict(),
 });
 
+// Read-only batch listing.
+// Authentication, HOD authorization, and validation remain enforced.
+// The global API rate limiter still applies.
 batchRouter.get(
   '/',
   authenticate,
   authorize('HOD'),
-  authRateLimiter,
   validate(listBatchesSchema),
   listBatchesController,
 );
 
+// Creating a batch changes system state.
+// Retain the stricter rate limiter and audit event.
 batchRouter.post(
   '/',
   authenticate,
