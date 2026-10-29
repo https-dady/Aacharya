@@ -15,6 +15,7 @@ import HodDetails from "../features/lms/pages/super-admin/HodDetails.jsx";
 
 // HOD pages
 import HodDashboard from "../features/lms/pages/hod/HodDashboard.jsx";
+import HodProfile from "../features/lms/pages/hod/HodProfile.jsx";
 
 import FacultyList from "../features/lms/pages/hod/FacultyList.jsx";
 import CreateFaculty from "../features/lms/pages/hod/CreateFaculty.jsx";
@@ -353,6 +354,13 @@ export const applicationRoutes = [
         path: "results/edit",
         element: <ResultEdit />,
       },
+
+      // HOD Profile
+      {
+        id: "hod-profile",
+        path: "profile",
+        element: <HodProfile />,
+      },
     ],
   },
 
@@ -384,75 +392,75 @@ export const applicationRoutes = [
         element: <FacultyCourses />,
       },
       {
-  id: "faculty-timetable",
-  path: "timetable",
-  element: <FacultyTimetable />,
-},
-{
-  id: "faculty-attendance",
-  path: "attendance",
-  element: <FacultyAttendance />,
-},
-{
-  id: "faculty-assignments",
-  path: "assignments",
-  element: <FacultyAssignments />,
-},
-{
-  id: "faculty-assignment-create",
-  path: "assignments/new",
-  element: <FacultyAssignmentForm />,
-},
-{
-  id: "faculty-assignment-details",
-  path: "assignments/details",
-  element: <FacultyAssignmentDetails />,
-},
-{
-  id: "faculty-assignment-submissions",
-  path: "assignments/submissions",
-  element: <FacultyAssignmentSubmissions />,
-},
-{
-  id: "faculty-quizzes",
-  path: "quizzes",
-  element: <FacultyQuizzes />,
-},
-{
-  id: "faculty-quiz-create",
-  path: "quizzes/new",
-  element: <FacultyQuizForm />,
-},
-{
-  id: "faculty-quiz-questions",
-  path: "quizzes/questions",
-  element: <FacultyQuizQuestions />,
-},
-{
-  id: "faculty-quiz-results",
-  path: "quizzes/results",
-  element: <FacultyQuizResults />,
-},
-{
-  id: "faculty-results",
-  path: "results",
-  element: <FacultyResults />,
-},
-{
-  id: "faculty-course-details",
-  path: "courses/details",
-  element: <FacultyCourseDetails />,
-},
-{
-  id: "faculty-course-material-details",
-  path: "courses/materials/details",
-  element: <FacultyCourseMaterialDetails />,
-},
-{
-  id: "faculty-course-material-upload",
-  path: "courses/materials/upload",
-  element: <FacultyCourseMaterialUpload />,
-},
+        id: "faculty-timetable",
+        path: "timetable",
+        element: <FacultyTimetable />,
+      },
+      {
+        id: "faculty-attendance",
+        path: "attendance",
+        element: <FacultyAttendance />,
+      },
+      {
+        id: "faculty-assignments",
+        path: "assignments",
+        element: <FacultyAssignments />,
+      },
+      {
+        id: "faculty-assignment-create",
+        path: "assignments/new",
+        element: <FacultyAssignmentForm />,
+      },
+      {
+        id: "faculty-assignment-details",
+        path: "assignments/details",
+        element: <FacultyAssignmentDetails />,
+      },
+      {
+        id: "faculty-assignment-submissions",
+        path: "assignments/submissions",
+        element: <FacultyAssignmentSubmissions />,
+      },
+      {
+        id: "faculty-quizzes",
+        path: "quizzes",
+        element: <FacultyQuizzes />,
+      },
+      {
+        id: "faculty-quiz-create",
+        path: "quizzes/new",
+        element: <FacultyQuizForm />,
+      },
+      {
+        id: "faculty-quiz-questions",
+        path: "quizzes/questions",
+        element: <FacultyQuizQuestions />,
+      },
+      {
+        id: "faculty-quiz-results",
+        path: "quizzes/results",
+        element: <FacultyQuizResults />,
+      },
+      {
+        id: "faculty-results",
+        path: "results",
+        element: <FacultyResults />,
+      },
+      {
+        id: "faculty-course-details",
+        path: "courses/details",
+        element: <FacultyCourseDetails />,
+      },
+      {
+        id: "faculty-course-material-details",
+        path: "courses/materials/details",
+        element: <FacultyCourseMaterialDetails />,
+      },
+      {
+        id: "faculty-course-material-upload",
+        path: "courses/materials/upload",
+        element: <FacultyCourseMaterialUpload />,
+      },
     ],
   },
 
@@ -468,177 +476,176 @@ export const applicationRoutes = [
         path: "dashboard",
         element: <MentorDashboard />,
       },
-          {
-      id: "mentor-students",
-      path: "students",
-      element: <MentorStudents />,
-    },
-    {
-      id: "mentor-student-details",
-      path: "students/:studentId",
-      element: <MentorStudentDetails />,
-    },
-    {
-  id: "mentor-student-create",
-  path: "students/create",
-  element: <MentorStudentForm />,
-},
-{
-  id: "mentor-student-edit",
-  path: "students/:studentId/edit",
-  element: <MentorStudentForm />,
-},
-{
-  id: "mentor-student-import",
-  path: "students/import",
-  element: <MentorStudentImport />,
-},
-{
-  id: "mentor-student-mentoring",
-  path: "mentoring",
-  element: <MentorStudentMentoring />,
-},
-{
-  id: "mentor-attendance",
-  path: "attendance",
-  element: <MentorAttendance />,
-},
-{
-  id: "mentor-batches",
-  path: "batches",
-  element: <MentorBatches />,
-},
-{
-  id: "mentor-profile",
-  path: "profile",
-  element: <MentorProfile />,
-},
+      {
+        id: "mentor-students",
+        path: "students",
+        element: <MentorStudents />,
+      },
+      {
+        id: "mentor-student-details",
+        path: "students/:studentId",
+        element: <MentorStudentDetails />,
+      },
+      {
+        id: "mentor-student-create",
+        path: "students/create",
+        element: <MentorStudentForm />,
+      },
+      {
+        id: "mentor-student-edit",
+        path: "students/:studentId/edit",
+        element: <MentorStudentForm />,
+      },
+      {
+        id: "mentor-student-import",
+        path: "students/import",
+        element: <MentorStudentImport />,
+      },
+      {
+        id: "mentor-student-mentoring",
+        path: "mentoring",
+        element: <MentorStudentMentoring />,
+      },
+      {
+        id: "mentor-attendance",
+        path: "attendance",
+        element: <MentorAttendance />,
+      },
+      {
+        id: "mentor-batches",
+        path: "batches",
+        element: <MentorBatches />,
+      },
+      {
+        id: "mentor-profile",
+        path: "profile",
+        element: <MentorProfile />,
+      },
     ],
   },
 
-
   // Student
-{
-  id: "student",
-  path: "/student",
-  roles: ["STUDENT"],
-  element: <AppLayout />,
-  children: [
-    {
-      id: "student-dashboard",
-      path: "dashboard",
-      element: <StudentDashboard />,
-    },
-    {
-  id: "student-timetable",
-  path: "timetable",
-  element: <StudentTimetable />,
-},
-{
-  id: "student-courses",
-  path: "courses",
-  element: <StudentCourses />,
-},
-{
-  id: "student-attendance",
-  path: "attendance",
-  element: <StudentAttendance />,
-},
-{
-  id: "student-assignments",
-  path: "assignments",
-  element: <StudentAssignments />,
-},
-{
-  id: "student-quizzes",
-  path: "quizzes",
-  element: <StudentQuizzes />,
-},
-{
-  id: "student-results",
-  path: "results",
-  element: <StudentResults />,
-},
-{
-  id: "student-profile",
-  path: "profile",
-  element: <StudentProfile />,
-},
-{
-  id: "student-course-details",
-  path: "courses/:courseId",
-  element: <StudentCourseDetails />,
-},
-{
-  id: "student-assignment-details",
-  path: "assignments/:assignmentId",
-  element: <StudentAssignmentDetails />,
-},
-{
-  id: "student-quiz-details",
-  path: "quizzes/:quizId",
-  element: <StudentQuizDetails />,
-},
-{
-  id: "student-document-vault",
-  path: "documents",
-  element: <StudentDocumentVault />,
-},
-{
-  id: "student-notifications",
-  path: "notifications",
-  element: <StudentNotifications />,
-},
-{
-  id: "student-announcements",
-  path: "announcements",
-  element: <StudentAnnouncements />,
-},
-{
-  id: "student-academic-overview",
-  path: "academic-overview",
-  element: <StudentAcademicOverview />,
-},
-{
-  id: "student-career-resources",
-  path: "career/resources",
-  element: <StudentCareerResources />,
-},
-{
-  id: "student-quiz-attempt",
-  path: "quizzes/:quizId/attempt",
-  element: <StudentQuizAttempt />,
-},
-  ],
-},
+  {
+    id: "student",
+    path: "/student",
+    roles: ["STUDENT"],
+    element: <AppLayout />,
+    children: [
+      {
+        id: "student-dashboard",
+        path: "dashboard",
+        element: <StudentDashboard />,
+      },
+      {
+        id: "student-timetable",
+        path: "timetable",
+        element: <StudentTimetable />,
+      },
+      {
+        id: "student-courses",
+        path: "courses",
+        element: <StudentCourses />,
+      },
+      {
+        id: "student-attendance",
+        path: "attendance",
+        element: <StudentAttendance />,
+      },
+      {
+        id: "student-assignments",
+        path: "assignments",
+        element: <StudentAssignments />,
+      },
+      {
+        id: "student-quizzes",
+        path: "quizzes",
+        element: <StudentQuizzes />,
+      },
+      {
+        id: "student-results",
+        path: "results",
+        element: <StudentResults />,
+      },
+      {
+        id: "student-profile",
+        path: "profile",
+        element: <StudentProfile />,
+      },
+      {
+        id: "student-course-details",
+        path: "courses/:courseId",
+        element: <StudentCourseDetails />,
+      },
+      {
+        id: "student-assignment-details",
+        path: "assignments/:assignmentId",
+        element: <StudentAssignmentDetails />,
+      },
+      {
+        id: "student-quiz-details",
+        path: "quizzes/:quizId",
+        element: <StudentQuizDetails />,
+      },
+      {
+        id: "student-document-vault",
+        path: "documents",
+        element: <StudentDocumentVault />,
+      },
+      {
+        id: "student-notifications",
+        path: "notifications",
+        element: <StudentNotifications />,
+      },
+      {
+        id: "student-announcements",
+        path: "announcements",
+        element: <StudentAnnouncements />,
+      },
+      {
+        id: "student-academic-overview",
+        path: "academic-overview",
+        element: <StudentAcademicOverview />,
+      },
+      {
+        id: "student-career-resources",
+        path: "career/resources",
+        element: <StudentCareerResources />,
+      },
+      {
+        id: "student-quiz-attempt",
+        path: "quizzes/:quizId/attempt",
+        element: <StudentQuizAttempt />,
+      },
+    ],
+  },
 
-// Alumni
-{
-  id: "alumni",
-  path: "/alumni",
-  roles: ["ALUMNI"],
-  element: <AppLayout />,
-  children: [
-    {
-      id: "alumni-dashboard",
-      path: "dashboard",
-      element: <AlumniDashboard />,
-    },
-    {
-  id: "alumni-profile",
-  path: "profile",
-  element: <AlumniProfile />,
-},
-{
-  id: "alumni-opportunities",
-  path: "opportunities",
-  element: <AlumniOpportunities />,
-},
-{
-  id: "alumni-community",
-  path: "community",
-  element: <AlumniCommunity />,
-},
-  ],
-},
+  // Alumni
+  {
+    id: "alumni",
+    path: "/alumni",
+    roles: ["ALUMNI"],
+    element: <AppLayout />,
+    children: [
+      {
+        id: "alumni-dashboard",
+        path: "dashboard",
+        element: <AlumniDashboard />,
+      },
+      {
+        id: "alumni-profile",
+        path: "profile",
+        element: <AlumniProfile />,
+      },
+      {
+        id: "alumni-opportunities",
+        path: "opportunities",
+        element: <AlumniOpportunities />,
+      },
+      {
+        id: "alumni-community",
+        path: "community",
+        element: <AlumniCommunity />,
+      },
+    ],
+  },
 ];
