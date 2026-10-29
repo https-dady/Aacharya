@@ -14,9 +14,11 @@ export function validate(schema) {
 
   return function validateRequest(req, res, next) {
     const result = schema.safeParse({
-      body: req.body,
-      params: req.params,
-      query: req.query,
+      // GET and other requests without a body should validate
+      // against an empty object instead of undefined.
+      body: req.body ?? {},
+      params: req.params ?? {},
+      query: req.query ?? {},
     });
 
     if (!result.success) {
@@ -35,13 +37,13 @@ export function validate(schema) {
     }
 
     req.validated = Object.freeze({
-      body: result.data.body ?? req.body,
-      params: result.data.params ?? req.params,
-      query: result.data.query ?? req.query,
+      body: result.data.body ?? req.body ?? {},
+      params: result.data.params ?? req.params ?? {},
+      query: result.data.query ?? req.query ?? {},
     });
 
-    // Preserve compatibility with existing controllers that consume
-    // validated request bodies.
+    // Preserve compatibility with existing controllers that
+    // consume validated request bodies.
     req.body = req.validated.body;
 
     return next();

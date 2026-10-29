@@ -19,8 +19,12 @@ import studentImportRoutes from './routes/student-import.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
 
 import studentProfileRoutes from './routes/student-profile.routes.js';
+import hodSelfProfileRoutes from './routes/hod-self-profile.routes.js';
+
 import courseRoutes from './routes/course.routes.js';
+import assignmentRoutes from './routes/assignment.routes.js';
 import studentAssignmentRoutes from './routes/student-assignment.routes.js';
+
 import studentQuizRoutes from './routes/student-quiz.routes.js';
 import studentQuizAttemptRoutes from './routes/student-quiz-attempt.routes.js';
 import studentQuizResultRoutes from './routes/student-quiz-result.routes.js';
@@ -112,6 +116,9 @@ app.use('/api/v1/departments', departmentRoutes);
 // Account provisioning: HOD creation.
 app.use('/api/v1/provisioning', hodRoutes);
 
+// HOD self-service profile.
+app.use('/api/v1/hod-profile', hodSelfProfileRoutes);
+
 // Faculty account provisioning.
 app.use('/api/v1/provisioning/faculty', facultyRoutes);
 
@@ -133,10 +140,13 @@ app.use('/api/v1/provisioning', studentImportRoutes);
 // Student profile.
 app.use('/api/v1/student-profile', studentProfileRoutes);
 
-// Student courses.
+// Courses.
 app.use('/api/v1/courses', courseRoutes);
 
-// Student assignments.
+// Common Assignment and Practical management.
+app.use('/api/v1/assignments', assignmentRoutes);
+
+// Student-specific assignment listing.
 app.use('/api/v1/assignments', studentAssignmentRoutes);
 
 // Student quizzes.

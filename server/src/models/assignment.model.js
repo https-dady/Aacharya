@@ -2,6 +2,11 @@ import mongoose from 'mongoose';
 
 const { Schema, model, models } = mongoose;
 
+const ASSIGNMENT_CONTENT_TYPES = Object.freeze({
+  ASSIGNMENT: 'ASSIGNMENT',
+  PRACTICAL: 'PRACTICAL',
+});
+
 const ASSIGNMENT_STATUSES = Object.freeze({
   DRAFT: 'DRAFT',
   PUBLISHED: 'PUBLISHED',
@@ -12,20 +17,31 @@ const assignmentSchema = new Schema(
   {
     title: {
       type: String,
-      required: [true, 'Assignment title is required.'],
+      required: [true, 'Title is required.'],
       trim: true,
-      minlength: [2, 'Assignment title must contain at least 2 characters.'],
-      maxlength: [200, 'Assignment title cannot exceed 200 characters.'],
+      minlength: [2, 'Title must contain at least 2 characters.'],
+      maxlength: [200, 'Title cannot exceed 200 characters.'],
+    },
+
+    contentType: {
+      type: String,
+      enum: {
+        values: Object.values(ASSIGNMENT_CONTENT_TYPES),
+        message: 'Invalid content type.',
+      },
+      default: ASSIGNMENT_CONTENT_TYPES.ASSIGNMENT,
+      required: true,
+      index: true,
     },
 
     description: {
       type: String,
-      required: [true, 'Assignment description is required.'],
+      required: [true, 'Description is required.'],
       trim: true,
-      minlength: [1, 'Assignment description cannot be empty.'],
+      minlength: [1, 'Description cannot be empty.'],
       maxlength: [
         10000,
-        'Assignment description cannot exceed 10000 characters.',
+        'Description cannot exceed 10000 characters.',
       ],
     },
 
@@ -66,20 +82,20 @@ const assignmentSchema = new Schema(
 
     dueDate: {
       type: Date,
-      required: [true, 'Assignment due date is required.'],
+      required: [true, 'Due date is required.'],
       validate: {
         validator(value) {
           return value instanceof Date && !Number.isNaN(value.getTime());
         },
-        message: 'Assignment due date must be valid.',
+        message: 'Due date must be valid.',
       },
     },
 
     totalMarks: {
       type: Number,
-      required: [true, 'Assignment total marks are required.'],
-      min: [1, 'Assignment total marks must be at least 1.'],
-      max: [10000, 'Assignment total marks cannot exceed 10000.'],
+      required: [true, 'Total marks are required.'],
+      min: [1, 'Total marks must be at least 1.'],
+      max: [10000, 'Total marks cannot exceed 10000.'],
     },
 
     attachments: {
@@ -129,7 +145,7 @@ const assignmentSchema = new Schema(
     createdBy: {
       type: Schema.Types.ObjectId,
       ref: 'User',
-      required: [true, 'Assignment creator is required.'],
+      required: [true, 'Creator is required.'],
       immutable: true,
     },
 
@@ -174,7 +190,17 @@ assignmentSchema.index({
   createdAt: -1,
 });
 
-export { ASSIGNMENT_STATUSES };
+assignmentSchema.index({
+  department: 1,
+  contentType: 1,
+  status: 1,
+  createdAt: -1,
+});
+
+export {
+  ASSIGNMENT_CONTENT_TYPES,
+  ASSIGNMENT_STATUSES,
+};
 
 export const Assignment =
   models.Assignment || model('Assignment', assignmentSchema);

@@ -19,9 +19,15 @@ function createError(statusCode, code, message) {
   return error;
 }
 
-async function getActiveHodDepartment(userId) {
-  const hod = await User.findById(userId)
+async function getActiveHodDepartment(userId, session = null) {
+  let hodQuery = User.findById(userId)
     .select('role status department');
+
+  if (session) {
+    hodQuery = hodQuery.session(session);
+  }
+
+  const hod = await hodQuery;
 
   if (
     !hod
@@ -43,11 +49,17 @@ async function getActiveHodDepartment(userId) {
     );
   }
 
-  const department = await Department.findOne({
+  let departmentQuery = Department.findOne({
     _id: hod.department,
     hod: hod._id,
     status: 'ACTIVE',
   }).select('_id name code');
+
+  if (session) {
+    departmentQuery = departmentQuery.session(session);
+  }
+
+  const department = await departmentQuery;
 
   if (!department) {
     throw createError(
@@ -64,17 +76,25 @@ function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function uniqueIds(values) {
+  return [...new Set(values.map(String))];
+}
+
+function sameId(left, right) {
+  return Boolean(left && right && String(left) === String(right));
+}
+
 function normalizeMentor(mentor, department, batches, sections) {
   const assignedBatchIds = new Set(
-    (mentor.assignedBatches ?? []).map((id) => id.toString()),
+    (mentor.assignedBatches ?? []).map((id) => String(id)),
   );
 
   const assignedSectionIds = new Set(
-    (mentor.assignedSections ?? []).map((id) => id.toString()),
+    (mentor.assignedSections ?? []).map((id) => String(id)),
   );
 
   return {
-    id: mentor._id.toString(),
+    id: String(mentor._id),
     institutionalId: mentor.institutionalId,
     fullName: mentor.fullName,
     email: mentor.email ?? null,
@@ -82,27 +102,27 @@ function normalizeMentor(mentor, department, batches, sections) {
     status: mentor.status,
 
     department: {
-      id: department._id.toString(),
+      id: String(department._id),
       name: department.name,
       code: department.code,
     },
 
     assignedBatches: batches
-      .filter((batch) => assignedBatchIds.has(batch._id.toString()))
+      .filter((batch) => assignedBatchIds.has(String(batch._id)))
       .map((batch) => ({
-        id: batch._id.toString(),
+        id: String(batch._id),
         name: batch.name,
         code: batch.code,
         academicYear: batch.academicYear,
       })),
 
     assignedSections: sections
-      .filter((section) => assignedSectionIds.has(section._id.toString()))
+      .filter((section) => assignedSectionIds.has(String(section._id)))
       .map((section) => ({
-        id: section._id.toString(),
+        id: String(section._id),
         name: section.name,
         code: section.code,
-        batch: section.batch.toString(),
+        batch: String(section.batch),
       })),
 
     createdAt: mentor.createdAt,
@@ -111,136 +131,242 @@ function normalizeMentor(mentor, department, batches, sections) {
 }
 
 export async function assignMentorController(req, res, next) {
-  try {
-    const { department } = await getActiveHodDepartment(
-      req.user?.id,
-    );
+  const session = await mongoose.startSession();
 
+  try {
     const { facultyId } = req.params;
-    const { batchIds, sectionIds } = req.body;
+    const { batchIds, sectionIds } = req.body ?? {};
 
     if (!mongoose.isValidObjectId(facultyId)) {
-      return next(
-        createError(
-          400,
-          'INVALID_FACULTY_ID',
-          'A valid faculty ID is required.',
-        ),
+      throw createError(
+        400,
+        'INVALID_FACULTY_ID',
+        'A valid faculty ID is required.',
       );
     }
 
-    const uniqueBatchIds = [...new Set(batchIds)];
-    const uniqueSectionIds = [...new Set(sectionIds)];
+    if (!Array.isArray(batchIds) || !Array.isArray(sectionIds)) {
+      throw createError(
+        400,
+        'INVALID_ASSIGNMENT_PAYLOAD',
+        'batchIds and sectionIds must both be arrays.',
+      );
+    }
 
     if (
-      uniqueBatchIds.some((id) => !mongoose.isValidObjectId(id))
-      || uniqueSectionIds.some((id) => !mongoose.isValidObjectId(id))
+      batchIds.some((id) => !mongoose.isValidObjectId(id))
+      || sectionIds.some((id) => !mongoose.isValidObjectId(id))
     ) {
-      return next(
-        createError(
-          400,
-          'INVALID_ASSIGNMENT_ID',
-          'All batch and section IDs must be valid.',
-        ),
+      throw createError(
+        400,
+        'INVALID_ASSIGNMENT_ID',
+        'All batch and section IDs must be valid.',
       );
     }
 
-    const faculty = await User.findOne({
-      _id: facultyId,
-      department: department._id,
-      role: {
-        $in: [USER_ROLES.FACULTY, USER_ROLES.MENTOR],
-      },
-      status: ACCOUNT_STATUSES.ACTIVE,
-    }).select(
-      'institutionalId fullName email role status department assignedBatches assignedSections',
-    );
+    const uniqueBatchIds = uniqueIds(batchIds);
+    const uniqueSectionIds = uniqueIds(sectionIds);
 
-    if (!faculty) {
-      return next(
-        createError(
+    if (uniqueSectionIds.length > 0 && uniqueBatchIds.length === 0) {
+      throw createError(
+        422,
+        'INVALID_SECTION_ASSIGNMENT',
+        'A section cannot be assigned without its batch.',
+      );
+    }
+
+    let responseData;
+
+    await session.withTransaction(async () => {
+      const { department } = await getActiveHodDepartment(
+        req.user?.id,
+        session,
+      );
+
+      const faculty = await User.findOne({
+        _id: facultyId,
+        department: department._id,
+        role: {
+          $in: [USER_ROLES.FACULTY, USER_ROLES.MENTOR],
+        },
+        status: ACCOUNT_STATUSES.ACTIVE,
+      })
+        .session(session)
+        .select(
+          'institutionalId fullName email role status department assignedBatches assignedSections createdAt updatedAt',
+        );
+
+      if (!faculty) {
+        throw createError(
           404,
           'FACULTY_NOT_FOUND',
           'No active Faculty member was found in your department.',
-        ),
-      );
-    }
+        );
+      }
 
-    const batches = await Batch.find({
-      _id: { $in: uniqueBatchIds },
-      department: department._id,
-      status: 'ACTIVE',
-    }).select('_id name code academicYear');
+      const batches = uniqueBatchIds.length
+        ? await Batch.find({
+            _id: { $in: uniqueBatchIds },
+            department: department._id,
+            status: 'ACTIVE',
+          })
+            .session(session)
+            .select('_id name code academicYear')
+        : [];
 
-    if (batches.length !== uniqueBatchIds.length) {
-      return next(
-        createError(
+      if (batches.length !== uniqueBatchIds.length) {
+        throw createError(
           422,
           'INVALID_BATCH_ASSIGNMENT',
           'Every assigned batch must be active and belong to your department.',
-        ),
-      );
-    }
+        );
+      }
 
-    const sections = await Section.find({
-      _id: { $in: uniqueSectionIds },
-      department: department._id,
-      batch: { $in: uniqueBatchIds },
-      status: 'ACTIVE',
-    }).select('_id name code batch');
+      const sections = uniqueSectionIds.length
+        ? await Section.find({
+            _id: { $in: uniqueSectionIds },
+            department: department._id,
+            batch: { $in: uniqueBatchIds },
+            status: 'ACTIVE',
+          })
+            .session(session)
+            .select('_id name code batch department status mentor')
+        : [];
 
-    if (sections.length !== uniqueSectionIds.length) {
-      return next(
-        createError(
+      if (sections.length !== uniqueSectionIds.length) {
+        throw createError(
           422,
           'INVALID_SECTION_ASSIGNMENT',
           'Every assigned section must be active, belong to your department, and belong to an assigned batch.',
-        ),
+        );
+      }
+
+      const selectedSectionObjectIds = sections.map(
+        (section) => section._id,
       );
-    }
 
-    faculty.role = USER_ROLES.MENTOR;
-    faculty.assignedBatches = batches.map((batch) => batch._id);
-    faculty.assignedSections = sections.map((section) => section._id);
+      /*
+       * Find the existing owners before changing any assignments.
+       * Existing mentors may have multiple sections; only the selected
+       * sections will be removed from their assignedSections arrays.
+       */
+      const previousOwnerIds = uniqueIds(
+        sections
+          .map((section) => section.mentor)
+          .filter(Boolean)
+          .map((id) => String(id)),
+      ).filter((id) => id !== String(faculty._id));
 
-    await faculty.save();
+      if (previousOwnerIds.length > 0) {
+        await User.updateMany(
+          {
+            _id: { $in: previousOwnerIds },
+            department: department._id,
+          },
+          {
+            $pull: {
+              assignedSections: {
+                $in: selectedSectionObjectIds,
+              },
+            },
+          },
+          { session },
+        );
+      }
+
+      /*
+       * Section.mentor is the canonical owner for each section.
+       * Updating the section documents inside this transaction ensures
+       * that a failed operation does not leave a partial reassignment.
+       */
+      if (sections.length > 0) {
+        await Section.updateMany(
+          {
+            _id: { $in: selectedSectionObjectIds },
+            department: department._id,
+            status: 'ACTIVE',
+          },
+          {
+            $set: {
+              mentor: faculty._id,
+            },
+          },
+          { session },
+        );
+      }
+
+      /*
+       * Preserve the target mentor's other section assignments.
+       * Add the selected sections rather than replacing the whole array.
+       */
+      faculty.role = USER_ROLES.MENTOR;
+
+      faculty.assignedBatches = [
+        ...new Map(
+          [
+            ...(faculty.assignedBatches ?? []),
+            ...batches.map((batch) => batch._id),
+          ].map((id) => [String(id), id]),
+        ).values(),
+      ];
+
+      faculty.assignedSections = [
+        ...new Map(
+          [
+            ...(faculty.assignedSections ?? []),
+            ...selectedSectionObjectIds,
+          ].map((id) => [String(id), id]),
+        ).values(),
+      ];
+
+      await faculty.save({ session });
+
+      /*
+       * Read back the mentor's current assignments so the response
+       * reflects the state persisted by this transaction.
+       */
+      const assignedBatchIds = faculty.assignedBatches ?? [];
+      const assignedSectionIds = faculty.assignedSections ?? [];
+
+      const [allAssignedBatches, allAssignedSections] = await Promise.all([
+        assignedBatchIds.length
+          ? Batch.find({
+              _id: { $in: assignedBatchIds },
+              department: department._id,
+            })
+              .session(session)
+              .select('_id name code academicYear')
+          : [],
+
+        assignedSectionIds.length
+          ? Section.find({
+              _id: { $in: assignedSectionIds },
+              department: department._id,
+            })
+              .session(session)
+              .select('_id name code batch')
+          : [],
+      ]);
+
+      responseData = {
+        mentor: normalizeMentor(
+          faculty.toObject(),
+          department,
+          allAssignedBatches,
+          allAssignedSections,
+        ),
+      };
+    });
 
     return res.status(200).json({
       success: true,
       message: 'Mentor role and assignments updated successfully.',
-      data: {
-        mentor: {
-          id: faculty.id,
-          institutionalId: faculty.institutionalId,
-          fullName: faculty.fullName,
-          email: faculty.email,
-          role: faculty.role,
-          status: faculty.status,
-
-          department: {
-            id: department.id,
-            name: department.name,
-            code: department.code,
-          },
-
-          assignedBatches: batches.map((batch) => ({
-            id: batch.id,
-            name: batch.name,
-            code: batch.code,
-            academicYear: batch.academicYear,
-          })),
-
-          assignedSections: sections.map((section) => ({
-            id: section.id,
-            name: section.name,
-            code: section.code,
-            batch: section.batch.toString(),
-          })),
-        },
-      },
+      data: responseData,
     });
   } catch (error) {
     return next(error);
+  } finally {
+    await session.endSession();
   }
 }
 
@@ -250,8 +376,12 @@ export async function listMentorsController(req, res, next) {
       req.user?.id,
     );
 
-    const page = Number(req.query.page ?? 1);
-    const limit = Number(req.query.limit ?? 20);
+    const page = Math.max(1, Number.parseInt(req.query.page ?? '1', 10) || 1);
+    const limit = Math.min(
+      100,
+      Math.max(1, Number.parseInt(req.query.limit ?? '20', 10) || 20),
+    );
+
     const search = String(req.query.search ?? '').trim();
 
     const filter = {
@@ -294,23 +424,19 @@ export async function listMentorsController(req, res, next) {
       User.countDocuments(filter),
     ]);
 
-    const batchIds = [
-      ...new Set(
-        mentors.flatMap((mentor) =>
-          (mentor.assignedBatches ?? []).map((id) => id.toString()),
-        ),
+    const batchIds = uniqueIds(
+      mentors.flatMap((mentor) =>
+        (mentor.assignedBatches ?? []).map((id) => String(id)),
       ),
-    ];
+    );
 
-    const sectionIds = [
-      ...new Set(
-        mentors.flatMap((mentor) =>
-          (mentor.assignedSections ?? []).map((id) => id.toString()),
-        ),
-      ),
-    ];
+    /*
+     * Resolve section assignments from the canonical Section.mentor
+     * relationship, not solely from potentially stale user arrays.
+     */
+    const mentorIds = mentors.map((mentor) => mentor._id);
 
-    const [batches, sections] = await Promise.all([
+    const [batches, ownedSections] = await Promise.all([
       batchIds.length
         ? Batch.find({
             _id: { $in: batchIds },
@@ -318,30 +444,54 @@ export async function listMentorsController(req, res, next) {
           }).select('_id name code academicYear')
         : [],
 
-      sectionIds.length
+      mentorIds.length
         ? Section.find({
-            _id: { $in: sectionIds },
+            mentor: { $in: mentorIds },
             department: department._id,
-          }).select('_id name code batch')
+          }).select('_id name code batch mentor')
         : [],
     ]);
+
+    const mentorsWithCanonicalSections = mentors.map((mentor) => ({
+      ...mentor,
+      assignedSections: ownedSections
+        .filter((section) => sameId(section.mentor, mentor._id))
+        .map((section) => section._id),
+    }));
+
+    const allOwnedBatchIds = uniqueIds([
+      ...batchIds,
+      ...ownedSections.map((section) => String(section.batch)),
+    ]);
+
+    const missingBatches = allOwnedBatchIds.length
+      ? await Batch.find({
+          _id: { $in: allOwnedBatchIds },
+          department: department._id,
+        }).select('_id name code academicYear')
+      : [];
+
+    const batchMap = new Map(
+      missingBatches.map((batch) => [String(batch._id), batch]),
+    );
+
+    const batchesForResponse = [...batchMap.values()];
 
     return res.status(200).json({
       success: true,
       message: 'Mentors retrieved successfully.',
-
       data: {
-        mentors: mentors.map((mentor) =>
+        mentors: mentorsWithCanonicalSections.map((mentor) =>
           normalizeMentor(
             mentor,
             department,
-            batches,
-            sections,
+            batchesForResponse,
+            ownedSections,
           ),
         ),
 
         department: {
-          id: department.id,
+          id: String(department._id),
           name: department.name,
           code: department.code,
         },

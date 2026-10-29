@@ -17,14 +17,18 @@ const INITIAL_FORM = {
 };
 
 function getErrorMessage(error) {
-  const responseData = error?.response?.data;
-
   return (
-    responseData?.error?.message
-    || responseData?.message
+    error?.response?.data?.error?.message
+    || error?.response?.data?.message
     || error?.message
     || 'Unable to create the faculty account. Please try again.'
   );
+}
+
+function getResponseData(response) {
+  const body = response?.data;
+
+  return body?.data ?? body ?? {};
 }
 
 export default function CreateFaculty() {
@@ -33,6 +37,7 @@ export default function CreateFaculty() {
   const [form, setForm] = useState(INITIAL_FORM);
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState('');
+  const [createdFaculty, setCreatedFaculty] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   function handleChange(event) {
@@ -77,9 +82,7 @@ export default function CreateFaculty() {
 
     if (!email) {
       nextErrors.email = 'Email address is required.';
-    } else if (
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
-    ) {
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       nextErrors.email = 'Enter a valid email address.';
     } else if (email.length > 254) {
       nextErrors.email = 'Email address cannot exceed 254 characters.';
@@ -97,7 +100,8 @@ export default function CreateFaculty() {
       nextErrors.confirmPassword =
         'Please confirm the password.';
     } else if (form.password !== form.confirmPassword) {
-      nextErrors.confirmPassword = 'Passwords do not match.';
+      nextErrors.confirmPassword =
+        'Passwords do not match.';
     }
 
     return nextErrors;
@@ -110,12 +114,14 @@ export default function CreateFaculty() {
       return;
     }
 
+    setErrors({});
+    setNotice('');
+    setCreatedFaculty(null);
+
     const nextErrors = validateForm();
 
-    setErrors(nextErrors);
-    setNotice('');
-
     if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
       return;
     }
 
@@ -132,56 +138,27 @@ export default function CreateFaculty() {
         },
       );
 
-      const body = response?.data;
-      const responseData = body?.data ?? body;
-      const createdUser = responseData?.user;
+      const data = getResponseData(response);
+      const faculty = data.user;
 
-      if (!createdUser?.id) {
+      if (!faculty?.id) {
         throw new Error(
-          'The server response did not contain the created faculty account.',
+          'The server did not return the created faculty account.',
         );
       }
 
+      setCreatedFaculty(faculty);
+
       setNotice(
-        `Faculty account for ${createdUser.fullName} was created successfully.`,
+        data.message || 'Faculty account created successfully.',
       );
 
       setForm(INITIAL_FORM);
       setErrors({});
-
-      navigate('/hod/faculty', {
-        replace: true,
-        state: {
-          notice: `Faculty account for ${createdUser.fullName} was created successfully.`,
-          createdFacultyId: createdUser.id,
-        },
-      });
     } catch (error) {
-      const status = error?.response?.status;
-      const responseData = error?.response?.data;
-
-      if (status === 409) {
-        setErrors({
-          form:
-            responseData?.error?.message
-            || responseData?.message
-            || 'An account with this institutional ID or email already exists.',
-        });
-      } else if (status === 401) {
-        setErrors({
-          form:
-            'Your session may have expired. Please sign in again and retry.',
-        });
-      } else if (status === 403) {
-        setErrors({
-          form:
-            'Your account is not authorized to create faculty accounts for this department.',
-        });
-      } else {
-        setErrors({
-          form: getErrorMessage(error),
-        });
-      }
+      setErrors({
+        form: getErrorMessage(error),
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -196,13 +173,66 @@ export default function CreateFaculty() {
       <PageHeader
         eyebrow="DEPARTMENT ADMINISTRATION"
         title="Create Faculty Account"
-        description="Create a faculty account under your assigned department."
+        description="Create a faculty account for your department."
         breadcrumbs={[
-          { label: 'HOD Dashboard', to: '/hod/dashboard' },
-          { label: 'Faculty Management', to: '/hod/faculty' },
-          { label: 'Create Faculty' },
+          {
+            label: 'HOD Dashboard',
+            to: '/hod/dashboard',
+          },
+          {
+            label: 'Faculty Management',
+            to: '/hod/faculty',
+          },
+          {
+            label: 'Create Faculty',
+          },
         ]}
       />
+
+      {notice && createdFaculty && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5"
+        >
+          <p className="text-sm font-semibold text-emerald-300">
+            Faculty account created
+          </p>
+
+          <p className="mt-2 text-sm leading-6 text-[#D0D0D8]">
+            {notice}
+          </p>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <p className="text-xs text-[#92929F]">
+                Faculty Name
+              </p>
+
+              <p className="mt-1 text-sm font-medium text-[#EAEAE6]">
+                {createdFaculty.fullName}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs text-[#92929F]">
+                Institutional ID
+              </p>
+
+              <p className="mt-1 text-sm font-medium text-[#EAEAE6]">
+                {createdFaculty.institutionalId}
+              </p>
+            </div>
+          </div>
+
+          <Link
+            to="/hod/faculty"
+            className="mt-4 inline-flex min-h-10 items-center justify-center rounded-xl border border-emerald-500/30 px-4 py-2 text-sm font-semibold text-emerald-300 transition-colors hover:bg-emerald-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+          >
+            View Faculty Directory
+          </Link>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} noValidate>
         <SectionCard
@@ -292,18 +322,10 @@ export default function CreateFaculty() {
           </SectionCard>
         </div>
 
-        {notice && (
-          <div
-            role="status"
-            className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm leading-6 text-emerald-200"
-          >
-            {notice}
-          </div>
-        )}
-
         {errors.form && (
           <div
             role="alert"
+            aria-live="assertive"
             className="mt-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm leading-6 text-rose-200"
           >
             {errors.form}
@@ -330,19 +352,22 @@ export default function CreateFaculty() {
 
             <ActionButton
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || Boolean(createdFaculty)}
             >
-              {isSubmitting ? 'Creating Faculty...' : 'Create Faculty Account'}
+              {isSubmitting
+                ? 'Creating Account...'
+                : createdFaculty
+                  ? 'Account Created'
+                  : 'Create Faculty Account'}
             </ActionButton>
           </div>
         </div>
       </form>
 
       <p className="mt-5 text-xs leading-5 text-[#777986]">
-        The account is created in your assigned department. Institutional
-        ID and email must be unique across the institution. Passwords are
-        sent to the server for secure hashing; the original password is
-        not stored as plain text.
+        The account is created under your authenticated department.
+        The initial password is sent only to the backend for hashing;
+        it is not displayed in the success message.
       </p>
     </div>
   );

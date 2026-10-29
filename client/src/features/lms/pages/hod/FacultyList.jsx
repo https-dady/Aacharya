@@ -119,51 +119,66 @@ const FACULTY_COLUMNS = [
       );
     },
   },
-    {
+      {
     key: 'actions',
     header: 'Actions',
-    render: (_value, faculty) => (
-      <div className="flex flex-wrap gap-2">
-        <Link
-          to="/hod/faculty/details"
-          state={{ faculty }}
-          aria-label={`View details for ${faculty.fullName || 'faculty member'}`}
-        >
-          <ActionButton variant="secondary" size="sm">
-            View
-          </ActionButton>
-        </Link>
+    render: (_value, faculty) => {
+      const facultyId = faculty.id || faculty._id;
 
-        <Link
-          to="/hod/faculty/edit"
-          state={{ faculty }}
-          aria-label={`Edit ${faculty.fullName || 'faculty member'}`}
-        >
-          <ActionButton size="sm">
-            Edit
-          </ActionButton>
-        </Link>
+      if (!facultyId) {
+        return (
+          <span className="text-xs text-[#858590]">
+            Record ID unavailable
+          </span>
+        );
+      }
 
-        {faculty.status === 'ACTIVE'
-          && ['FACULTY', 'MENTOR'].includes(faculty.role) && (
-            <Link
-              to="/hod/faculty/grant-mentor"
-              state={{ faculty }}
-              aria-label={
-                faculty.role === 'MENTOR'
-                  ? `Manage mentor assignments for ${faculty.fullName || 'faculty member'}`
-                  : `Grant mentor role to ${faculty.fullName || 'faculty member'}`
-              }
-            >
-              <ActionButton variant="outline" size="sm">
-                {faculty.role === 'MENTOR'
-                  ? 'Manage Assignments'
-                  : 'Grant Mentor'}
-              </ActionButton>
-            </Link>
-          )}
-      </div>
-    ),
+      const detailsPath = `/hod/faculty/${encodeURIComponent(facultyId)}`;
+      const editPath = `${detailsPath}/edit`;
+
+      return (
+        <div className="flex flex-wrap gap-2">
+          <Link
+            to={detailsPath}
+            state={{ faculty }}
+            aria-label={`View details for ${faculty.fullName || 'faculty member'}`}
+          >
+            <ActionButton variant="secondary" size="sm">
+              View
+            </ActionButton>
+          </Link>
+
+          <Link
+            to={editPath}
+            state={{ faculty }}
+            aria-label={`Edit ${faculty.fullName || 'faculty member'}`}
+          >
+            <ActionButton size="sm">
+              Edit
+            </ActionButton>
+          </Link>
+
+          {faculty.status === 'ACTIVE'
+            && ['FACULTY', 'MENTOR'].includes(faculty.role) && (
+              <Link
+                to="/hod/faculty/grant-mentor"
+                state={{ faculty }}
+                aria-label={
+                  faculty.role === 'MENTOR'
+                    ? `Manage mentor assignments for ${faculty.fullName || 'faculty member'}`
+                    : `Grant mentor role to ${faculty.fullName || 'faculty member'}`
+                }
+              >
+                <ActionButton variant="outline" size="sm">
+                  {faculty.role === 'MENTOR'
+                    ? 'Manage Assignments'
+                    : 'Grant Mentor'}
+                </ActionButton>
+              </Link>
+            )}
+        </div>
+      );
+    },
   },
 ];
 

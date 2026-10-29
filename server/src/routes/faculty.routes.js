@@ -4,6 +4,8 @@ import { z } from 'zod';
 import {
   createFacultyController,
   listFacultyController,
+  getFacultyByIdController,
+  updateFacultyController,
 } from '../controllers/faculty.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
@@ -19,6 +21,8 @@ import {
 
 const facultyRouter = Router();
 
+const emptyObjectSchema = z.object({}).strict();
+
 const createFacultySchema = z.object({
   body: z.object({
     institutionalId: z.string().trim().min(2).max(50),
@@ -27,14 +31,13 @@ const createFacultySchema = z.object({
     password: z.string().min(8).max(72),
   }).strict(),
 
-  params: z.object({}),
-  query: z.object({}),
+  params: emptyObjectSchema,
+  query: emptyObjectSchema,
 });
 
 const listFacultySchema = z.object({
-  body: z.object({}),
-
-  params: z.object({}),
+  body: emptyObjectSchema,
+  params: emptyObjectSchema,
 
   query: z.object({
     page: z.coerce.number().int().min(1).max(100000).optional(),
@@ -55,9 +58,41 @@ const listFacultySchema = z.object({
   }).strict(),
 });
 
-// Read-only faculty listing.
-// Authentication, HOD authorization, and query validation remain enforced.
-// The global API rate limiter still applies.
+const facultyIdParamsSchema = z.object({
+  facultyId: z.string().regex(
+    /^[a-f\d]{24}$/i,
+    'A valid faculty account ID is required.',
+  ),
+});
+
+const getFacultyByIdSchema = z.object({
+  body: emptyObjectSchema,
+  params: facultyIdParamsSchema,
+  query: emptyObjectSchema,
+});
+
+const updateFacultySchema = z.object({
+  body: z.object({
+    institutionalId: z.string().trim().min(2).max(50).optional(),
+    fullName: z.string().trim().min(2).max(100).optional(),
+    email: z.string().trim().email().max(254).optional(),
+  })
+    .strict()
+    .refine(
+      (body) => Object.keys(body).length > 0,
+      {
+        message: 'Provide at least one field to update.',
+      },
+    ),
+
+  params: facultyIdParamsSchema,
+  query: emptyObjectSchema,
+});
+
+// List faculty and mentor accounts within the authenticated HOD's
+// department.
+//
+// GET /api/v1/provisioning/faculty
 facultyRouter.get(
   '/',
   authenticate,
@@ -66,8 +101,9 @@ facultyRouter.get(
   listFacultyController,
 );
 
-// Creating a faculty account is a state-changing operation.
-// Keep the stricter rate limiter and audit event.
+// Create a faculty account within the authenticated HOD's department.
+//
+// POST /api/v1/provisioning/faculty
 facultyRouter.post(
   '/',
   authenticate,
@@ -82,6 +118,37 @@ facultyRouter.post(
     }),
   }),
   createFacultyController,
+);
+
+// Retrieve an individual faculty or mentor account.
+//
+// GET /api/v1/provisioning/faculty/:facultyId
+facultyRouter.get(
+  '/:facultyId',
+  authenticate,
+  authorize('HOD'),
+  validate(getFacultyByIdSchema),
+  getFacultyByIdController,
+);
+
+// Update permitted fields on an individual faculty or mentor account.
+//
+// PATCH /api/v1/provisioning/faculty/:facultyId
+facultyRouter.patch(
+  '/:facultyId',
+  authenticate,
+  authorize('HOD'),
+  authRateLimiter,
+  validate(updateFacultySchema),
+  auditEvent({
+    action: 'FACULTY_ACCOUNT_UPDATE',
+    resourceType: 'FacultyAccount',
+    getResourceId: (req) => req.params.facultyId,
+    getMetadata: (req) => ({
+      updatedFields: Object.keys(req.body ?? {}),
+    }),
+  }),
+  updateFacultyController,
 );
 
 export default facultyRouter;

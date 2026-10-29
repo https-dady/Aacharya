@@ -202,8 +202,18 @@ export const applicationRoutes = [
         element: <FacultyDetails />,
       },
       {
+        id: "hod-faculty-details-by-id",
+        path: "faculty/:facultyId",
+        element: <FacultyDetails />,
+      },
+      {
         id: "hod-faculty-edit",
         path: "faculty/edit",
+        element: <EditFaculty />,
+      },
+      {
+        id: "hod-faculty-edit-by-id",
+        path: "faculty/:facultyId/edit",
         element: <EditFaculty />,
       },
 

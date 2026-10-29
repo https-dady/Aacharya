@@ -9,6 +9,7 @@ import {
 import {
   Assignment,
   ASSIGNMENT_STATUSES,
+  ASSIGNMENT_CONTENT_TYPES,
 } from '../models/assignment.model.js';
 
 function createControllerError(message, code, statusCode = 400) {
@@ -26,7 +27,14 @@ function normalizeAssignment(assignment) {
 
   return {
     id: assignment._id.toString(),
+
     title: assignment.title,
+
+    // Existing records without contentType remain assignments.
+    contentType:
+      assignment.contentType
+      || ASSIGNMENT_CONTENT_TYPES.ASSIGNMENT,
+
     description: assignment.description,
 
     course: course
@@ -43,12 +51,14 @@ function normalizeAssignment(assignment) {
     dueDate: assignment.dueDate,
     totalMarks: assignment.totalMarks,
 
-    attachments: (assignment.attachments || []).map((attachment) => ({
-      name: attachment.name,
-      url: attachment.url,
-      mimeType: attachment.mimeType || '',
-      size: attachment.size ?? 0,
-    })),
+    attachments: (assignment.attachments || []).map(
+      (attachment) => ({
+        name: attachment.name,
+        url: attachment.url,
+        mimeType: attachment.mimeType || '',
+        size: attachment.size ?? 0,
+      }),
+    ),
 
     status: assignment.status.toLowerCase(),
 
@@ -62,8 +72,8 @@ function normalizeAssignment(assignment) {
 /**
  * GET /api/v1/assignments/me
  *
- * Returns published assignments targeted to the authenticated student's
- * department, assigned batches, or assigned sections.
+ * Returns published assignments and practicals targeted to the
+ * authenticated student's department, assigned batches, or sections.
  */
 export async function listMyAssignmentsController(req, res, next) {
   try {

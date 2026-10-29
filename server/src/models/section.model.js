@@ -44,6 +44,22 @@ const sectionSchema = new Schema(
       index: true,
     },
 
+    /*
+     * Canonical section-level mentor ownership.
+     *
+     * One section stores at most one mentor reference.
+     * null means the section currently has no assigned mentor.
+     *
+     * Optional ownership preserves compatibility with existing
+     * section documents until their assignments are reconciled.
+     */
+    mentor: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
+
     status: {
       type: String,
       enum: {
@@ -82,6 +98,13 @@ sectionSchema.index(
 sectionSchema.index({
   department: 1,
   batch: 1,
+  status: 1,
+});
+
+// Useful when retrieving sections assigned to a particular mentor.
+sectionSchema.index({
+  department: 1,
+  mentor: 1,
   status: 1,
 });
 

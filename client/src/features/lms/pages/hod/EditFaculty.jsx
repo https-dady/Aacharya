@@ -1,10 +1,28 @@
-import { useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import {
+  useCallback,
+  useEffect,
+  useState,
+} from 'react';
+
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+} from 'react-router-dom';
+
+import api from '../../../auth/services/api/axios.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import FormField from '../../components/FormField.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
+
+const INITIAL_FORM = {
+  institutionalId: '',
+  fullName: '',
+  email: '',
+};
 
 function getInitialForm(faculty) {
   return {
@@ -14,19 +32,137 @@ function getInitialForm(faculty) {
   };
 }
 
+function getResponseData(response) {
+  const body = response?.data;
+
+  return body?.data ?? body ?? {};
+}
+
+function getErrorMessage(error, fallback) {
+  return (
+    error?.response?.data?.error?.message
+    || error?.response?.data?.message
+    || error?.message
+    || fallback
+  );
+}
+
+function validateForm(form) {
+  const errors = {};
+
+  const institutionalId = form.institutionalId.trim();
+  const fullName = form.fullName.trim();
+  const email = form.email.trim();
+
+  if (institutionalId.length < 2 || institutionalId.length > 50) {
+    errors.institutionalId =
+      'Institutional ID must contain between 2 and 50 characters.';
+  }
+
+  if (fullName.length < 2 || fullName.length > 100) {
+    errors.fullName =
+      'Full name must contain between 2 and 100 characters.';
+  }
+
+  if (!email) {
+    errors.email = 'Email address is required.';
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.email = 'Enter a valid email address.';
+  } else if (email.length > 254) {
+    errors.email = 'Email address cannot exceed 254 characters.';
+  }
+
+  return errors;
+}
+
+function normalizeFaculty(data) {
+  return data?.faculty ?? data?.user ?? data ?? null;
+}
+
 export default function EditFaculty() {
   const location = useLocation();
   const navigate = useNavigate();
+  const params = useParams();
 
-  const faculty = location.state?.faculty ?? null;
+  const initialFaculty = location.state?.faculty ?? null;
 
-  const [form, setForm] = useState(() => getInitialForm(faculty));
+  const facultyId = (
+    params.facultyId
+    || params.id
+    || initialFaculty?.id
+    || initialFaculty?._id
+    || ''
+  );
+
+  const [faculty, setFaculty] = useState(initialFaculty);
+  const [form, setForm] = useState(
+    () => getInitialForm(initialFaculty),
+  );
+
   const [errors, setErrors] = useState({});
+  const [loadError, setLoadError] = useState('');
   const [notice, setNotice] = useState('');
 
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const loadFaculty = useCallback(async (signal) => {
+    if (!facultyId) {
+      setLoadError(
+        'Faculty account ID is missing. Open the faculty record from the directory and try again.',
+      );
+
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setLoadError('');
+
+    try {
+      const response = await api.get(
+        `/v1/provisioning/faculty/${encodeURIComponent(facultyId)}`,
+        { signal },
+      );
+
+      const data = getResponseData(response);
+      const fetchedFaculty = normalizeFaculty(data);
+
+      if (!fetchedFaculty?.id && !fetchedFaculty?._id) {
+        throw new Error(
+          'The server did not return the requested faculty account.',
+        );
+      }
+
+      setFaculty(fetchedFaculty);
+      setForm(getInitialForm(fetchedFaculty));
+    } catch (error) {
+      if (error.name === 'CanceledError' || error.name === 'AbortError') {
+        return;
+      }
+
+      setLoadError(
+        getErrorMessage(
+          error,
+          'Unable to load faculty details. Please try again.',
+        ),
+      );
+    } finally {
+      if (!signal?.aborted) {
+        setIsLoading(false);
+      }
+    }
+  }, [facultyId]);
+
   useEffect(() => {
-    setForm(getInitialForm(faculty));
-  }, [faculty]);
+    const controller = new AbortController();
+
+    loadFaculty(controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [loadFaculty]);
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -39,90 +175,97 @@ export default function EditFaculty() {
     setErrors((current) => ({
       ...current,
       [name]: '',
+      form: '',
     }));
 
     setNotice('');
   }
 
-  function validateForm() {
-    const nextErrors = {};
-
-    if (form.institutionalId.trim().length < 2) {
-      nextErrors.institutionalId =
-        'Institutional ID must contain at least 2 characters.';
-    } else if (form.institutionalId.trim().length > 50) {
-      nextErrors.institutionalId =
-        'Institutional ID cannot exceed 50 characters.';
-    }
-
-    if (form.fullName.trim().length < 2) {
-      nextErrors.fullName =
-        'Full name must contain at least 2 characters.';
-    } else if (form.fullName.trim().length > 100) {
-      nextErrors.fullName =
-        'Full name cannot exceed 100 characters.';
-    }
-
-    if (!form.email.trim()) {
-      nextErrors.email = 'Email address is required.';
-    } else if (
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
-    ) {
-      nextErrors.email = 'Enter a valid email address.';
-    } else if (form.email.trim().length > 254) {
-      nextErrors.email = 'Email address is too long.';
-    }
-
-    return nextErrors;
-  }
-
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
 
-    const nextErrors = validateForm();
-
-    setErrors(nextErrors);
-    setNotice('');
-
-    if (Object.keys(nextErrors).length > 0) {
+    if (isSaving || isLoading || !facultyId) {
       return;
     }
 
-    setNotice(
-      'Details validated successfully. Changes have not been saved because backend integration is not enabled yet.',
-    );
+    setErrors({});
+    setNotice('');
+
+    const validationErrors = validateForm(form);
+
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
+      return;
+    }
+
+    const payload = {
+      institutionalId: form.institutionalId.trim().toUpperCase(),
+      fullName: form.fullName.trim(),
+      email: form.email.trim().toLowerCase(),
+    };
+
+    const original = {
+      institutionalId: faculty?.institutionalId ?? '',
+      fullName: faculty?.fullName ?? '',
+      email: (faculty?.email ?? '').toLowerCase(),
+    };
+
+    const changedFields = {};
+
+    if (payload.institutionalId !== original.institutionalId) {
+      changedFields.institutionalId = payload.institutionalId;
+    }
+
+    if (payload.fullName !== original.fullName) {
+      changedFields.fullName = payload.fullName;
+    }
+
+    if (payload.email !== original.email) {
+      changedFields.email = payload.email;
+    }
+
+    if (Object.keys(changedFields).length === 0) {
+      setNotice('No changes to save.');
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      const response = await api.patch(
+        `/v1/provisioning/faculty/${encodeURIComponent(facultyId)}`,
+        changedFields,
+      );
+
+      const data = getResponseData(response);
+      const updatedFaculty = normalizeFaculty(data);
+
+      if (!updatedFaculty?.id && !updatedFaculty?._id) {
+        throw new Error(
+          'The server did not return the updated faculty account.',
+        );
+      }
+
+      setFaculty(updatedFaculty);
+      setForm(getInitialForm(updatedFaculty));
+
+      setNotice(
+        data.message || 'Faculty details updated successfully.',
+      );
+    } catch (error) {
+      setErrors({
+        form: getErrorMessage(
+          error,
+          'Unable to save faculty details. Please try again.',
+        ),
+      });
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function handleCancel() {
     navigate('/hod/faculty');
-  }
-
-  if (!faculty) {
-    return (
-      <div className="mx-auto w-full max-w-[1000px]">
-        <PageHeader
-          eyebrow="DEPARTMENT ADMINISTRATION"
-          title="Edit Faculty"
-          description="Update an existing faculty account."
-          breadcrumbs={[
-            { label: 'HOD Dashboard', to: '/hod/dashboard' },
-            { label: 'Faculty Management', to: '/hod/faculty' },
-            { label: 'Edit Faculty' },
-          ]}
-        />
-
-        <SectionCard
-          title="Faculty record unavailable"
-          description="Open a faculty member's details page first so the selected record can be passed to the edit form."
-        >
-          <Link to="/hod/faculty">
-            <ActionButton variant="secondary">
-              Return to faculty directory
-            </ActionButton>
-          </Link>
-        </SectionCard>
-      </div>
-    );
   }
 
   return (
@@ -130,101 +273,210 @@ export default function EditFaculty() {
       <PageHeader
         eyebrow="DEPARTMENT ADMINISTRATION"
         title="Edit Faculty Details"
-        description="Update the institutional identity and contact information of this faculty member."
+        description="Update the institutional identity and contact information of a faculty member in your department."
         breadcrumbs={[
-          { label: 'HOD Dashboard', to: '/hod/dashboard' },
-          { label: 'Faculty Management', to: '/hod/faculty' },
-          { label: 'Faculty Details', to: '/hod/faculty/details' },
-          { label: 'Edit Faculty' },
+          {
+            label: 'HOD Dashboard',
+            to: '/hod/dashboard',
+          },
+          {
+            label: 'Faculty Management',
+            to: '/hod/faculty',
+          },
+          {
+            label: 'Edit Faculty',
+          },
         ]}
       />
 
-      <form onSubmit={handleSubmit} noValidate>
-        <SectionCard
-          eyebrow="ACCOUNT INFORMATION"
-          title={faculty.fullName || 'Faculty Member'}
-          description="Edit the faculty member's institutional details."
+      {isLoading && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-5 rounded-xl border border-[#343640] bg-[#1D1F27] p-4 text-sm text-[#A5A6B0]"
         >
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-            <FormField
-              label="Institutional ID"
-              name="institutionalId"
-              value={form.institutionalId}
-              onChange={handleChange}
-              placeholder="Enter institutional ID"
-              error={errors.institutionalId}
-              required
-              autoComplete="off"
-              maxLength={50}
-            />
+          Loading faculty details...
+        </div>
+      )}
 
-            <FormField
-              label="Full Name"
-              name="fullName"
-              value={form.fullName}
-              onChange={handleChange}
-              placeholder="Enter full name"
-              error={errors.fullName}
-              required
-              autoComplete="name"
-              maxLength={100}
-            />
+      {!isLoading && loadError && (
+        <div
+          role="alert"
+          className="mb-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-5"
+        >
+          <p className="text-sm font-semibold text-rose-200">
+            Faculty details unavailable
+          </p>
 
-            <div className="sm:col-span-2">
-              <FormField
-                label="Institutional Email"
-                name="email"
-                type="email"
-                value={form.email}
-                onChange={handleChange}
-                placeholder="faculty@institution.edu"
-                helperText="Enter the faculty member's institutional email."
-                error={errors.email}
-                required
-                autoComplete="email"
-                maxLength={254}
-              />
-            </div>
-          </div>
-        </SectionCard>
+          <p className="mt-2 text-sm leading-6 text-rose-100/90">
+            {loadError}
+          </p>
 
-        {notice && (
-          <div
-            role="status"
-            className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-200"
-          >
-            {notice}
-          </div>
-        )}
+          <div className="mt-4 flex flex-wrap gap-3">
+            {facultyId && (
+              <ActionButton
+                type="button"
+                variant="secondary"
+                onClick={() => loadFaculty()}
+              >
+                Retry
+              </ActionButton>
+            )}
 
-        <div className="mt-6 flex flex-col-reverse gap-3 border-t border-[#343640] pt-5 sm:flex-row sm:items-center sm:justify-between">
-          <Link
-            to="/hod/faculty"
-            className="inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-[#A5A6B0] transition-colors hover:bg-[#26272B] hover:text-[#EAEAE6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
-          >
-            Back to directory
-          </Link>
-
-          <div className="flex flex-col-reverse gap-3 sm:flex-row">
-            <ActionButton
-              type="button"
-              variant="secondary"
-              onClick={handleCancel}
-            >
-              Cancel
-            </ActionButton>
-
-            <ActionButton type="submit">
-              Validate Changes
-            </ActionButton>
+            <Link to="/hod/faculty">
+              <ActionButton variant="secondary">
+                Return to Directory
+              </ActionButton>
+            </Link>
           </div>
         </div>
-      </form>
+      )}
+
+      {!loadError && faculty && (
+        <>
+          {notice && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="mb-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm leading-6 text-emerald-200"
+            >
+              {notice}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} noValidate>
+            <SectionCard
+              eyebrow="ACCOUNT INFORMATION"
+              title={faculty.fullName || 'Faculty Member'}
+              description="Update the faculty member's institutional ID, name, and email address."
+            >
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <FormField
+                  label="Institutional ID"
+                  name="institutionalId"
+                  value={form.institutionalId}
+                  onChange={handleChange}
+                  placeholder="Enter institutional ID"
+                  helperText="Must be unique across the institution."
+                  error={errors.institutionalId}
+                  required
+                  autoComplete="off"
+                  maxLength={50}
+                  disabled={isSaving}
+                />
+
+                <FormField
+                  label="Full Name"
+                  name="fullName"
+                  value={form.fullName}
+                  onChange={handleChange}
+                  placeholder="Enter full name"
+                  error={errors.fullName}
+                  required
+                  autoComplete="name"
+                  maxLength={100}
+                  disabled={isSaving}
+                />
+
+                <div className="sm:col-span-2">
+                  <FormField
+                    label="Institutional Email"
+                    name="email"
+                    type="email"
+                    value={form.email}
+                    onChange={handleChange}
+                    placeholder="faculty@institution.edu"
+                    helperText="Changing the email address resets its verification status."
+                    error={errors.email}
+                    required
+                    autoComplete="email"
+                    maxLength={254}
+                    disabled={isSaving}
+                  />
+                </div>
+              </div>
+            </SectionCard>
+
+            <div className="mt-5">
+              <SectionCard
+                eyebrow="ACCOUNT CONTROL"
+                title="Protected fields"
+                description="These fields cannot be changed through the faculty edit form."
+              >
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+                    <p className="text-xs font-medium text-[#858590]">
+                      Account Role
+                    </p>
+
+                    <p className="mt-2 text-sm font-semibold text-[#EAEAE6]">
+                      {faculty.role || 'FACULTY'}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+                    <p className="text-xs font-medium text-[#858590]">
+                      Account Status
+                    </p>
+
+                    <p className="mt-2 text-sm font-semibold text-[#EAEAE6]">
+                      {faculty.status || 'Not available'}
+                    </p>
+                  </div>
+                </div>
+
+                <p className="mt-4 text-xs leading-5 text-[#858590]">
+                  Department, role, account status, password, and batch or
+                  section assignments are managed separately and cannot
+                  be changed from this form.
+                </p>
+              </SectionCard>
+            </div>
+
+            {errors.form && (
+              <div
+                role="alert"
+                aria-live="assertive"
+                className="mt-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm leading-6 text-rose-200"
+              >
+                {errors.form}
+              </div>
+            )}
+
+            <div className="mt-6 flex flex-col-reverse gap-3 border-t border-[#343640] pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <Link
+                to="/hod/faculty"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-[#A5A6B0] transition-colors hover:bg-[#26272B] hover:text-[#EAEAE6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+              >
+                Back to Directory
+              </Link>
+
+              <div className="flex flex-col-reverse gap-3 sm:flex-row">
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  onClick={handleCancel}
+                  disabled={isSaving}
+                >
+                  Cancel
+                </ActionButton>
+
+                <ActionButton
+                  type="submit"
+                  loading={isSaving}
+                  disabled={isLoading || Boolean(loadError)}
+                >
+                  Save Changes
+                </ActionButton>
+              </div>
+            </div>
+          </form>
+        </>
+      )}
 
       <p className="mt-5 text-xs leading-5 text-[#777986]">
-        This form currently validates changes locally. It does not update
-        the database. Saving will be connected to the existing backend
-        contract during the integration phase.
+        Changes are saved to the backend. Email verification must be
+        completed separately if the email address changes.
       </p>
     </div>
   );

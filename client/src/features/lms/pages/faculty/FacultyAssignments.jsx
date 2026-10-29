@@ -1,4 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+
+import api from '../../../auth/services/api/axios.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
@@ -6,17 +9,79 @@ import PageHeader from '../../components/PageHeader.jsx';
 import SearchInput from '../../components/SearchInput.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
-const ASSIGNMENT_STATUSES = [
-  { value: 'all', label: 'All Assignments' },
+const CONTENT_TYPES = Object.freeze({
+  ASSIGNMENT: 'ASSIGNMENT',
+  PRACTICAL: 'PRACTICAL',
+});
+
+const STATUS_FILTERS = [
+  { value: 'all', label: 'All Statuses' },
   { value: 'draft', label: 'Draft' },
   { value: 'published', label: 'Published' },
   { value: 'closed', label: 'Closed' },
 ];
 
-const INITIAL_ASSIGNMENTS = [];
+const TYPE_FILTERS = [
+  { value: 'all', label: 'Assignments & Practicals' },
+  { value: CONTENT_TYPES.ASSIGNMENT, label: 'Assignments' },
+  { value: CONTENT_TYPES.PRACTICAL, label: 'Practicals' },
+];
 
-function getAssignmentStatus(assignment) {
-  return String(assignment.status ?? '').toLowerCase();
+function getResponseData(response) {
+  return response?.data?.data ?? response?.data ?? {};
+}
+
+function getItemId(item) {
+  const id = item?.id ?? item?._id;
+  return id ? String(id) : '';
+}
+
+function getContentStatus(item) {
+  return String(item?.status ?? '').toLowerCase();
+}
+
+function getContentType(item) {
+  return String(
+    item?.contentType || CONTENT_TYPES.ASSIGNMENT,
+  ).toUpperCase();
+}
+
+function getCourseTitle(item) {
+  return (
+    item?.course?.title
+    ?? item?.courseName
+    ?? item?.course?.name
+    ?? '—'
+  );
+}
+
+function getCourseCode(item) {
+  return item?.course?.code ?? item?.courseCode ?? '';
+}
+
+function getTargetLabel(item, prefix) {
+  if (typeof item === 'string') {
+    return `${prefix} ${item.slice(-6)}`;
+  }
+
+  return (
+    item?.name
+    ?? item?.title
+    ?? item?.code
+    ?? `${prefix} ${getItemId(item).slice(-6)}`
+  );
+}
+
+function normalizeContent(item) {
+  return {
+    ...item,
+    id: getItemId(item),
+    contentType: getContentType(item),
+    courseName: getCourseTitle(item),
+    courseCode: getCourseCode(item),
+    batches: Array.isArray(item?.batches) ? item.batches : [],
+    sections: Array.isArray(item?.sections) ? item.sections : [],
+  };
 }
 
 function formatDate(value) {
@@ -27,7 +92,7 @@ function formatDate(value) {
   const date = new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    return String(value);
+    return '—';
   }
 
   return new Intl.DateTimeFormat('en-IN', {
@@ -53,87 +118,195 @@ function getStatusStyles(status) {
   }
 }
 
+function getReadableType(type) {
+  return type === CONTENT_TYPES.PRACTICAL
+    ? 'Practical'
+    : 'Assignment';
+}
+
+function getErrorMessage(error, fallback) {
+  return (
+    error?.response?.data?.message
+    ?? error?.response?.data?.error?.message
+    ?? error?.message
+    ?? fallback
+  );
+}
+
 export default function FacultyAssignments() {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('all');
+  const [selectedType, setSelectedType] = useState('all');
 
-  // Real assignment records will be connected after the backend
-  // assignment API and its response contract are available.
-  const assignments = INITIAL_ASSIGNMENTS;
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const filteredAssignments = useMemo(() => {
+  const loadContent = useCallback(async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const response = await api.get('/v1/assignments/manage', {
+        params: {
+          page: 1,
+          limit: 100,
+        },
+      });
+
+      const data = getResponseData(response);
+      const records = Array.isArray(data.items) ? data.items : [];
+
+      setItems(records.map(normalizeContent));
+    } catch (requestError) {
+      setError(
+        getErrorMessage(
+          requestError,
+          'Assignments and practicals could not be loaded.',
+        ),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadContent();
+  }, [loadContent]);
+
+  const filteredItems = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
 
-    return assignments.filter((assignment) => {
+    return items.filter((item) => {
       const matchesSearch =
-        !query ||
-        [
-          assignment.title,
-          assignment.description,
-          assignment.courseName,
-          assignment.courseCode,
-          assignment.sectionName,
-          assignment.batchName,
+        !query
+        || [
+          item.title,
+          item.description,
+          item.courseName,
+          item.courseCode,
+          item.contentType,
+          ...item.batches.map((batch) => getTargetLabel(batch, 'Batch')),
+          ...item.sections.map((section) => getTargetLabel(section, 'Section')),
         ].some((value) =>
           String(value ?? '').toLowerCase().includes(query),
         );
 
       const matchesStatus =
-        selectedStatus === 'all' ||
-        getAssignmentStatus(assignment) === selectedStatus;
+        selectedStatus === 'all'
+        || getContentStatus(item) === selectedStatus;
 
-      return matchesSearch && matchesStatus;
+      const matchesType =
+        selectedType === 'all'
+        || getContentType(item) === selectedType;
+
+      return matchesSearch && matchesStatus && matchesType;
     });
-  }, [assignments, searchTerm, selectedStatus]);
+  }, [items, searchTerm, selectedStatus, selectedType]);
 
-  const totalAssignments = assignments.length;
+  const statistics = useMemo(() => ({
+    total: items.length,
 
-  const publishedAssignments = assignments.filter(
-    (assignment) => getAssignmentStatus(assignment) === 'published',
-  ).length;
+    published: items.filter(
+      (item) => getContentStatus(item) === 'published',
+    ).length,
 
-  const draftAssignments = assignments.filter(
-    (assignment) => getAssignmentStatus(assignment) === 'draft',
-  ).length;
+    drafts: items.filter(
+      (item) => getContentStatus(item) === 'draft',
+    ).length,
 
-  const closedAssignments = assignments.filter(
-    (assignment) => getAssignmentStatus(assignment) === 'closed',
-  ).length;
+    practicals: items.filter(
+      (item) => getContentType(item) === CONTENT_TYPES.PRACTICAL,
+    ).length,
+  }), [items]);
 
   function clearFilters() {
     setSearchTerm('');
     setSelectedStatus('all');
+    setSelectedType('all');
   }
+
+  const hasActiveFilters =
+    Boolean(searchTerm.trim())
+    || selectedStatus !== 'all'
+    || selectedType !== 'all';
 
   return (
     <div className="mx-auto w-full max-w-[1200px]">
       <PageHeader
         eyebrow="FACULTY WORKSPACE"
-        title="Assignments"
-        description="Manage coursework, review assignment deadlines, and track student submissions."
+        title="Assignments & Practicals"
+        description="Manage coursework and practical activities for subjects assigned to you."
         breadcrumbs={[
           {
             label: 'Faculty Dashboard',
             to: '/faculty/dashboard',
           },
           {
-            label: 'Assignments',
+            label: 'Assignments & Practicals',
           },
         ]}
+        actions={
+          <div className="flex flex-wrap gap-3">
+            <ActionButton
+              variant="secondary"
+              onClick={loadContent}
+              loading={loading}
+            >
+              Refresh
+            </ActionButton>
+
+            <Link
+              to="/faculty/assignments/new"
+              className="inline-flex rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+            >
+              <ActionButton>
+                Create New
+              </ActionButton>
+            </Link>
+          </div>
+        }
       />
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {error && (
+        <div
+          role="alert"
+          className="mb-6 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4"
+        >
+          <p className="text-sm leading-6 text-rose-200">
+            {error}
+          </p>
+
+          <p className="mt-2 text-xs leading-5 text-[#C8A8A8]">
+            If the request returns an authorization or server error, the
+            backend route, authenticated role, and course assignment should
+            be checked before changing the UI.
+          </p>
+
+          <div className="mt-3">
+            <ActionButton
+              variant="secondary"
+              onClick={loadContent}
+              loading={loading}
+            >
+              Try Again
+            </ActionButton>
+          </div>
+        </div>
+      )}
+
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <section className="rounded-2xl border border-[#343640] bg-[#191A21] p-5">
           <p className="text-sm text-[#9697A2]">
-            Total Assignments
+            Total Content
           </p>
 
           <p className="mt-3 text-3xl font-semibold text-[#EAEAE6]">
-            {totalAssignments}
+            {loading ? '—' : statistics.total}
           </p>
 
           <p className="mt-2 text-xs leading-5 text-[#777986]">
-            Across your assigned courses
+            Assignments and practicals
           </p>
         </section>
 
@@ -143,11 +316,11 @@ export default function FacultyAssignments() {
           </p>
 
           <p className="mt-3 text-3xl font-semibold text-emerald-300">
-            {publishedAssignments}
+            {loading ? '—' : statistics.published}
           </p>
 
           <p className="mt-2 text-xs leading-5 text-[#777986]">
-            Available to students
+            Published content
           </p>
         </section>
 
@@ -157,234 +330,269 @@ export default function FacultyAssignments() {
           </p>
 
           <p className="mt-3 text-3xl font-semibold text-amber-200">
-            {draftAssignments}
+            {loading ? '—' : statistics.drafts}
           </p>
 
           <p className="mt-2 text-xs leading-5 text-[#777986]">
-            Not yet published
+            Saved but not published
           </p>
         </section>
 
-        <section className="rounded-2xl border border-red-500/20 bg-[#191A21] p-5">
+        <section className="rounded-2xl border border-[#CDB5F7]/20 bg-[#191A21] p-5">
           <p className="text-sm text-[#9697A2]">
-            Closed
+            Practicals
           </p>
 
-          <p className="mt-3 text-3xl font-semibold text-red-300">
-            {closedAssignments}
+          <p className="mt-3 text-3xl font-semibold text-[#CDB5F7]">
+            {loading ? '—' : statistics.practicals}
           </p>
 
           <p className="mt-2 text-xs leading-5 text-[#777986]">
-            No longer accepting submissions
+            Practical coursework
           </p>
         </section>
       </div>
 
-      <div className="mt-6">
-        <SectionCard
-          eyebrow="ASSIGNMENT DIRECTORY"
-          title="Your Assignments"
-          description="Find assignments by title, course, batch, or section and filter them by status."
-        >
-          <div className="flex flex-col gap-5">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-              <SearchInput
-                name="facultyAssignmentSearch"
-                label="Search assignments"
-                value={searchTerm}
-                onChange={(event) =>
-                  setSearchTerm(event.target.value)
-                }
-                placeholder="Search title, course, or section..."
-              />
+      <SectionCard
+        eyebrow="CONTENT DIRECTORY"
+        title="Your Assignments & Practicals"
+        description="Search and filter content associated with your account."
+      >
+        <div className="flex flex-col gap-5">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <SearchInput
+              name="facultyContentSearch"
+              label="Search content"
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Search title, course, batch, or section..."
+            />
 
-              <div>
-                <label
-                  htmlFor="faculty-assignment-status"
-                  className="mb-2 block text-sm font-medium text-[#D0D0D8]"
-                >
-                  Assignment Status
-                </label>
-
-                <select
-                  id="faculty-assignment-status"
-                  value={selectedStatus}
-                  onChange={(event) =>
-                    setSelectedStatus(event.target.value)
-                  }
-                  className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
-                >
-                  {ASSIGNMENT_STATUSES.map((status) => (
-                    <option
-                      key={status.value}
-                      value={status.value}
-                    >
-                      {status.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#343640] pt-4">
-              <p
-                className="text-sm text-[#9697A2]"
-                aria-live="polite"
+            <div>
+              <label
+                htmlFor="faculty-content-type"
+                className="mb-2 block text-sm font-medium text-[#D0D0D8]"
               >
-                Showing {filteredAssignments.length} of{' '}
-                {totalAssignments} assignments
-              </p>
+                Content Type
+              </label>
 
-              {(searchTerm || selectedStatus !== 'all') && (
-                <ActionButton
-                  variant="secondary"
-                  size="sm"
-                  onClick={clearFilters}
-                >
-                  Clear Filters
-                </ActionButton>
-              )}
+              <select
+                id="faculty-content-type"
+                value={selectedType}
+                onChange={(event) => setSelectedType(event.target.value)}
+                className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+              >
+                {TYPE_FILTERS.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            {filteredAssignments.length === 0 ? (
-              <EmptyState
-                title={
-                  searchTerm.trim() || selectedStatus !== 'all'
-                    ? 'No matching assignments'
-                    : 'No assignment records available'
-                }
-                description={
-                  searchTerm.trim() || selectedStatus !== 'all'
-                    ? 'Try another search term or select a different assignment status.'
-                    : 'Your assigned coursework will appear here once assignment data is available from the backend.'
-                }
-                action={
-                  searchTerm.trim() || selectedStatus !== 'all' ? (
-                    <ActionButton
-                      variant="secondary"
-                      onClick={clearFilters}
-                    >
-                      Reset Filters
-                    </ActionButton>
-                  ) : null
-                }
-              />
-            ) : (
-              <div className="overflow-x-auto rounded-xl border border-[#343640]">
-                <table className="w-full min-w-[850px] text-left text-sm">
-                  <caption className="sr-only">
-                    Faculty assignment directory
-                  </caption>
+            <div>
+              <label
+                htmlFor="faculty-content-status"
+                className="mb-2 block text-sm font-medium text-[#D0D0D8]"
+              >
+                Status
+              </label>
 
-                  <thead className="bg-[#202129] text-xs uppercase tracking-wider text-[#9697A2]">
-                    <tr>
-                      <th
-                        scope="col"
-                        className="px-4 py-3 font-medium"
-                      >
-                        Assignment
-                      </th>
+              <select
+                id="faculty-content-status"
+                value={selectedStatus}
+                onChange={(event) => setSelectedStatus(event.target.value)}
+                className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+              >
+                {STATUS_FILTERS.map((status) => (
+                  <option key={status.value} value={status.value}>
+                    {status.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
 
-                      <th
-                        scope="col"
-                        className="px-4 py-3 font-medium"
-                      >
-                        Course
-                      </th>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#343640] pt-4">
+            <p
+              className="text-sm text-[#9697A2]"
+              aria-live="polite"
+            >
+              Showing {filteredItems.length} of {items.length} records
+            </p>
 
-                      <th
-                        scope="col"
-                        className="px-4 py-3 font-medium"
-                      >
-                        Section / Batch
-                      </th>
-
-                      <th
-                        scope="col"
-                        className="px-4 py-3 font-medium"
-                      >
-                        Due Date
-                      </th>
-
-                      <th
-                        scope="col"
-                        className="px-4 py-3 font-medium"
-                      >
-                        Status
-                      </th>
-                    </tr>
-                  </thead>
-
-                  <tbody className="divide-y divide-[#343640]">
-                    {filteredAssignments.map((assignment, index) => {
-                      const status = getAssignmentStatus(assignment);
-
-                      return (
-                        <tr
-                          key={assignment.id ?? assignment._id ?? index}
-                          className="bg-[#191A21] transition-colors hover:bg-[#202129]"
-                        >
-                          <td className="px-4 py-4">
-                            <p className="font-medium text-[#EAEAE6]">
-                              {assignment.title || 'Untitled assignment'}
-                            </p>
-
-                            {assignment.description && (
-                              <p className="mt-1 max-w-xs truncate text-xs text-[#9697A2]">
-                                {assignment.description}
-                              </p>
-                            )}
-                          </td>
-
-                          <td className="px-4 py-4 text-[#D0D0D8]">
-                            <p>
-                              {assignment.courseName ||
-                                assignment.courseCode ||
-                                '—'}
-                            </p>
-
-                            {assignment.courseName &&
-                              assignment.courseCode && (
-                                <p className="mt-1 text-xs text-[#9697A2]">
-                                  {assignment.courseCode}
-                                </p>
-                              )}
-                          </td>
-
-                          <td className="px-4 py-4 text-[#D0D0D8]">
-                            {assignment.sectionName ||
-                              assignment.batchName ||
-                              '—'}
-                          </td>
-
-                          <td className="whitespace-nowrap px-4 py-4 text-[#D0D0D8]">
-                            {formatDate(assignment.dueDate)}
-                          </td>
-
-                          <td className="px-4 py-4">
-                            <span
-                              className={[
-                                'inline-flex rounded-full border px-2.5 py-1',
-                                'text-xs font-medium',
-                                getStatusStyles(status),
-                              ].join(' ')}
-                            >
-                              {status
-                                ? status.charAt(0).toUpperCase() +
-                                  status.slice(1)
-                                : 'Unknown'}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+            {hasActiveFilters && (
+              <ActionButton
+                variant="secondary"
+                size="sm"
+                onClick={clearFilters}
+              >
+                Clear Filters
+              </ActionButton>
             )}
           </div>
-        </SectionCard>
-      </div>
+
+          {loading ? (
+            <div
+              role="status"
+              className="rounded-xl border border-[#343640] bg-[#191A21] p-8 text-center text-sm text-[#9697A2]"
+            >
+              Loading assignments and practicals...
+            </div>
+          ) : filteredItems.length === 0 ? (
+            <EmptyState
+              title={
+                hasActiveFilters
+                  ? 'No matching content'
+                  : 'No assignments or practicals available'
+              }
+              description={
+                hasActiveFilters
+                  ? 'Try another search term or change the selected filters.'
+                  : 'Create content for a course assigned to you. Your saved records will appear here.'
+              }
+              action={
+                hasActiveFilters ? (
+                  <ActionButton
+                    variant="secondary"
+                    onClick={clearFilters}
+                  >
+                    Reset Filters
+                  </ActionButton>
+                ) : (
+                  <Link
+                    to="/faculty/assignments/new"
+                    className="inline-flex rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                  >
+                    <ActionButton>
+                      Create New
+                    </ActionButton>
+                  </Link>
+                )
+              }
+            />
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-[#343640]">
+              <table className="w-full min-w-[1000px] text-left text-sm">
+                <caption className="sr-only">
+                  Faculty assignment and practical directory
+                </caption>
+
+                <thead className="bg-[#202129] text-xs uppercase tracking-wider text-[#9697A2]">
+                  <tr>
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Title
+                    </th>
+
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Type
+                    </th>
+
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Course
+                    </th>
+
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Batch / Section
+                    </th>
+
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Due Date
+                    </th>
+
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Marks
+                    </th>
+
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-[#343640]">
+                  {filteredItems.map((item, index) => {
+                    const status = getContentStatus(item);
+                    const type = getContentType(item);
+
+                    const targetNames = [
+                      ...item.batches.map((batch) =>
+                        getTargetLabel(batch, 'Batch'),
+                      ),
+                      ...item.sections.map((section) =>
+                        getTargetLabel(section, 'Section'),
+                      ),
+                    ];
+
+                    return (
+                      <tr
+                        key={item.id || index}
+                        className="bg-[#191A21] transition-colors hover:bg-[#202129]"
+                      >
+                        <td className="px-4 py-4">
+                          <p className="font-medium text-[#EAEAE6]">
+                            {item.title || 'Untitled'}
+                          </p>
+
+                          {item.description && (
+                            <p className="mt-1 max-w-xs truncate text-xs text-[#9697A2]">
+                              {item.description}
+                            </p>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <span className="inline-flex rounded-full border border-[#454650] bg-[#26272B] px-2.5 py-1 text-xs text-[#D0D0D8]">
+                            {getReadableType(type)}
+                          </span>
+                        </td>
+
+                        <td className="px-4 py-4 text-[#D0D0D8]">
+                          <p>{item.courseName}</p>
+
+                          {item.courseCode && (
+                            <p className="mt-1 text-xs text-[#9697A2]">
+                              {item.courseCode}
+                            </p>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-4 text-[#D0D0D8]">
+                          {targetNames.length > 0
+                            ? targetNames.join(', ')
+                            : 'Course targets'}
+                        </td>
+
+                        <td className="whitespace-nowrap px-4 py-4 text-[#D0D0D8]">
+                          {formatDate(item.dueDate)}
+                        </td>
+
+                        <td className="px-4 py-4 text-[#D0D0D8]">
+                          {item.totalMarks ?? '—'}
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <span
+                            className={[
+                              'inline-flex rounded-full border px-2.5 py-1',
+                              'text-xs font-medium',
+                              getStatusStyles(status),
+                            ].join(' ')}
+                          >
+                            {status
+                              ? status.charAt(0).toUpperCase() + status.slice(1)
+                              : 'Unknown'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </SectionCard>
 
       <section className="mt-5 rounded-2xl border border-[#343640] bg-[#191A21] p-5 sm:p-6">
         <div className="flex items-start gap-3">
@@ -416,14 +624,14 @@ export default function FacultyAssignments() {
 
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-[#EAEAE6]">
-              Assignment workflow
+              Common content workflow
             </h2>
 
             <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-              Assignment creation, editing, student submissions, grading,
-              and detailed submission status will be developed as separate
-              Faculty workflows. They will use confirmed backend contracts
-              when those endpoints are available.
+              Assignments and practicals use the same backend record structure.
+              The selected content type distinguishes the workflow. Editing,
+              publishing, direct file uploads, and student submission review
+              will be connected in their respective steps.
             </p>
           </div>
         </div>
