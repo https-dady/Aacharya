@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
+import api from '../../../auth/services/api/axios.js';
+
 import ActionButton from '../../components/ActionButton.jsx';
 import FormField from '../../components/FormField.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
@@ -14,12 +16,24 @@ const INITIAL_FORM = {
   confirmPassword: '',
 };
 
+function getErrorMessage(error) {
+  const responseData = error?.response?.data;
+
+  return (
+    responseData?.error?.message
+    || responseData?.message
+    || error?.message
+    || 'Unable to create the faculty account. Please try again.'
+  );
+}
+
 export default function CreateFaculty() {
   const navigate = useNavigate();
 
   const [form, setForm] = useState(INITIAL_FORM);
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -41,30 +55,34 @@ export default function CreateFaculty() {
   function validateForm() {
     const nextErrors = {};
 
-    if (form.institutionalId.trim().length < 2) {
+    const institutionalId = form.institutionalId.trim();
+    const fullName = form.fullName.trim();
+    const email = form.email.trim();
+
+    if (institutionalId.length < 2) {
       nextErrors.institutionalId =
         'Institutional ID must contain at least 2 characters.';
-    } else if (form.institutionalId.trim().length > 50) {
+    } else if (institutionalId.length > 50) {
       nextErrors.institutionalId =
         'Institutional ID cannot exceed 50 characters.';
     }
 
-    if (form.fullName.trim().length < 2) {
+    if (fullName.length < 2) {
       nextErrors.fullName =
         'Full name must contain at least 2 characters.';
-    } else if (form.fullName.trim().length > 100) {
+    } else if (fullName.length > 100) {
       nextErrors.fullName =
         'Full name cannot exceed 100 characters.';
     }
 
-    if (!form.email.trim()) {
+    if (!email) {
       nextErrors.email = 'Email address is required.';
     } else if (
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())
+      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
     ) {
       nextErrors.email = 'Enter a valid email address.';
-    } else if (form.email.trim().length > 254) {
-      nextErrors.email = 'Email address is too long.';
+    } else if (email.length > 254) {
+      nextErrors.email = 'Email address cannot exceed 254 characters.';
     }
 
     if (form.password.length < 8) {
@@ -79,15 +97,18 @@ export default function CreateFaculty() {
       nextErrors.confirmPassword =
         'Please confirm the password.';
     } else if (form.password !== form.confirmPassword) {
-      nextErrors.confirmPassword =
-        'Passwords do not match.';
+      nextErrors.confirmPassword = 'Passwords do not match.';
     }
 
     return nextErrors;
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
+
+    if (isSubmitting) {
+      return;
+    }
 
     const nextErrors = validateForm();
 
@@ -98,9 +119,72 @@ export default function CreateFaculty() {
       return;
     }
 
-    setNotice(
-      'Form validation successful. Account creation will be enabled during the backend integration phase.',
-    );
+    setIsSubmitting(true);
+
+    try {
+      const response = await api.post(
+        '/v1/provisioning/faculty',
+        {
+          institutionalId: form.institutionalId.trim().toUpperCase(),
+          fullName: form.fullName.trim(),
+          email: form.email.trim().toLowerCase(),
+          password: form.password,
+        },
+      );
+
+      const body = response?.data;
+      const responseData = body?.data ?? body;
+      const createdUser = responseData?.user;
+
+      if (!createdUser?.id) {
+        throw new Error(
+          'The server response did not contain the created faculty account.',
+        );
+      }
+
+      setNotice(
+        `Faculty account for ${createdUser.fullName} was created successfully.`,
+      );
+
+      setForm(INITIAL_FORM);
+      setErrors({});
+
+      navigate('/hod/faculty', {
+        replace: true,
+        state: {
+          notice: `Faculty account for ${createdUser.fullName} was created successfully.`,
+          createdFacultyId: createdUser.id,
+        },
+      });
+    } catch (error) {
+      const status = error?.response?.status;
+      const responseData = error?.response?.data;
+
+      if (status === 409) {
+        setErrors({
+          form:
+            responseData?.error?.message
+            || responseData?.message
+            || 'An account with this institutional ID or email already exists.',
+        });
+      } else if (status === 401) {
+        setErrors({
+          form:
+            'Your session may have expired. Please sign in again and retry.',
+        });
+      } else if (status === 403) {
+        setErrors({
+          form:
+            'Your account is not authorized to create faculty accounts for this department.',
+        });
+      } else {
+        setErrors({
+          form: getErrorMessage(error),
+        });
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   function handleCancel() {
@@ -112,7 +196,7 @@ export default function CreateFaculty() {
       <PageHeader
         eyebrow="DEPARTMENT ADMINISTRATION"
         title="Create Faculty Account"
-        description="Prepare a faculty account for your department."
+        description="Create a faculty account under your assigned department."
         breadcrumbs={[
           { label: 'HOD Dashboard', to: '/hod/dashboard' },
           { label: 'Faculty Management', to: '/hod/faculty' },
@@ -211,7 +295,7 @@ export default function CreateFaculty() {
         {notice && (
           <div
             role="status"
-            className="mt-5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-200"
+            className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm leading-6 text-emerald-200"
           >
             {notice}
           </div>
@@ -220,7 +304,7 @@ export default function CreateFaculty() {
         {errors.form && (
           <div
             role="alert"
-            className="mt-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm text-rose-200"
+            className="mt-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm leading-6 text-rose-200"
           >
             {errors.form}
           </div>
@@ -239,22 +323,26 @@ export default function CreateFaculty() {
               type="button"
               variant="secondary"
               onClick={handleCancel}
+              disabled={isSubmitting}
             >
               Cancel
             </ActionButton>
 
-            <ActionButton type="submit">
-              Validate Faculty Details
+            <ActionButton
+              type="submit"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Creating Faculty...' : 'Create Faculty Account'}
             </ActionButton>
           </div>
         </div>
       </form>
 
       <p className="mt-5 text-xs leading-5 text-[#777986]">
-        This form currently validates the entered details locally. It does
-        not create an account or send credentials to a server. Account
-        creation will be connected to the existing HOD faculty provisioning
-        endpoint during backend integration.
+        The account is created in your assigned department. Institutional
+        ID and email must be unique across the institution. Passwords are
+        sent to the server for secure hashing; the original password is
+        not stored as plain text.
       </p>
     </div>
   );
