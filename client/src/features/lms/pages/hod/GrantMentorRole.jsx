@@ -1,44 +1,227 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+
+import api from '../../../auth/services/api/axios.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
-import FormField from '../../components/FormField.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
-const INITIAL_FORM = {
-  institutionalId: '',
-  batch: '',
-  section: '',
-};
+function getResponseData(response) {
+  return response?.data?.data ?? response?.data;
+}
 
-function normalizeFacultyId(faculty) {
+function getErrorMessage(error) {
   return (
-    faculty?.institutionalId ??
-    faculty?.employeeId ??
-    faculty?.staffId ??
-    ''
+    error?.response?.data?.error?.message
+    || error?.response?.data?.message
+    || error?.message
+    || 'Something went wrong. Please try again.'
   );
 }
 
-function validateForm(form) {
-  const errors = {};
-
-  if (form.institutionalId.trim().length < 2) {
-    errors.institutionalId =
-      'Enter a valid faculty institutional ID.';
+function getId(value) {
+  if (value && typeof value === 'object') {
+    return String(value.id ?? value._id ?? '');
   }
 
-  if (!form.batch.trim()) {
-    errors.batch = 'Enter the assigned batch identifier.';
+  return String(value ?? '');
+}
+
+function getAssignedIds(values) {
+  if (!Array.isArray(values)) {
+    return [];
   }
 
-  if (!form.section.trim()) {
-    errors.section = 'Enter the assigned section identifier.';
+  return [
+    ...new Set(values.map(getId).filter(Boolean)),
+  ];
+}
+
+function FormSelect({
+  label,
+  name,
+  value,
+  onChange,
+  options,
+  placeholder,
+  disabled = false,
+  required = false,
+  error,
+  helperText,
+}) {
+  return (
+    <div className="min-w-0">
+      <label
+        htmlFor={name}
+        className="mb-2 block text-sm font-semibold text-[#EAEAE6]"
+      >
+        {label}
+        {required && (
+          <span
+            className="ml-1 text-[#E5DF98]"
+            aria-hidden="true"
+          >
+            *
+          </span>
+        )}
+      </label>
+
+      <select
+        id={name}
+        name={name}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        required={required}
+        aria-invalid={error ? 'true' : undefined}
+        aria-describedby={
+          error
+            ? `${name}-error`
+            : helperText
+              ? `${name}-help`
+              : undefined
+        }
+        className={[
+          'min-h-11 w-full rounded-xl border bg-[#1D1F27]',
+          'px-3.5 py-2.5 text-sm text-[#EAEAE6]',
+          'outline-none transition-colors',
+          'focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20',
+          'disabled:cursor-not-allowed disabled:opacity-50',
+          error ? 'border-rose-400' : 'border-[#454650]',
+        ].join(' ')}
+      >
+        <option value="">{placeholder}</option>
+
+        {options.map((option) => (
+          <option
+            key={option.value}
+            value={option.value}
+          >
+            {option.label}
+          </option>
+        ))}
+      </select>
+
+      {error && (
+        <p
+          id={`${name}-error`}
+          role="alert"
+          className="mt-2 text-sm text-rose-300"
+        >
+          {error}
+        </p>
+      )}
+
+      {!error && helperText && (
+        <p
+          id={`${name}-help`}
+          className="mt-2 text-xs leading-5 text-[#858590]"
+        >
+          {helperText}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function MultiSelect({
+  label,
+  name,
+  options,
+  selectedIds,
+  onChange,
+  disabled = false,
+  error,
+  helperText,
+}) {
+  function handleChange(event) {
+    onChange(
+      Array.from(
+        event.target.selectedOptions,
+        (option) => option.value,
+      ),
+    );
   }
 
-  return errors;
+  return (
+    <div className="min-w-0">
+      <label
+        htmlFor={name}
+        className="mb-2 block text-sm font-semibold text-[#EAEAE6]"
+      >
+        {label}
+      </label>
+
+      <select
+        id={name}
+        name={name}
+        multiple
+        value={selectedIds}
+        onChange={handleChange}
+        disabled={disabled}
+        aria-invalid={error ? 'true' : undefined}
+        aria-describedby={
+          error
+            ? `${name}-error`
+            : helperText
+              ? `${name}-help`
+              : undefined
+        }
+        className={[
+          'min-h-40 w-full rounded-xl border bg-[#1D1F27]',
+          'px-3 py-2 text-sm text-[#EAEAE6]',
+          'outline-none transition-colors',
+          'focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20',
+          'disabled:cursor-not-allowed disabled:opacity-50',
+          error ? 'border-rose-400' : 'border-[#454650]',
+        ].join(' ')}
+      >
+        {options.map((option) => (
+          <option
+            key={option.value}
+            value={option.value}
+          >
+            {option.label}
+          </option>
+        ))}
+      </select>
+
+      {error && (
+        <p
+          id={`${name}-error`}
+          role="alert"
+          className="mt-2 text-sm text-rose-300"
+        >
+          {error}
+        </p>
+      )}
+
+      {!error && helperText && (
+        <p
+          id={`${name}-help`}
+          className="mt-2 text-xs leading-5 text-[#858590]"
+        >
+          {helperText}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function InfoItem({ label, value }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-medium text-[#858590]">
+        {label}
+      </p>
+
+      <p className="mt-1 break-words text-sm font-medium text-[#EAEAE6]">
+        {value || 'Not available'}
+      </p>
+    </div>
+  );
 }
 
 function RuleIcon() {
@@ -55,6 +238,7 @@ function RuleIcon() {
         d="M12 3 20 6v5c0 5-3.4 8.3-8 10-4.6-1.7-8-5-8-10V6l8-3Z"
         strokeLinejoin="round"
       />
+
       <path
         d="m9 12 2 2 4-4"
         strokeLinecap="round"
@@ -64,83 +248,525 @@ function RuleIcon() {
   );
 }
 
-function InfoItem({ label, value }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-xs font-medium text-[#858590]">{label}</p>
-      <p className="mt-1 break-words text-sm font-medium text-[#EAEAE6]">
-        {value || 'Not available'}
-      </p>
-    </div>
-  );
-}
-
 export default function GrantMentorRole() {
   const location = useLocation();
 
-  const selectedFaculty = location.state?.faculty ?? null;
+  const initialFaculty = location.state?.faculty ?? null;
 
-  const [form, setForm] = useState(() => ({
-    ...INITIAL_FORM,
-    institutionalId: normalizeFacultyId(selectedFaculty),
-  }));
+  const [facultyMembers, setFacultyMembers] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [sections, setSections] = useState([]);
 
-  const [errors, setErrors] = useState({});
-  const [notice, setNotice] = useState(null);
+  const [facultyId, setFacultyId] = useState(
+    () => getId(initialFaculty),
+  );
 
-  function handleChange(event) {
-    const { name, value } = event.target;
+  const [selectedBatchIds, setSelectedBatchIds] = useState(
+    () => getAssignedIds(initialFaculty?.assignedBatches),
+  );
 
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
+  const [selectedSectionIds, setSelectedSectionIds] = useState(
+    () => getAssignedIds(initialFaculty?.assignedSections),
+  );
 
-    setErrors((current) => ({
-      ...current,
-      [name]: '',
-    }));
+  const [isLoadingOptions, setIsLoadingOptions] = useState(true);
+  const [isLoadingMentorAssignments, setIsLoadingMentorAssignments] =
+    useState(false);
+  const [isLoadingSections, setIsLoadingSections] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-    setNotice(null);
-  }
+  const [pageError, setPageError] = useState('');
+  const [assignmentLoadError, setAssignmentLoadError] = useState('');
+  const [sectionError, setSectionError] = useState('');
+  const [saveError, setSaveError] = useState('');
+  const [notice, setNotice] = useState('');
 
-  function handleSubmit(event) {
-    event.preventDefault();
+  const [loadedMentorId, setLoadedMentorId] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
 
-    const nextErrors = validateForm(form);
+  const selectedFaculty = useMemo(
+    () => (
+      facultyMembers.find(
+        (faculty) => getId(faculty) === facultyId,
+      )
+      || (
+        getId(initialFaculty) === facultyId
+          ? initialFaculty
+          : null
+      )
+    ),
+    [facultyMembers, facultyId, initialFaculty],
+  );
 
-    setErrors(nextErrors);
-    setNotice(null);
+  const isExistingMentor = selectedFaculty?.role === 'MENTOR';
 
-    if (Object.keys(nextErrors).length > 0) {
-      return;
+  // Load the faculty directory and active batches.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadOptions() {
+      setIsLoadingOptions(true);
+      setPageError('');
+
+      try {
+        const [facultyResponse, batchResponse] = await Promise.all([
+          api.get('/v1/provisioning/faculty', {
+            params: {
+              page: 1,
+              limit: 100,
+              status: 'ACTIVE',
+            },
+            signal: controller.signal,
+          }),
+
+          api.get('/v1/provisioning/batches', {
+            params: {
+              page: 1,
+              limit: 100,
+              status: 'ACTIVE',
+            },
+            signal: controller.signal,
+          }),
+        ]);
+
+        const facultyData = getResponseData(facultyResponse);
+        const batchData = getResponseData(batchResponse);
+
+        if (!Array.isArray(facultyData?.faculty)) {
+          throw new Error(
+            'The server returned an unexpected faculty response.',
+          );
+        }
+
+        if (!Array.isArray(batchData?.batches)) {
+          throw new Error(
+            'The server returned an unexpected batch response.',
+          );
+        }
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setFacultyMembers(facultyData.faculty);
+        setBatches(batchData.batches);
+      } catch (error) {
+        if (
+          controller.signal.aborted
+          || error?.code === 'ERR_CANCELED'
+        ) {
+          return;
+        }
+
+        setPageError(getErrorMessage(error));
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingOptions(false);
+        }
+      }
     }
 
-    setNotice({
-      type: 'info',
-      message:
-        'Form validation successful. No role or mentor assignment has been saved. Backend integration is required to verify the faculty account and persist this assignment.',
-    });
+    loadOptions();
+
+    return () => controller.abort();
+  }, [reloadKey]);
+
+  // Load saved allocations from the authoritative mentor endpoint.
+  // The faculty-list response is not assumed to contain assignments.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadSavedMentorAssignments() {
+      if (isLoadingOptions || !facultyId || !selectedFaculty) {
+        return;
+      }
+
+      if (selectedFaculty.role !== 'MENTOR') {
+        setLoadedMentorId('');
+        setAssignmentLoadError('');
+        setIsLoadingMentorAssignments(false);
+
+        return;
+      }
+
+      setLoadedMentorId('');
+      setAssignmentLoadError('');
+      setIsLoadingMentorAssignments(true);
+
+      try {
+        const institutionalId = selectedFaculty.institutionalId;
+
+        if (!institutionalId) {
+          throw new Error(
+            'The selected mentor has no institutional ID. Saved assignments cannot be retrieved safely.',
+          );
+        }
+
+        const response = await api.get(
+          '/v1/provisioning/mentors',
+          {
+            params: {
+              page: 1,
+              limit: 100,
+              search: institutionalId,
+            },
+            signal: controller.signal,
+          },
+        );
+
+        const data = getResponseData(response);
+
+        if (!Array.isArray(data?.mentors)) {
+          throw new Error(
+            'The server returned an unexpected mentor response.',
+          );
+        }
+
+        const savedMentor = data.mentors.find(
+          (mentor) => (
+            getId(mentor) === facultyId
+            || (
+              mentor.institutionalId
+              && mentor.institutionalId === institutionalId
+            )
+          ),
+        );
+
+        if (!savedMentor) {
+          throw new Error(
+            'Could not retrieve this mentor’s saved assignments. Saving is disabled to protect the existing allocation.',
+          );
+        }
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setSelectedBatchIds(
+          getAssignedIds(savedMentor.assignedBatches),
+        );
+
+        setSelectedSectionIds(
+          getAssignedIds(savedMentor.assignedSections),
+        );
+
+        setLoadedMentorId(facultyId);
+        setAssignmentLoadError('');
+      } catch (error) {
+        if (
+          controller.signal.aborted
+          || error?.code === 'ERR_CANCELED'
+        ) {
+          return;
+        }
+
+        setAssignmentLoadError(getErrorMessage(error));
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingMentorAssignments(false);
+        }
+      }
+    }
+
+    loadSavedMentorAssignments();
+
+    return () => controller.abort();
+  }, [
+    facultyId,
+    facultyMembers,
+    initialFaculty,
+    isLoadingOptions,
+    selectedFaculty,
+  ]);
+
+  // Load active sections for the selected batches.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadSections() {
+      if (selectedBatchIds.length === 0) {
+        setSections([]);
+        setSelectedSectionIds([]);
+        setSectionError('');
+        setIsLoadingSections(false);
+        return;
+      }
+
+      setIsLoadingSections(true);
+      setSectionError('');
+
+      try {
+        const responses = await Promise.all(
+          selectedBatchIds.map((batchId) =>
+            api.get(
+              `/v1/provisioning/batches/${batchId}/sections`,
+              {
+                params: {
+                  page: 1,
+                  limit: 100,
+                  status: 'ACTIVE',
+                },
+                signal: controller.signal,
+              },
+            ),
+          ),
+        );
+
+        const sectionMap = new Map();
+
+        responses.forEach((response) => {
+          const data = getResponseData(response);
+
+          if (!Array.isArray(data?.sections)) {
+            throw new Error(
+              'The server returned an unexpected section response.',
+            );
+          }
+
+          data.sections.forEach((section) => {
+            const id = getId(section);
+
+            if (id) {
+              sectionMap.set(id, section);
+            }
+          });
+        });
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        setSections([...sectionMap.values()]);
+
+        // Preserve selected sections only when they remain available
+        // in the currently selected active batches.
+        setSelectedSectionIds((current) =>
+          current.filter((id) => sectionMap.has(id)),
+        );
+      } catch (error) {
+        if (
+          controller.signal.aborted
+          || error?.code === 'ERR_CANCELED'
+        ) {
+          return;
+        }
+
+        setSections([]);
+        setSectionError(getErrorMessage(error));
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsLoadingSections(false);
+        }
+      }
+    }
+
+    loadSections();
+
+    return () => controller.abort();
+  }, [selectedBatchIds]);
+
+  const facultyOptions = useMemo(
+    () => facultyMembers
+      .filter((faculty) => (
+        ['FACULTY', 'MENTOR'].includes(faculty.role)
+        && faculty.status === 'ACTIVE'
+      ))
+      .map((faculty) => ({
+        value: getId(faculty),
+        label: `${faculty.fullName} · ${faculty.institutionalId} · ${faculty.role}`,
+      })),
+    [facultyMembers],
+  );
+
+  const batchOptions = useMemo(
+    () => batches.map((batch) => ({
+      value: getId(batch),
+      label: `${batch.name} (${batch.code}) · ${batch.academicYear}`,
+    })),
+    [batches],
+  );
+
+  const sectionOptions = useMemo(
+    () => sections.map((section) => {
+      const batch = batches.find(
+        (item) => getId(item) === getId(section.batch),
+      );
+
+      return {
+        value: getId(section),
+        label: `${section.name} (${section.code})${batch ? ` · ${batch.name}` : ''}`,
+      };
+    }),
+    [sections, batches],
+  );
+
+  function handleFacultyChange(event) {
+    const nextFacultyId = event.target.value;
+
+    const nextFaculty = facultyMembers.find(
+      (faculty) => getId(faculty) === nextFacultyId,
+    );
+
+    setFacultyId(nextFacultyId);
+
+    // Existing mentor allocations will be loaded from the backend.
+    // For a faculty member who is not yet a mentor, start unassigned.
+    if (nextFaculty?.role !== 'MENTOR') {
+      setSelectedBatchIds([]);
+      setSelectedSectionIds([]);
+    } else {
+      // These are provisional only. The backend fetch below is
+      // authoritative, and saving remains disabled until it succeeds.
+      setSelectedBatchIds(
+        getAssignedIds(nextFaculty?.assignedBatches),
+      );
+
+      setSelectedSectionIds(
+        getAssignedIds(nextFaculty?.assignedSections),
+      );
+    }
+
+    setLoadedMentorId('');
+    setAssignmentLoadError('');
+    setSectionError('');
+    setSaveError('');
+    setNotice('');
+  }
+
+  function handleBatchChange(nextBatchIds) {
+    setSelectedBatchIds(nextBatchIds);
+
+    const allowedSectionIds = new Set(
+      sections
+        .filter((section) => (
+          nextBatchIds.includes(getId(section.batch))
+        ))
+        .map(getId),
+    );
+
+    setSelectedSectionIds((current) =>
+      current.filter((id) => allowedSectionIds.has(id)),
+    );
+
+    setSaveError('');
+    setNotice('');
+  }
+
+  function handleSectionChange(nextSectionIds) {
+    setSelectedSectionIds(nextSectionIds);
+    setSaveError('');
+    setNotice('');
   }
 
   function handleReset() {
-    setForm({
-      ...INITIAL_FORM,
-      institutionalId: normalizeFacultyId(selectedFaculty),
-    });
+    if (isExistingMentor) {
+      // Re-fetch the authoritative saved assignment rather than
+      // resetting to potentially incomplete navigation state.
+      setLoadedMentorId('');
+      setAssignmentLoadError('');
+      setReloadKey((current) => current + 1);
+    } else {
+      setSelectedBatchIds([]);
+      setSelectedSectionIds([]);
+    }
 
-    setErrors({});
-    setNotice(null);
+    setSaveError('');
+    setNotice('');
+    setPageError('');
+    setSectionError('');
   }
 
-  const hasSelectedFaculty = Boolean(
-    selectedFaculty &&
-      (
-        selectedFaculty.fullName ||
-        selectedFaculty.institutionalId ||
-        selectedFaculty.employeeId ||
-        selectedFaculty.staffId
-      ),
+  async function handleSubmit(event) {
+    event.preventDefault();
+
+    setSaveError('');
+    setNotice('');
+
+    if (!facultyId) {
+      setSaveError('Select an existing faculty member.');
+      return;
+    }
+
+    if (isExistingMentor && loadedMentorId !== facultyId) {
+      setSaveError(
+        'The mentor’s saved assignments have not been verified. Retry loading them before saving.',
+      );
+      return;
+    }
+
+    if (selectedBatchIds.length === 0) {
+      setSaveError('Select at least one batch.');
+      return;
+    }
+
+    if (selectedSectionIds.length === 0) {
+      setSaveError('Select at least one section.');
+      return;
+    }
+
+    if (
+      isLoadingOptions
+      || isLoadingMentorAssignments
+      || isLoadingSections
+      || pageError
+      || assignmentLoadError
+      || sectionError
+    ) {
+      setSaveError(
+        'Resolve the loading errors and wait for all assignment data to finish loading before saving.',
+      );
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      const response = await api.patch(
+        `/v1/provisioning/faculty/${facultyId}/mentor`,
+        {
+          batchIds: selectedBatchIds,
+          sectionIds: selectedSectionIds,
+        },
+      );
+
+      const data = getResponseData(response);
+
+      if (data?.mentor) {
+        setSelectedBatchIds(
+          getAssignedIds(data.mentor.assignedBatches),
+        );
+
+        setSelectedSectionIds(
+          getAssignedIds(data.mentor.assignedSections),
+        );
+
+        setLoadedMentorId(facultyId);
+      }
+
+      setNotice(
+        data?.mentor
+          ? 'Mentor role and assignments were saved successfully.'
+          : 'The server accepted the assignment update.',
+      );
+    } catch (error) {
+      setSaveError(getErrorMessage(error));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  const isSavingBlocked = (
+    isLoadingOptions
+    || isLoadingMentorAssignments
+    || isLoadingSections
+    || Boolean(pageError)
+    || Boolean(assignmentLoadError)
+    || Boolean(sectionError)
+    || facultyOptions.length === 0
+    || (
+      isExistingMentor
+      && loadedMentorId !== facultyId
+    )
   );
 
   return (
@@ -148,7 +774,7 @@ export default function GrantMentorRole() {
       <PageHeader
         eyebrow="DEPARTMENT ADMINISTRATION"
         title="Grant Mentor / TG Role"
-        description="Designate an existing faculty member as a mentor and define their batch and section assignment."
+        description="Designate an existing faculty member and manage their batch and section allocations."
         breadcrumbs={[
           { label: 'HOD Dashboard', to: '/hod/dashboard' },
           { label: 'Faculty Management', to: '/hod/faculty' },
@@ -183,23 +809,41 @@ export default function GrantMentorRole() {
                 The faculty account must belong to the HOD's department.
               </li>
               <li>
-                Mentor allocation must respect the existing batch and
-                section structure.
+                Every assigned batch and section must be valid for that department.
               </li>
               <li>
-                A faculty member may retain teaching responsibilities
-                while also holding the Mentor/TG role.
+                Existing mentor assignments are retrieved from the backend before they can be updated.
               </li>
             </ul>
           </div>
         </div>
       </div>
 
-      {hasSelectedFaculty ? (
+      {pageError && (
+        <div
+          role="alert"
+          className="mb-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4"
+        >
+          <p className="text-sm leading-6 text-rose-200">
+            {pageError}
+          </p>
+
+          <div className="mt-3">
+            <ActionButton
+              variant="secondary"
+              onClick={() => setReloadKey((current) => current + 1)}
+            >
+              Retry loading options
+            </ActionButton>
+          </div>
+        </div>
+      )}
+
+      {selectedFaculty && (
         <SectionCard
           eyebrow="SELECTED ACCOUNT"
           title="Faculty member"
-          description="The faculty information below was passed from the previous page. Verify the institutional ID before continuing."
+          description="Verify the account before changing its mentor designation."
           className="mb-5"
         >
           <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
@@ -218,7 +862,7 @@ export default function GrantMentorRole() {
 
               <InfoItem
                 label="Institutional ID"
-                value={normalizeFacultyId(selectedFaculty)}
+                value={selectedFaculty.institutionalId}
               />
 
               <InfoItem
@@ -228,144 +872,203 @@ export default function GrantMentorRole() {
 
               <InfoItem
                 label="Current role"
-                value={selectedFaculty.role || 'Faculty'}
+                value={selectedFaculty.role}
               />
             </div>
           </div>
         </SectionCard>
-      ) : (
-        <div className="mb-5">
-          <EmptyState
-            title="No faculty account selected"
-            description="You opened this page without a faculty record. Enter the institutional ID of an existing faculty member below. The account cannot be verified until backend integration is available."
-            action={
-              <Link to="/hod/faculty">
-                <ActionButton variant="secondary">
-                  Open faculty directory
-                </ActionButton>
-              </Link>
-            }
-          />
-        </div>
       )}
+
+      {!isLoadingOptions
+        && facultyOptions.length === 0
+        && !pageError && (
+          <div className="mb-5">
+            <EmptyState
+              title="No active faculty accounts found"
+              description="An active faculty account is required before the Mentor/TG role can be assigned."
+              action={
+                <Link to="/hod/faculty">
+                  <ActionButton variant="secondary">
+                    Open faculty directory
+                  </ActionButton>
+                </Link>
+              }
+            />
+          </div>
+        )}
 
       <form onSubmit={handleSubmit} noValidate>
         <SectionCard
           eyebrow="MENTOR DESIGNATION"
           title="Faculty identification"
-          description="Identify the existing faculty account that should receive the Mentor/TG role."
+          description="Select an existing active faculty or mentor account."
         >
-          <FormField
-            label="Faculty Institutional ID"
-            name="institutionalId"
-            value={form.institutionalId}
-            onChange={handleChange}
-            placeholder="Enter existing faculty ID"
-            helperText={
-              hasSelectedFaculty
-                ? 'Prefilled from the selected faculty record. Verify the ID before proceeding.'
-                : 'Enter the institutional ID assigned to an existing faculty account.'
+          <FormSelect
+            label="Faculty member"
+            name="facultyId"
+            value={facultyId}
+            onChange={handleFacultyChange}
+            options={facultyOptions}
+            placeholder={
+              isLoadingOptions
+                ? 'Loading faculty accounts…'
+                : 'Select faculty member'
             }
-            error={errors.institutionalId}
+            disabled={isLoadingOptions || facultyOptions.length === 0}
             required
-            autoComplete="off"
-            maxLength={50}
           />
+
+          {isLoadingMentorAssignments && (
+            <p
+              role="status"
+              className="mt-3 text-sm text-[#CDB5F7]"
+            >
+              Retrieving saved mentor assignments…
+            </p>
+          )}
+
+          {assignmentLoadError && (
+            <div
+              role="alert"
+              className="mt-4 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4"
+            >
+              <p className="text-sm leading-6 text-rose-200">
+                {assignmentLoadError}
+              </p>
+
+              <p className="mt-2 text-xs leading-5 text-rose-200/80">
+                Saving is disabled until the existing assignment has been retrieved successfully.
+              </p>
+
+              <div className="mt-3">
+                <ActionButton
+                  variant="secondary"
+                  onClick={() => setReloadKey((current) => current + 1)}
+                  disabled={isLoadingOptions}
+                >
+                  Retry
+                </ActionButton>
+              </div>
+            </div>
+          )}
         </SectionCard>
 
         <div className="mt-5">
           <SectionCard
             eyebrow="MENTOR ALLOCATION"
             title="Batch and section"
-            description="Specify the existing academic group for the mentor assignment. Use the identifiers defined by your institution."
+            description="Choose active batches and sections belonging to those batches."
           >
             <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <FormField
-                label="Batch identifier"
-                name="batch"
-                value={form.batch}
-                onChange={handleChange}
-                placeholder="Enter existing batch identifier"
-                helperText="Enter a batch identifier from the academic structure."
-                error={errors.batch}
-                required
-                maxLength={100}
-                autoComplete="off"
+              <MultiSelect
+                label="Assigned batches"
+                name="batchIds"
+                options={batchOptions}
+                selectedIds={selectedBatchIds}
+                onChange={handleBatchChange}
+                disabled={
+                  isLoadingOptions
+                  || Boolean(pageError)
+                  || (
+                    isExistingMentor
+                    && loadedMentorId !== facultyId
+                  )
+                }
+                helperText="Use Ctrl (Windows) or Command (Mac) to select multiple options."
               />
 
-              <FormField
-                label="Section identifier"
-                name="section"
-                value={form.section}
-                onChange={handleChange}
-                placeholder="Enter existing section identifier"
-                helperText="Enter a section belonging to the specified batch."
-                error={errors.section}
-                required
-                maxLength={100}
-                autoComplete="off"
+              <MultiSelect
+                label="Assigned sections"
+                name="sectionIds"
+                options={sectionOptions}
+                selectedIds={selectedSectionIds}
+                onChange={handleSectionChange}
+                disabled={
+                  isLoadingSections
+                  || selectedBatchIds.length === 0
+                  || Boolean(sectionError)
+                  || (
+                    isExistingMentor
+                    && loadedMentorId !== facultyId
+                  )
+                }
+                helperText={
+                  isLoadingSections
+                    ? 'Loading sections…'
+                    : 'Only sections from the selected batches are shown.'
+                }
+                error={sectionError}
               />
             </div>
 
             <div className="mt-5 rounded-xl border border-[#454650] bg-[#14161C]/60 p-4">
               <p className="text-sm font-medium text-[#EAEAE6]">
-                Assignment scope
+                Current selection
               </p>
 
-              <p className="mt-1 text-sm leading-6 text-[#A5A6B0]">
-                This form collects one batch and one section. The actual
-                relationship between the faculty member, batch and section
-                must be verified by the backend before the assignment can
-                be saved.
-              </p>
+              <div className="mt-3 grid grid-cols-2 gap-4">
+                <InfoItem
+                  label="Selected batches"
+                  value={String(selectedBatchIds.length)}
+                />
+
+                <InfoItem
+                  label="Selected sections"
+                  value={String(selectedSectionIds.length)}
+                />
+              </div>
             </div>
           </SectionCard>
         </div>
 
-        {notice && (
+        {saveError && (
           <div
-            role="status"
-            className={[
-              'mt-5 rounded-xl border p-4 text-sm leading-6',
-              notice.type === 'info'
-                ? 'border-sky-500/25 bg-sky-500/10 text-sky-200'
-                : 'border-amber-500/30 bg-amber-500/10 text-amber-200',
-            ].join(' ')}
+            role="alert"
+            className="mt-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm leading-6 text-rose-200"
           >
-            {notice.message}
+            {saveError}
           </div>
         )}
 
-        <div className="mt-6 flex flex-col-reverse gap-3 border-t border-[#343640] pt-5 sm:flex-row sm:items-center sm:justify-between">
-          <Link
-            to="/hod/faculty"
-            className="inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-[#A5A6B0] transition-colors hover:bg-[#26272B] hover:text-[#EAEAE6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+        {notice && (
+          <div
+            role="status"
+            className="mt-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm leading-6 text-emerald-200"
           >
-            Back to faculty
-          </Link>
+            {notice}
 
-          <div className="flex flex-col-reverse gap-3 sm:flex-row">
-            <ActionButton
-              type="button"
-              variant="secondary"
-              onClick={handleReset}
-            >
-              Reset form
-            </ActionButton>
-
-            <ActionButton type="submit">
-              Validate assignment
-            </ActionButton>
+            <div className="mt-3">
+              <Link
+                to="/hod/mentors/assignments"
+                className="font-semibold underline underline-offset-4"
+              >
+                View mentor assignments
+              </Link>
+            </div>
           </div>
+        )}
+
+        <div className="mt-5 flex flex-wrap justify-end gap-3">
+          <ActionButton
+            variant="secondary"
+            type="button"
+            onClick={handleReset}
+            disabled={isSaving}
+          >
+            Reset
+          </ActionButton>
+
+          <ActionButton
+            type="submit"
+            loading={isSaving}
+            disabled={isSaving || isSavingBlocked}
+          >
+            {isExistingMentor
+              ? 'Save Assignment Changes'
+              : 'Grant Mentor Role'}
+          </ActionButton>
         </div>
       </form>
-
-      <p className="mt-5 text-xs leading-5 text-[#777986]">
-        Frontend-only workflow: this page does not grant roles, verify
-        accounts, or save assignments. Faculty, batch and section
-        selectors will be connected to the authorized backend contracts
-        during the integration phase.
-      </p>
     </div>
   );
 }

@@ -1,5 +1,12 @@
-import { useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 import { Link } from 'react-router-dom';
+
+import api from '../../../auth/services/api/axios.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import DataTable from '../../components/DataTable.jsx';
@@ -7,97 +14,325 @@ import PageHeader from '../../components/PageHeader.jsx';
 import SearchInput from '../../components/SearchInput.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
+const PAGE_SIZE = 20;
+
+const INITIAL_PAGINATION = {
+  page: 1,
+  limit: PAGE_SIZE,
+  total: 0,
+  totalPages: 0,
+  hasNextPage: false,
+  hasPreviousPage: false,
+};
+
+function getErrorMessage(error) {
+  return (
+    error?.response?.data?.error?.message
+    || error?.response?.data?.message
+    || error?.message
+    || 'Unable to load mentor assignments. Please try again.'
+  );
+}
+
+function formatAssignedItems(items, emptyLabel) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return emptyLabel;
+  }
+
+  return items
+    .map((item) => item?.name || item?.code)
+    .filter(Boolean)
+    .join(', ') || emptyLabel;
+}
+
+function getStatusStyles(status) {
+  const styles = {
+    ACTIVE:
+      'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
+    SUSPENDED:
+      'border-amber-500/25 bg-amber-500/10 text-amber-300',
+    DISABLED:
+      'border-rose-500/25 bg-rose-500/10 text-rose-300',
+  };
+
+  return (
+    styles[status]
+    || 'border-[#454650] bg-[#292A32] text-[#A5A6B0]'
+  );
+}
+
 const ASSIGNMENT_COLUMNS = [
   {
     key: 'facultyName',
     header: 'Faculty Member',
     accessor: 'facultyName',
+    render: (value, mentor) => (
+      <div className="min-w-[170px]">
+        <p className="font-medium text-[#EAEAE6]">
+          {value || 'Unnamed faculty member'}
+        </p>
+
+        {mentor.email && (
+          <p className="mt-1 break-all text-xs text-[#858590]">
+            {mentor.email}
+          </p>
+        )}
+      </div>
+    ),
   },
   {
     key: 'institutionalId',
     header: 'Institutional ID',
     accessor: 'institutionalId',
+    render: (value) => (
+      <span className="whitespace-nowrap font-mono text-xs text-[#CDB5F7]">
+        {value || '—'}
+      </span>
+    ),
   },
   {
     key: 'batch',
-    header: 'Batch',
+    header: 'Assigned Batches',
     accessor: 'batch',
+    render: (value) => (
+      <span className="block min-w-[140px] max-w-[260px] whitespace-normal leading-5 text-[#C7C7D0]">
+        {value || 'No batch assigned'}
+      </span>
+    ),
   },
   {
     key: 'section',
-    header: 'Section',
+    header: 'Assigned Sections',
     accessor: 'section',
+    render: (value) => (
+      <span className="block min-w-[140px] max-w-[260px] whitespace-normal leading-5 text-[#C7C7D0]">
+        {value || 'No section assigned'}
+      </span>
+    ),
   },
   {
     key: 'status',
-    header: 'Assignment Status',
+    header: 'Account Status',
     accessor: 'status',
-    render: (value) => {
-      const styles = {
-        ACTIVE:
-          'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
-        INACTIVE:
-          'border-[#454650] bg-[#292A32] text-[#A5A6B0]',
-      };
-
-      return (
-        <span
-          className={[
-            'inline-flex rounded-full border px-2.5 py-1',
-            'text-xs font-medium',
-            styles[value] ??
-              'border-[#454650] bg-[#292A32] text-[#A5A6B0]',
-          ].join(' ')}
+    render: (value) => (
+      <span
+        className={[
+          'inline-flex whitespace-nowrap rounded-full border px-2.5 py-1',
+          'text-xs font-medium',
+          getStatusStyles(value),
+        ].join(' ')}
+      >
+        {value || 'UNKNOWN'}
+      </span>
+    ),
+  },
+  {
+    key: 'actions',
+    header: 'Actions',
+    render: (_value, mentor) => (
+      <Link
+        to="/hod/faculty/grant-mentor"
+        state={{
+          faculty: {
+            id: mentor.id,
+            institutionalId: mentor.institutionalId,
+            fullName: mentor.facultyName,
+            email: mentor.email,
+            role: mentor.role,
+            status: mentor.status,
+          },
+        }}
+        aria-label={`Manage assignments for ${mentor.facultyName || 'mentor'}`}
+      >
+        <ActionButton
+          variant="outline"
+          size="sm"
         >
-          {value || 'Unknown'}
-        </span>
-      );
-    },
+          Manage
+        </ActionButton>
+      </Link>
+    ),
   },
 ];
 
 export default function MentorAssignments() {
   const [search, setSearch] = useState('');
+  const [submittedSearch, setSubmittedSearch] = useState('');
+  const [page, setPage] = useState(1);
 
-  /*
-   * Frontend-only phase:
-   * Actual mentor assignment records will be connected during integration.
-   * Do not populate this list with fabricated records.
-   */
-  const assignments = [];
-  const isLoading = false;
+  const [mentors, setMentors] = useState([]);
+  const [pagination, setPagination] = useState(INITIAL_PAGINATION);
 
-  const normalizedSearch = search.trim().toLowerCase();
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  const filteredAssignments = assignments.filter((assignment) => {
-    const searchableValues = [
-      assignment.facultyName,
-      assignment.institutionalId,
-      assignment.batch,
-      assignment.section,
-      assignment.status,
-    ];
+  const loadMentors = useCallback(async (signal) => {
+    setIsLoading(true);
+    setError('');
 
-    return searchableValues.some((value) =>
-      String(value ?? '')
-        .toLowerCase()
-        .includes(normalizedSearch),
-    );
-  });
+    try {
+      const response = await api.get('/v1/provisioning/mentors', {
+        params: {
+          page,
+          limit: PAGE_SIZE,
+          ...(submittedSearch
+            ? { search: submittedSearch }
+            : {}),
+        },
+        signal,
+      });
 
-  function clearSearch() {
+      if (signal?.aborted) {
+        return;
+      }
+
+      const body = response?.data;
+      const data = body?.data ?? body;
+
+      const records = Array.isArray(data?.mentors)
+        ? data.mentors
+        : [];
+
+      const serverPagination = data?.pagination ?? {};
+
+      const normalizedMentors = records.map((mentor) => ({
+        id: mentor.id,
+        institutionalId: mentor.institutionalId || '',
+        facultyName: mentor.fullName || '',
+        email: mentor.email || '',
+        role: mentor.role || 'MENTOR',
+        status: mentor.status || 'UNKNOWN',
+
+        assignedBatches: Array.isArray(mentor.assignedBatches)
+          ? mentor.assignedBatches
+          : [],
+
+        assignedSections: Array.isArray(mentor.assignedSections)
+          ? mentor.assignedSections
+          : [],
+
+        batch: formatAssignedItems(
+          mentor.assignedBatches,
+          'No batch assigned',
+        ),
+
+        section: formatAssignedItems(
+          mentor.assignedSections,
+          'No section assigned',
+        ),
+      }));
+
+      setMentors(normalizedMentors);
+
+      setPagination({
+        page: Number(serverPagination.page) || page,
+        limit: Number(serverPagination.limit) || PAGE_SIZE,
+        total: Number(serverPagination.total) || 0,
+        totalPages: Number(serverPagination.totalPages) || 0,
+        hasNextPage: Boolean(serverPagination.hasNextPage),
+        hasPreviousPage: Boolean(
+          serverPagination.hasPreviousPage,
+        ),
+      });
+    } catch (requestError) {
+      if (signal?.aborted) {
+        return;
+      }
+
+      setMentors([]);
+      setPagination(INITIAL_PAGINATION);
+      setError(getErrorMessage(requestError));
+    } finally {
+      if (!signal?.aborted) {
+        setIsLoading(false);
+      }
+    }
+  }, [page, submittedSearch]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    loadMentors(controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [loadMentors]);
+
+  const handleSearchChange = useCallback((event) => {
+    setSearch(event.target.value);
+  }, []);
+
+  const handleSearch = useCallback((value) => {
+    const nextSearch = String(value ?? '').trim();
+
+    setPage(1);
+    setSubmittedSearch(nextSearch);
+  }, []);
+
+  const handleClearSearch = useCallback(() => {
     setSearch('');
-  }
+    setSubmittedSearch('');
+    setPage(1);
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    const controller = new AbortController();
+
+    loadMentors(controller.signal);
+  }, [loadMentors]);
+
+  const pageBatchCount = useMemo(() => {
+    const batchIds = new Set();
+
+    mentors.forEach((mentor) => {
+      mentor.assignedBatches.forEach((batch) => {
+        if (batch?.id) {
+          batchIds.add(batch.id);
+        }
+      });
+    });
+
+    return batchIds.size;
+  }, [mentors]);
+
+  const pageSectionCount = useMemo(() => {
+    const sectionIds = new Set();
+
+    mentors.forEach((mentor) => {
+      mentor.assignedSections.forEach((section) => {
+        if (section?.id) {
+          sectionIds.add(section.id);
+        }
+      });
+    });
+
+    return sectionIds.size;
+  }, [mentors]);
+
+  const pageRangeStart = pagination.total === 0
+    ? 0
+    : ((pagination.page - 1) * pagination.limit) + 1;
+
+  const pageRangeEnd = Math.min(
+    pagination.page * pagination.limit,
+    pagination.total,
+  );
 
   return (
     <div className="mx-auto w-full max-w-[1200px]">
       <PageHeader
         eyebrow="DEPARTMENT ADMINISTRATION"
         title="Mentor Assignments"
-        description="Review mentor designations and their assigned batches and sections."
+        description="Review mentors and their assigned batches and sections within your department."
         breadcrumbs={[
-          { label: 'HOD Dashboard', to: '/hod/dashboard' },
-          { label: 'Mentor Assignments' },
+          {
+            label: 'HOD Dashboard',
+            to: '/hod/dashboard',
+          },
+          {
+            label: 'Mentor Assignments',
+          },
         ]}
         actions={
           <Link to="/hod/faculty/grant-mentor">
@@ -127,29 +362,36 @@ export default function MentorAssignments() {
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
           <p className="text-sm text-[#A5A6B0]">
-            Mentor Assignments
+            Total Mentors
           </p>
 
-          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
-            —
+          <p
+            className="mt-3 text-2xl font-semibold text-[#EAEAE6]"
+            aria-live="polite"
+          >
+            {isLoading && pagination.total === 0
+              ? '—'
+              : pagination.total}
           </p>
 
           <p className="mt-1 text-xs leading-5 text-[#777986]">
-            Assignment totals will appear after backend integration.
+            Total mentor records matching the current search.
           </p>
         </div>
 
         <div className="rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
           <p className="text-sm text-[#A5A6B0]">
-            Batch &amp; Section Coverage
+            Current Page Coverage
           </p>
 
           <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
-            —
+            {isLoading && mentors.length === 0
+              ? '—'
+              : `${pageBatchCount} batches · ${pageSectionCount} sections`}
           </p>
 
           <p className="mt-1 text-xs leading-5 text-[#777986]">
-            Coverage information is not loaded yet.
+            Distinct assigned batches and sections on this page only.
           </p>
         </div>
       </div>
@@ -157,7 +399,7 @@ export default function MentorAssignments() {
       <SectionCard
         eyebrow="MENTOR DIRECTORY"
         title="Current assignments"
-        description="Find mentor assignments using a faculty member's name, institutional ID, batch, or section."
+        description="Search mentors by name, institutional ID, or email. Search results are provided by the backend."
       >
         <div className="space-y-5">
           <div className="max-w-xl">
@@ -165,58 +407,154 @@ export default function MentorAssignments() {
               name="mentor-assignment-search"
               label="Search mentor assignments"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search faculty, batch, or section..."
+              onChange={handleSearchChange}
+              onSearch={handleSearch}
+              placeholder="Search name, institutional ID, or email..."
+              disabled={isLoading}
             />
           </div>
 
+          {error && (
+            <div
+              role="alert"
+              className="flex flex-col gap-3 rounded-xl border border-rose-500/30 bg-rose-500/5 p-4 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div>
+                <p className="text-sm font-semibold text-rose-300">
+                  Could not load mentor assignments
+                </p>
+
+                <p className="mt-1 text-sm leading-6 text-[#C7C7D0]">
+                  {error}
+                </p>
+              </div>
+
+              <ActionButton
+                variant="secondary"
+                onClick={handleRetry}
+                disabled={isLoading}
+              >
+                Retry
+              </ActionButton>
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#343640] pt-4">
-            <p className="text-sm text-[#A5A6B0]">
-              {filteredAssignments.length} assignments currently loaded
+            <p
+              className="text-sm text-[#A5A6B0]"
+              aria-live="polite"
+            >
+              {error
+                ? 'Mentor records could not be retrieved.'
+                : pagination.total === 0 && !isLoading
+                  ? 'No mentor records found.'
+                  : pagination.total > 0
+                    ? `Showing ${pageRangeStart}–${pageRangeEnd} of ${pagination.total} mentors`
+                    : 'Loading mentor records…'}
             </p>
 
-            {search && (
+            <div className="flex flex-wrap items-center gap-2">
+              {submittedSearch && (
+                <ActionButton
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleClearSearch}
+                >
+                  Clear search
+                </ActionButton>
+              )}
+
               <ActionButton
                 variant="secondary"
                 size="sm"
-                onClick={clearSearch}
+                onClick={handleRetry}
+                disabled={isLoading}
               >
-                Clear search
+                Refresh
               </ActionButton>
-            )}
+            </div>
           </div>
 
           <DataTable
             columns={ASSIGNMENT_COLUMNS}
-            data={filteredAssignments}
-            rowKey={(assignment) =>
-              assignment.id ||
-              assignment._id ||
-              `${assignment.institutionalId}-${assignment.batch}-${assignment.section}`
-            }
+            data={mentors}
+            rowKey={(mentor) => mentor.id}
             loading={isLoading}
             ariaLabel="Mentor assignments"
             emptyTitle={
-              normalizedSearch
-                ? 'No matching mentor assignments'
-                : 'No mentor assignments loaded'
+              error
+                ? 'Mentor assignments unavailable'
+                : submittedSearch
+                  ? 'No matching mentors'
+                  : 'No mentors found'
             }
             emptyDescription={
-              normalizedSearch
-                ? 'No loaded assignments match your search. Try another search term or clear the search.'
-                : 'Mentor assignments will appear here when actual departmental records are connected. No sample assignments are being displayed.'
+              error
+                ? 'The mentor directory could not be loaded. Retry the request to check again.'
+                : submittedSearch
+                  ? 'No mentors match this name, institutional ID, or email. Try a different search.'
+                  : 'There are currently no mentor records available for your department.'
             }
             emptyAction={
-              normalizedSearch ? (
+              error ? (
                 <ActionButton
                   variant="secondary"
-                  onClick={clearSearch}
+                  onClick={handleRetry}
+                  disabled={isLoading}
+                >
+                  Try again
+                </ActionButton>
+              ) : submittedSearch ? (
+                <ActionButton
+                  variant="secondary"
+                  onClick={handleClearSearch}
                 >
                   Clear search
                 </ActionButton>
               ) : null
             }
           />
+
+          {pagination.totalPages > 1 && (
+            <nav
+              aria-label="Mentor assignments pagination"
+              className="flex flex-wrap items-center justify-between gap-3 border-t border-[#343640] pt-4"
+            >
+              <p className="text-sm text-[#A5A6B0]">
+                Page {pagination.page} of {pagination.totalPages}
+              </p>
+
+              <div className="flex items-center gap-2">
+                <ActionButton
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setPage((currentPage) => currentPage - 1);
+                  }}
+                  disabled={
+                    isLoading
+                    || !pagination.hasPreviousPage
+                  }
+                >
+                  Previous
+                </ActionButton>
+
+                <ActionButton
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setPage((currentPage) => currentPage + 1);
+                  }}
+                  disabled={
+                    isLoading
+                    || !pagination.hasNextPage
+                  }
+                >
+                  Next
+                </ActionButton>
+              </div>
+            </nav>
+          )}
         </div>
       </SectionCard>
 
@@ -226,10 +564,9 @@ export default function MentorAssignments() {
         </p>
 
         <p className="mt-1 text-sm leading-6 text-[#A5A6B0]">
-          Mentor assignments must remain within the authenticated HOD's
-          department. Available faculty, batches, and sections will be
-          connected through the authorized backend contracts during the
-          integration phase.
+          Use the mentor designation form to update assignments.
+          The backend validates that selected batches and sections
+          belong to the authenticated HOD&apos;s department.
         </p>
 
         <div className="mt-4">
