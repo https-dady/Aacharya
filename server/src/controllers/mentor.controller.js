@@ -246,38 +246,31 @@ export async function assignMentorController(req, res, next) {
       );
 
       /*
-       * Find the existing owners before changing any assignments.
-       * Existing mentors may have multiple sections; only the selected
-       * sections will be removed from their assignedSections arrays.
+       * Remove selected sections from every other mentor's assignment
+       * list, including stale legacy assignments where Section.mentor
+       * is missing. Other section assignments remain untouched.
        */
-      const previousOwnerIds = uniqueIds(
-        sections
-          .map((section) => section.mentor)
-          .filter(Boolean)
-          .map((id) => String(id)),
-      ).filter((id) => id !== String(faculty._id));
-
-      if (previousOwnerIds.length > 0) {
-        await User.updateMany(
-          {
-            _id: { $in: previousOwnerIds },
-            department: department._id,
+      await User.updateMany(
+        {
+          _id: { $ne: faculty._id },
+          department: department._id,
+          role: USER_ROLES.MENTOR,
+          assignedSections: {
+            $in: selectedSectionObjectIds,
           },
-          {
-            $pull: {
-              assignedSections: {
-                $in: selectedSectionObjectIds,
-              },
+        },
+        {
+          $pull: {
+            assignedSections: {
+              $in: selectedSectionObjectIds,
             },
           },
-          { session },
-        );
-      }
+        },
+        { session },
+      );
 
       /*
-       * Section.mentor is the canonical owner for each section.
-       * Updating the section documents inside this transaction ensures
-       * that a failed operation does not leave a partial reassignment.
+       * Section.mentor is the canonical owner of each section.
        */
       if (sections.length > 0) {
         await Section.updateMany(
@@ -296,8 +289,8 @@ export async function assignMentorController(req, res, next) {
       }
 
       /*
-       * Preserve the target mentor's other section assignments.
-       * Add the selected sections rather than replacing the whole array.
+       * Preserve the target mentor's existing assignments and add the
+       * selected sections and batches without duplicating their IDs.
        */
       faculty.role = USER_ROLES.MENTOR;
 
@@ -322,8 +315,8 @@ export async function assignMentorController(req, res, next) {
       await faculty.save({ session });
 
       /*
-       * Read back the mentor's current assignments so the response
-       * reflects the state persisted by this transaction.
+       * Read back the target mentor's current assignments for the
+       * response.
        */
       const assignedBatchIds = faculty.assignedBatches ?? [];
       const assignedSectionIds = faculty.assignedSections ?? [];
@@ -432,7 +425,7 @@ export async function listMentorsController(req, res, next) {
 
     /*
      * Resolve section assignments from the canonical Section.mentor
-     * relationship, not solely from potentially stale user arrays.
+     * relationship instead of relying only on legacy user arrays.
      */
     const mentorIds = mentors.map((mentor) => mentor._id);
 
