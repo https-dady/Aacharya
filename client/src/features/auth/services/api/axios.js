@@ -27,6 +27,21 @@ function notifyAuthenticationExpired() {
   }
 }
 
+function isFormData(body) {
+  return (
+    typeof FormData !== 'undefined'
+    && body instanceof FormData
+  );
+}
+
+function serializeRequestBody(body) {
+  if (body === undefined || isFormData(body)) {
+    return body;
+  }
+
+  return JSON.stringify(body);
+}
+
 function buildRequestUrl(path, params) {
   const url = new URL(`${API_BASE_URL}${path}`);
 
@@ -116,7 +131,16 @@ async function performRequest(path, options = {}) {
 
   headers.set('Accept', 'application/json');
 
-  if (options.body !== undefined) {
+  /*
+   * Browser must generate the multipart Content-Type boundary.
+   * Explicitly setting application/json for FormData breaks uploads.
+   */
+  if (isFormData(options.body)) {
+    headers.delete('Content-Type');
+  } else if (
+    options.body !== undefined
+    && !headers.has('Content-Type')
+  ) {
     headers.set('Content-Type', 'application/json');
   }
 
@@ -326,7 +350,7 @@ async function post(path, body, options = {}) {
     method: 'POST',
     ...(body === undefined
       ? {}
-      : { body: JSON.stringify(body) }),
+      : { body: serializeRequestBody(body) }),
   });
 }
 
@@ -336,7 +360,7 @@ async function patch(path, body, options = {}) {
     method: 'PATCH',
     ...(body === undefined
       ? {}
-      : { body: JSON.stringify(body) }),
+      : { body: serializeRequestBody(body) }),
   });
 }
 

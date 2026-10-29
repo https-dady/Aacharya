@@ -31,11 +31,7 @@ const ALLOWED_MIME_TYPES = new Set([
   'text/plain',
 ]);
 
-function createStorageError(
-  statusCode,
-  code,
-  message,
-) {
+function createStorageError(statusCode, code, message) {
   const error = new Error(message);
 
   error.statusCode = statusCode;
@@ -131,6 +127,7 @@ function validateFile(file) {
 
   return {
     filename,
+    extension,
     mimeType,
     size: file.buffer.length,
   };
@@ -148,18 +145,33 @@ function buildCloudinaryFolder({
   ].join('/');
 }
 
+function buildCloudinaryPublicId(filename, extension) {
+  const originalBaseName = path.parse(filename).name;
+
+  const safeBaseName = originalBaseName
+    .normalize('NFKC')
+    .replace(/[^\p{L}\p{N}_-]/gu, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+
+  const uniquePrefix = randomUUID();
+
+  // Raw Cloudinary assets retain the file extension in public_id.
+  return `${uniquePrefix}-${safeBaseName || 'attachment'}${extension}`;
+}
+
 /**
- * Upload assignment attachments to the existing Cloudinary storage.
+ * Upload assignment attachments to Cloudinary.
  *
  * @param {Array<object>} files Multer memory-storage files.
  * @param {object} options Upload scope.
  * @param {string} options.departmentId Department MongoDB ID.
  * @param {string} options.assignmentId Assignment MongoDB ID.
  *
- * @returns {Promise<Array<object>>} Uploaded attachment metadata.
- *
- * Each returned item includes publicId and resourceType in addition
- * to the metadata currently supported by the assignment model.
+ * @returns {Promise<Array<object>>}
+ * Each attachment contains its URL, filename, MIME type, size,
+ * Cloudinary public ID, and resource type.
  */
 export async function uploadAssignmentAttachments(
   files,
@@ -209,14 +221,17 @@ export async function uploadAssignmentAttachments(
     for (const file of files) {
       const metadata = validateFile(file);
 
+      const publicId = buildCloudinaryPublicId(
+        metadata.filename,
+        metadata.extension,
+      );
+
       const uploadResult = await uploadBufferToCloudinary(
         file.buffer,
         {
           folder,
           resourceType: 'raw',
-          publicId: `${randomUUID()}-${path.parse(metadata.filename).name
-            .replace(/[^a-zA-Z0-9_-]/g, '_')
-            .slice(0, 80)}`,
+          publicId,
           overwrite: false,
           tags: [
             'aacharya-lms',
@@ -233,7 +248,7 @@ export async function uploadAssignmentAttachments(
         mimeType: metadata.mimeType,
         size: uploadResult.bytes,
         publicId: uploadResult.publicId,
-        resourceType: uploadResult.resourceType,
+        resourceType: uploadResult.resourceType || 'raw',
       });
     }
 

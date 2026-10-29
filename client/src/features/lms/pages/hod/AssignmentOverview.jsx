@@ -20,6 +20,10 @@ const CONTENT_STATUSES = Object.freeze({
   CLOSED: 'CLOSED',
 });
 
+const MAX_FILES = 5;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const ALLOWED_FILE_EXTENSION = /\.(pdf|doc|docx|ppt|pptx|xls|xlsx|txt)$/i;
+
 const INITIAL_FORM = {
   title: '',
   contentType: CONTENT_TYPES.ASSIGNMENT,
@@ -29,9 +33,17 @@ const INITIAL_FORM = {
   sectionIds: [],
   dueDate: '',
   totalMarks: '10',
-  attachmentName: '',
-  attachmentUrl: '',
+  attachmentUrls: [{ name: '', url: '' }],
 };
+
+const inputClassName = [
+  'min-h-11 w-full rounded-xl border border-[#454650]',
+  'bg-[#191A21] px-3 py-2.5 text-sm text-[#EAEAE6]',
+  'placeholder:text-[#777986]',
+  'outline-none transition-colors',
+  'focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20',
+  'disabled:cursor-not-allowed disabled:opacity-50',
+].join(' ');
 
 function getResponseData(response) {
   return response?.data?.data ?? response?.data ?? {};
@@ -43,47 +55,30 @@ function getItemId(item) {
 }
 
 function getCourseTitle(course) {
-  return course?.title
-    ?? course?.name
-    ?? course?.courseName
-    ?? 'Untitled course';
+  return course?.title ?? course?.name ?? course?.courseName ?? 'Untitled course';
 }
 
 function getCourseCode(course) {
   return course?.code ?? course?.courseCode ?? '';
 }
 
-function getCourseBatches(course) {
-  return Array.isArray(course?.batches) ? course.batches : [];
-}
-
-function getCourseSections(course) {
-  return Array.isArray(course?.sections) ? course.sections : [];
-}
-
-function getTargetLabel(item, fallbackPrefix) {
+function getTargetLabel(item, prefix) {
   if (typeof item === 'string') {
-    return `${fallbackPrefix} ${item.slice(-6)}`;
+    return `${prefix} ${item.slice(-6)}`;
   }
 
-  return (
-    item?.name
+  return item?.name
     ?? item?.title
     ?? item?.code
-    ?? `${fallbackPrefix} ${getItemId(item).slice(-6)}`
-  );
+    ?? `${prefix} ${getItemId(item).slice(-6)}`;
 }
 
 function formatDate(value) {
-  if (!value) {
-    return '—';
-  }
+  if (!value) return '—';
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return '—';
-  }
+  if (Number.isNaN(date.getTime())) return '—';
 
   return new Intl.DateTimeFormat('en-IN', {
     day: '2-digit',
@@ -92,13 +87,23 @@ function formatDate(value) {
   }).format(date);
 }
 
+function toDateTimeLocal(value) {
+  if (!value) return getDefaultDueDate();
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return getDefaultDueDate();
+
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+
+  return date.toISOString().slice(0, 16);
+}
+
 function getDefaultDueDate() {
   const date = new Date();
 
   date.setDate(date.getDate() + 7);
-  date.setMinutes(
-    date.getMinutes() - date.getTimezoneOffset(),
-  );
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
 
   return date.toISOString().slice(0, 16);
 }
@@ -112,13 +117,21 @@ function normalizeContent(item) {
     contentType: item?.contentType || CONTENT_TYPES.ASSIGNMENT,
     courseTitle: course?.title ?? item?.courseName ?? '—',
     courseCode: course?.code ?? item?.courseCode ?? '',
-    creatorName:
-      item?.createdBy?.fullName
-      ?? item?.facultyName
-      ?? '—',
+    creatorName: item?.createdBy?.fullName ?? item?.facultyName ?? '—',
     batches: Array.isArray(item?.batches) ? item.batches : [],
     sections: Array.isArray(item?.sections) ? item.sections : [],
+    attachments: Array.isArray(item?.attachments) ? item.attachments : [],
   };
+}
+
+function normalizeIds(values) {
+  if (!Array.isArray(values)) return [];
+
+  return values
+    .map((value) => (
+      typeof value === 'string' ? value : getItemId(value)
+    ))
+    .filter(Boolean);
 }
 
 function FieldLabel({ children, htmlFor, required = false }) {
@@ -128,7 +141,6 @@ function FieldLabel({ children, htmlFor, required = false }) {
       className="mb-2 block text-sm font-medium text-[#D0D0D8]"
     >
       {children}
-
       {required && (
         <span className="ml-1 text-[#CDB5F7]" aria-hidden="true">
           *
@@ -137,15 +149,6 @@ function FieldLabel({ children, htmlFor, required = false }) {
     </label>
   );
 }
-
-const inputClassName = [
-  'min-h-11 w-full rounded-xl border border-[#454650]',
-  'bg-[#191A21] px-3 py-2.5 text-sm text-[#EAEAE6]',
-  'placeholder:text-[#777986]',
-  'outline-none transition-colors',
-  'focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20',
-  'disabled:cursor-not-allowed disabled:opacity-50',
-].join(' ');
 
 function StatusBadge({ status }) {
   const normalizedStatus = String(status || 'UNKNOWN').toUpperCase();
@@ -161,8 +164,7 @@ function StatusBadge({ status }) {
       className={[
         'inline-flex rounded-full border px-2.5 py-1',
         'text-xs font-medium',
-        styles[normalizedStatus]
-          || 'border-[#454650] text-[#C8C8D0]',
+        styles[normalizedStatus] || 'border-[#454650] text-[#C8C8D0]',
       ].join(' ')}
     >
       {normalizedStatus}
@@ -181,6 +183,10 @@ export default function AssignmentOverview() {
   const [loading, setLoading] = useState(true);
   const [coursesLoading, setCoursesLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [existingAttachments, setExistingAttachments] = useState([]);
+  const [editingItemId, setEditingItemId] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
 
   const [error, setError] = useState('');
@@ -198,16 +204,11 @@ export default function AssignmentOverview() {
 
     try {
       const response = await api.get('/v1/assignments/manage', {
-        params: {
-          page: 1,
-          limit: 100,
-        },
+        params: { page: 1, limit: 100 },
       });
 
       const data = getResponseData(response);
-      const records = Array.isArray(data.items)
-        ? data.items
-        : [];
+      const records = Array.isArray(data.items) ? data.items : [];
 
       setItems(records.map(normalizeContent));
     } catch (requestError) {
@@ -225,10 +226,7 @@ export default function AssignmentOverview() {
 
     try {
       const response = await api.get('/v1/courses/department', {
-        params: {
-          page: 1,
-          limit: 100,
-        },
+        params: { page: 1, limit: 100 },
       });
 
       const data = getResponseData(response);
@@ -262,12 +260,16 @@ export default function AssignmentOverview() {
   );
 
   const availableBatches = useMemo(
-    () => getCourseBatches(selectedCourse),
+    () => Array.isArray(selectedCourse?.batches)
+      ? selectedCourse.batches
+      : [],
     [selectedCourse],
   );
 
   const availableSections = useMemo(
-    () => getCourseSections(selectedCourse),
+    () => Array.isArray(selectedCourse?.sections)
+      ? selectedCourse.sections
+      : [],
     [selectedCourse],
   );
 
@@ -275,28 +277,27 @@ export default function AssignmentOverview() {
     const query = searchTerm.trim().toLowerCase();
 
     return items.filter((item) => {
-      const matchesType =
-        contentTypeFilter === 'ALL'
+      const matchesType = contentTypeFilter === 'ALL'
         || item.contentType === contentTypeFilter;
 
-      const matchesStatus =
-        statusFilter === 'ALL'
+      const matchesStatus = statusFilter === 'ALL'
         || String(item.status).toUpperCase() === statusFilter;
 
-      const matchesSearch =
-        !query
-        || [
-          item.title,
-          item.description,
-          item.courseTitle,
-          item.courseCode,
-          item.creatorName,
-          item.contentType,
-          ...item.batches.map((batch) => getTargetLabel(batch, 'Batch')),
-          ...item.sections.map((section) => getTargetLabel(section, 'Section')),
-        ].some((value) =>
-          String(value || '').toLowerCase().includes(query),
-        );
+      const searchableValues = [
+        item.title,
+        item.description,
+        item.courseTitle,
+        item.courseCode,
+        item.creatorName,
+        item.contentType,
+        ...item.batches.map((batch) => getTargetLabel(batch, 'Batch')),
+        ...item.sections.map((section) => getTargetLabel(section, 'Section')),
+      ];
+
+      const matchesSearch = !query
+        || searchableValues.some((value) => (
+          String(value || '').toLowerCase().includes(query)
+        ));
 
       return matchesType && matchesStatus && matchesSearch;
     });
@@ -318,11 +319,7 @@ export default function AssignmentOverview() {
   function updateField(event) {
     const { name, value } = event.target;
 
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
-
+    setForm((current) => ({ ...current, [name]: value }));
     setFormError('');
     setNotice('');
   }
@@ -333,20 +330,14 @@ export default function AssignmentOverview() {
       (option) => option.value,
     );
 
-    setForm((current) => ({
-      ...current,
-      [fieldName]: selectedIds,
-    }));
-
+    setForm((current) => ({ ...current, [fieldName]: selectedIds }));
     setFormError('');
   }
 
   function handleCourseChange(event) {
-    const courseId = event.target.value;
-
     setForm((current) => ({
       ...current,
-      courseId,
+      courseId: event.target.value,
       batchIds: [],
       sectionIds: [],
     }));
@@ -358,102 +349,290 @@ export default function AssignmentOverview() {
     setForm({
       ...INITIAL_FORM,
       dueDate: getDefaultDueDate(),
+      attachmentUrls: [{ name: '', url: '' }],
     });
+
+    setSelectedFiles([]);
+    setExistingAttachments([]);
+    setEditingItemId('');
+    setFormError('');
+  }
+
+  function startEditing(item) {
+    const courseId = getItemId(item.course) || String(item.courseId || '');
+
+    const batches = Array.isArray(item.batchIds)
+      ? item.batchIds
+      : item.batches;
+
+    const sections = Array.isArray(item.sectionIds)
+      ? item.sectionIds
+      : item.sections;
+
+    setForm({
+      title: item.title || '',
+      contentType: item.contentType || CONTENT_TYPES.ASSIGNMENT,
+      description: item.description || '',
+      courseId,
+      batchIds: normalizeIds(batches),
+      sectionIds: normalizeIds(sections),
+      dueDate: toDateTimeLocal(item.dueDate),
+      totalMarks: String(item.totalMarks ?? 10),
+      attachmentUrls: [{ name: '', url: '' }],
+    });
+
+    setExistingAttachments(
+      Array.isArray(item.attachments) ? item.attachments : [],
+    );
+
+    setSelectedFiles([]);
+    setEditingItemId(item.id);
+    setShowCreateForm(true);
+    setFormError('');
+    setNotice('');
+  }
+
+  function removeExistingAttachment(index) {
+    setExistingAttachments((current) => (
+      current.filter((_, attachmentIndex) => attachmentIndex !== index)
+    ));
 
     setFormError('');
   }
 
-  async function handleCreateContent(event) {
+  function updateAttachmentUrl(index, field, value) {
+    setForm((current) => ({
+      ...current,
+      attachmentUrls: current.attachmentUrls.map((attachment, attachmentIndex) => (
+        attachmentIndex === index
+          ? { ...attachment, [field]: value }
+          : attachment
+      )),
+    }));
+
+    setFormError('');
+  }
+
+  function addAttachmentUrl() {
+    setForm((current) => ({
+      ...current,
+      attachmentUrls: [
+        ...current.attachmentUrls,
+        { name: '', url: '' },
+      ],
+    }));
+  }
+
+  function removeAttachmentUrl(index) {
+    setForm((current) => ({
+      ...current,
+      attachmentUrls: current.attachmentUrls.filter(
+        (_, attachmentIndex) => attachmentIndex !== index,
+      ),
+    }));
+
+    setFormError('');
+  }
+
+  function handleFileSelection(event) {
+    const files = Array.from(event.target.files || []);
+    const combinedFiles = [...selectedFiles, ...files];
+
+    const uniqueFiles = combinedFiles.filter((file, index, allFiles) => (
+      allFiles.findIndex((candidate) => (
+        candidate.name === file.name
+        && candidate.size === file.size
+        && candidate.lastModified === file.lastModified
+      )) === index
+    ));
+
+    if (uniqueFiles.length > MAX_FILES) {
+      setFormError(`You can attach a maximum of ${MAX_FILES} new files.`);
+      event.target.value = '';
+      return;
+    }
+
+    const invalidFile = uniqueFiles.find((file) => (
+      file.size > MAX_FILE_SIZE
+      || !ALLOWED_FILE_EXTENSION.test(file.name)
+    ));
+
+    if (invalidFile) {
+      setFormError(
+        invalidFile.size > MAX_FILE_SIZE
+          ? `${invalidFile.name} exceeds the 10 MB per-file limit.`
+          : `${invalidFile.name} is not a supported file type.`,
+      );
+
+      event.target.value = '';
+      return;
+    }
+
+    setSelectedFiles(uniqueFiles);
+    setFormError('');
+    event.target.value = '';
+  }
+
+  function removeSelectedFile(index) {
+    setSelectedFiles((current) => (
+      current.filter((_, fileIndex) => fileIndex !== index)
+    ));
+  }
+
+  async function handleSaveContent(event) {
     event.preventDefault();
 
     setFormError('');
     setNotice('');
 
-    if (!form.courseId) {
-      setFormError('Select a course before creating content.');
+    if (!form.title.trim()) {
+      setFormError('Enter an assignment or practical title.');
       return;
     }
 
-    if (new Date(form.dueDate).getTime() <= Date.now()) {
+    if (!form.courseId) {
+      setFormError('Select a course before saving this content.');
+      return;
+    }
+
+    if (!form.description.trim()) {
+      setFormError('Enter the instructions or description.');
+      return;
+    }
+
+    const dueDate = new Date(form.dueDate);
+
+    if (
+      !form.dueDate
+      || Number.isNaN(dueDate.getTime())
+      || dueDate.getTime() <= Date.now()
+    ) {
       setFormError('Choose a future submission deadline.');
       return;
     }
 
-    const attachments = [];
+    const totalMarks = Number(form.totalMarks);
 
-    if (form.attachmentName.trim() || form.attachmentUrl.trim()) {
-      if (!form.attachmentName.trim() || !form.attachmentUrl.trim()) {
+    if (
+      !Number.isFinite(totalMarks)
+      || totalMarks < 1
+      || totalMarks > 10000
+    ) {
+      setFormError('Maximum marks must be between 1 and 10000.');
+      return;
+    }
+
+    const urlAttachments = [];
+
+    for (const attachment of form.attachmentUrls) {
+      const name = attachment.name.trim();
+      const rawUrl = attachment.url.trim();
+
+      if (!name && !rawUrl) continue;
+
+      if (!name || !rawUrl) {
         setFormError(
-          'Provide both the attachment name and URL, or leave both empty.',
+          'Provide both a name and URL for each material link, or leave the row empty.',
         );
         return;
       }
 
       try {
-        const attachmentUrl = new URL(form.attachmentUrl.trim());
+        const parsedUrl = new URL(rawUrl);
 
-        if (!['http:', 'https:'].includes(attachmentUrl.protocol)) {
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
           setFormError('Attachment URLs must use HTTP or HTTPS.');
           return;
         }
 
-        attachments.push({
-          name: form.attachmentName.trim(),
-          url: attachmentUrl.toString(),
+        urlAttachments.push({
+          name,
+          url: parsedUrl.toString(),
           mimeType: '',
           size: 0,
         });
       } catch {
-        setFormError('Enter a valid attachment URL.');
+        setFormError(`Enter a valid URL for "${name}".`);
         return;
       }
     }
 
-    const payload = {
-      title: form.title.trim(),
-      contentType: form.contentType,
-      description: form.description.trim(),
-      courseId: form.courseId,
-      batchIds: form.batchIds,
-      sectionIds: form.sectionIds,
-      dueDate: new Date(form.dueDate).toISOString(),
-      totalMarks: Number(form.totalMarks),
-      attachments,
-      status: CONTENT_STATUSES.DRAFT,
-    };
+    if (selectedFiles.length > MAX_FILES) {
+      setFormError(`You can attach a maximum of ${MAX_FILES} new files.`);
+      return;
+    }
+
+    const payload = new FormData();
+
+    payload.append('title', form.title.trim());
+    payload.append('contentType', form.contentType);
+    payload.append('description', form.description.trim());
+    payload.append('courseId', form.courseId);
+    payload.append('batchIds', JSON.stringify(form.batchIds));
+    payload.append('sectionIds', JSON.stringify(form.sectionIds));
+    payload.append('dueDate', dueDate.toISOString());
+    payload.append('totalMarks', String(totalMarks));
+
+    /*
+     * The backend receives the remaining existing attachments and new URL
+     * attachments as JSON. Newly selected files are appended separately
+     * under the same multipart field name.
+     */
+    payload.append(
+      'attachments',
+      JSON.stringify([...existingAttachments, ...urlAttachments]),
+    );
+
+    if (!editingItemId) {
+      payload.append('status', CONTENT_STATUSES.DRAFT);
+    }
+
+    selectedFiles.forEach((file) => {
+      payload.append('attachments', file, file.name);
+    });
 
     setSubmitting(true);
 
     try {
-      const response = await api.post(
-        '/v1/assignments/manage',
-        payload,
-      );
+      const response = editingItemId
+        ? await api.patch(
+          `/v1/assignments/manage/${encodeURIComponent(editingItemId)}`,
+          payload,
+        )
+        : await api.post('/v1/assignments/manage', payload);
 
       const data = getResponseData(response);
-      const createdItem = data.item;
+      const savedItem = data.item ?? data.assignment ?? data.record;
 
-      if (createdItem) {
-        setItems((current) => [
-          normalizeContent(createdItem),
-          ...current,
-        ]);
+      if (savedItem) {
+        const normalizedItem = normalizeContent(savedItem);
+
+        setItems((current) => (
+          editingItemId
+            ? current.map((item) => (
+              item.id === editingItemId ? normalizedItem : item
+            ))
+            : [normalizedItem, ...current]
+        ));
       } else {
         await loadItems();
       }
 
-      const contentLabel =
-        form.contentType === CONTENT_TYPES.PRACTICAL
-          ? 'Practical'
-          : 'Assignment';
+      const label = form.contentType === CONTENT_TYPES.PRACTICAL
+        ? 'Practical'
+        : 'Assignment';
 
-      setNotice(`${contentLabel} saved as draft successfully.`);
+      setNotice(
+        editingItemId
+          ? `${label} updated successfully.`
+          : `${label} saved as draft successfully.`,
+      );
+
       resetForm();
       setShowCreateForm(false);
     } catch (requestError) {
       setFormError(
-        requestError?.message
-        || 'The content could not be created.',
+        requestError?.message || 'The content could not be saved.',
       );
     } finally {
       setSubmitting(false);
@@ -481,9 +660,9 @@ export default function AssignmentOverview() {
 
             <ActionButton
               onClick={() => {
+                if (showCreateForm) resetForm();
+
                 setShowCreateForm((current) => !current);
-                setFormError('');
-                setNotice('');
               }}
             >
               {showCreateForm ? 'Close Form' : 'Create New'}
@@ -521,16 +700,14 @@ export default function AssignmentOverview() {
           {
             label: 'Published',
             value: statistics.published,
-            helper: 'Visible according to student access rules',
+            helper: 'Published content',
           },
         ].map((statistic) => (
           <div
             key={statistic.label}
             className="rounded-xl border border-[#343640] bg-[#191A21] p-5"
           >
-            <p className="text-sm text-[#9697A2]">
-              {statistic.label}
-            </p>
+            <p className="text-sm text-[#9697A2]">{statistic.label}</p>
 
             <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
               {loading ? '—' : statistic.value}
@@ -546,14 +723,15 @@ export default function AssignmentOverview() {
       {showCreateForm && (
         <div className="mb-6">
           <SectionCard
-            eyebrow="CONTENT CREATION"
-            title="Create Assignment or Practical"
-            description="Select the content type and course, then enter the instructions and submission details."
+            eyebrow={editingItemId ? 'CONTENT EDITING' : 'CONTENT CREATION'}
+            title={editingItemId
+              ? 'Edit Assignment or Practical'
+              : 'Create Assignment or Practical'}
+            description={editingItemId
+              ? 'Update content and remove attachments that are no longer required.'
+              : 'Enter the instructions, target groups, deadline, and supporting materials.'}
           >
-            <form
-              onSubmit={handleCreateContent}
-              className="space-y-6"
-            >
+            <form onSubmit={handleSaveContent} className="space-y-6">
               {formError && (
                 <div
                   role="alert"
@@ -577,13 +755,8 @@ export default function AssignmentOverview() {
                     className={inputClassName}
                     required
                   >
-                    <option value={CONTENT_TYPES.ASSIGNMENT}>
-                      Assignment
-                    </option>
-
-                    <option value={CONTENT_TYPES.PRACTICAL}>
-                      Practical
-                    </option>
+                    <option value={CONTENT_TYPES.ASSIGNMENT}>Assignment</option>
+                    <option value={CONTENT_TYPES.PRACTICAL}>Practical</option>
                   </select>
                 </div>
 
@@ -602,29 +775,16 @@ export default function AssignmentOverview() {
                     required
                   >
                     <option value="">
-                      {coursesLoading
-                        ? 'Loading courses...'
-                        : 'Select a course'}
+                      {coursesLoading ? 'Loading courses...' : 'Select a course'}
                     </option>
 
                     {courses.map((course) => (
-                      <option
-                        key={getItemId(course)}
-                        value={getItemId(course)}
-                      >
+                      <option key={getItemId(course)} value={getItemId(course)}>
                         {getCourseTitle(course)}
-                        {getCourseCode(course)
-                          ? ` (${getCourseCode(course)})`
-                          : ''}
+                        {getCourseCode(course) ? ` (${getCourseCode(course)})` : ''}
                       </option>
                     ))}
                   </select>
-
-                  <p className="mt-2 text-xs leading-5 text-[#9697A2]">
-                    The backend will verify that the selected course is
-                    assigned to you. An HOD can first assign a course to
-                    themselves from Course Management.
-                  </p>
                 </div>
 
                 <div className="md:col-span-2">
@@ -638,11 +798,7 @@ export default function AssignmentOverview() {
                     value={form.title}
                     onChange={updateField}
                     className={inputClassName}
-                    placeholder={
-                      form.contentType === CONTENT_TYPES.PRACTICAL
-                        ? 'e.g. Practical 1 — Data Structures'
-                        : 'e.g. Assignment 1 — Data Structures'
-                    }
+                    placeholder="Enter assignment or practical title"
                     minLength={2}
                     maxLength={200}
                     required
@@ -660,12 +816,7 @@ export default function AssignmentOverview() {
                     value={form.description}
                     onChange={updateField}
                     className={`${inputClassName} min-h-32 resize-y`}
-                    placeholder={
-                      form.contentType === CONTENT_TYPES.PRACTICAL
-                        ? 'Describe the experiment, procedure, expected output, and submission requirements.'
-                        : 'Enter assignment questions, instructions, and submission requirements.'
-                    }
-                    minLength={1}
+                    placeholder="Enter questions, procedure, instructions, and submission requirements."
                     maxLength={10000}
                     required
                   />
@@ -713,12 +864,9 @@ export default function AssignmentOverview() {
 
                   <select
                     id="batchIds"
-                    name="batchIds"
                     multiple
                     value={form.batchIds}
-                    onChange={(event) =>
-                      updateTargetSelection(event, 'batchIds')
-                    }
+                    onChange={(event) => updateTargetSelection(event, 'batchIds')}
                     className={`${inputClassName} min-h-28`}
                     disabled={!selectedCourse || availableBatches.length === 0}
                   >
@@ -737,12 +885,6 @@ export default function AssignmentOverview() {
                   <p className="mt-2 text-xs text-[#9697A2]">
                     Use Ctrl or Cmd to select multiple batches.
                   </p>
-
-                  {selectedCourse && availableBatches.length === 0 && (
-                    <p className="mt-1 text-xs text-amber-200">
-                      No course batches are available in the returned course data.
-                    </p>
-                  )}
                 </div>
 
                 <div>
@@ -752,12 +894,9 @@ export default function AssignmentOverview() {
 
                   <select
                     id="sectionIds"
-                    name="sectionIds"
                     multiple
                     value={form.sectionIds}
-                    onChange={(event) =>
-                      updateTargetSelection(event, 'sectionIds')
-                    }
+                    onChange={(event) => updateTargetSelection(event, 'sectionIds')}
                     className={`${inputClassName} min-h-28`}
                     disabled={!selectedCourse || availableSections.length === 0}
                   >
@@ -774,55 +913,197 @@ export default function AssignmentOverview() {
                   </select>
 
                   <p className="mt-2 text-xs text-[#9697A2]">
-                    Section targeting is available when sections are assigned
-                    to the selected course.
+                    Use Ctrl or Cmd to select multiple sections.
                   </p>
                 </div>
 
-                <div>
-                  <FieldLabel htmlFor="attachmentName">
-                    Material Name
-                  </FieldLabel>
+                {editingItemId && (
+                  <div className="md:col-span-2 space-y-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-[#EAEAE6]">
+                        Existing Attachments
+                      </h3>
 
-                  <input
-                    id="attachmentName"
-                    name="attachmentName"
-                    value={form.attachmentName}
-                    onChange={updateField}
-                    className={inputClassName}
-                    placeholder="e.g. Practical Manual PDF"
-                    maxLength={255}
-                  />
+                      <p className="mt-1 text-xs text-[#9697A2]">
+                        Remove an attachment here, then save the changes.
+                      </p>
+                    </div>
+
+                    {existingAttachments.length === 0 ? (
+                      <p className="rounded-xl border border-[#343640] bg-[#191A21] p-4 text-sm text-[#9697A2]">
+                        No existing attachments.
+                      </p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {existingAttachments.map((attachment, index) => (
+                          <li
+                            key={`${attachment.publicId || attachment.url || attachment.name}-${index}`}
+                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#343640] bg-[#191A21] p-3"
+                          >
+                            <div className="min-w-0">
+                              <p className="break-all text-sm text-[#EAEAE6]">
+                                {attachment.name || 'Attachment'}
+                              </p>
+
+                              {attachment.url && (
+                                <a
+                                  href={attachment.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="mt-1 block break-all text-xs text-[#CDB5F7] underline"
+                                >
+                                  Open attachment
+                                </a>
+                              )}
+                            </div>
+
+                            <ActionButton
+                              type="button"
+                              variant="secondary"
+                              onClick={() => removeExistingAttachment(index)}
+                              disabled={submitting}
+                            >
+                              Remove
+                            </ActionButton>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
+                <div className="md:col-span-2 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-semibold text-[#EAEAE6]">
+                        Material Links
+                      </h3>
+
+                      <p className="mt-1 text-xs text-[#9697A2]">
+                        Add HTTP or HTTPS links to study materials.
+                      </p>
+                    </div>
+
+                    <ActionButton
+                      type="button"
+                      variant="secondary"
+                      onClick={addAttachmentUrl}
+                      disabled={submitting || form.attachmentUrls.length >= 10}
+                    >
+                      Add URL
+                    </ActionButton>
+                  </div>
+
+                  {form.attachmentUrls.map((attachment, index) => (
+                    <div
+                      key={`attachment-url-${index}`}
+                      className="grid grid-cols-1 gap-3 rounded-xl border border-[#343640] bg-[#191A21] p-4 md:grid-cols-[1fr_2fr_auto]"
+                    >
+                      <div>
+                        <FieldLabel htmlFor={`attachmentName-${index}`}>
+                          Material Name
+                        </FieldLabel>
+
+                        <input
+                          id={`attachmentName-${index}`}
+                          value={attachment.name}
+                          onChange={(event) => updateAttachmentUrl(
+                            index,
+                            'name',
+                            event.target.value,
+                          )}
+                          className={inputClassName}
+                          placeholder="e.g. Practical Manual"
+                          maxLength={255}
+                        />
+                      </div>
+
+                      <div>
+                        <FieldLabel htmlFor={`attachmentUrl-${index}`}>
+                          Material URL
+                        </FieldLabel>
+
+                        <input
+                          id={`attachmentUrl-${index}`}
+                          type="url"
+                          value={attachment.url}
+                          onChange={(event) => updateAttachmentUrl(
+                            index,
+                            'url',
+                            event.target.value,
+                          )}
+                          className={inputClassName}
+                          placeholder="https://..."
+                          maxLength={2048}
+                        />
+                      </div>
+
+                      <div className="flex items-end">
+                        <ActionButton
+                          type="button"
+                          variant="secondary"
+                          onClick={() => removeAttachmentUrl(index)}
+                          disabled={submitting || form.attachmentUrls.length <= 1}
+                        >
+                          Remove
+                        </ActionButton>
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
-                <div>
-                  <FieldLabel htmlFor="attachmentUrl">
-                    Material URL
-                  </FieldLabel>
+                <div className="md:col-span-2 space-y-3">
+                  <div>
+                    <FieldLabel htmlFor="assignmentFiles">
+                      Upload Files
+                    </FieldLabel>
 
-                  <input
-                    id="attachmentUrl"
-                    name="attachmentUrl"
-                    type="url"
-                    value={form.attachmentUrl}
-                    onChange={updateField}
-                    className={inputClassName}
-                    placeholder="https://..."
-                    maxLength={2048}
-                  />
+                    <input
+                      id="assignmentFiles"
+                      type="file"
+                      multiple
+                      accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt"
+                      onChange={handleFileSelection}
+                      disabled={submitting || selectedFiles.length >= MAX_FILES}
+                      className={`${inputClassName} file:mr-3 file:rounded-lg file:border-0 file:bg-[#CDB5F7] file:px-3 file:py-2 file:text-sm file:font-medium file:text-[#14161C]`}
+                    />
+
+                    <p className="mt-2 text-xs leading-5 text-[#9697A2]">
+                      PDF, Word, PowerPoint, Excel, or TXT. Maximum 5 new files,
+                      10 MB per file.
+                    </p>
+                  </div>
+
+                  {selectedFiles.length > 0 && (
+                    <ul className="space-y-2" aria-label="Selected files">
+                      {selectedFiles.map((file, index) => (
+                        <li
+                          key={`${file.name}-${file.lastModified}-${index}`}
+                          className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#343640] bg-[#191A21] px-3 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="break-all text-sm text-[#EAEAE6]">
+                              {file.name}
+                            </p>
+
+                            <p className="text-xs text-[#9697A2]">
+                              {(file.size / (1024 * 1024)).toFixed(2)} MB
+                            </p>
+                          </div>
+
+                          <ActionButton
+                            type="button"
+                            variant="secondary"
+                            onClick={() => removeSelectedFile(index)}
+                            disabled={submitting}
+                          >
+                            Remove
+                          </ActionButton>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
-              </div>
-
-              <div className="rounded-xl border border-[#454650] bg-[#191A21] p-4">
-                <p className="text-sm font-medium text-[#EAEAE6]">
-                  Attachment note
-                </p>
-
-                <p className="mt-1 text-sm leading-6 text-[#9697A2]">
-                  This form currently accepts a material URL. Direct PDF or
-                  document upload will be connected through the file-storage
-                  integration separately.
-                </p>
               </div>
 
               <div className="flex flex-wrap justify-end gap-3 border-t border-[#343640] pt-5">
@@ -843,7 +1124,7 @@ export default function AssignmentOverview() {
                   loading={submitting}
                   disabled={coursesLoading || courses.length === 0}
                 >
-                  Save as Draft
+                  {editingItemId ? 'Save Changes' : 'Save as Draft'}
                 </ActionButton>
               </div>
             </form>
@@ -854,7 +1135,7 @@ export default function AssignmentOverview() {
       <SectionCard
         eyebrow="CONTENT DIRECTORY"
         title="Assignments & Practicals"
-        description="Search and filter records returned by the common management API."
+        description="Search and filter records returned by the management API."
         action={
           <ActionButton
             variant="secondary"
@@ -866,7 +1147,7 @@ export default function AssignmentOverview() {
         }
       >
         <div className="mb-5 grid grid-cols-1 gap-4 md:grid-cols-3">
-          <div className="md:col-span-1">
+          <div>
             <SearchInput
               name="contentSearch"
               label="Search content"
@@ -975,9 +1256,7 @@ export default function AssignmentOverview() {
                   Clear Filters
                 </ActionButton>
               ) : (
-                <ActionButton
-                  onClick={() => setShowCreateForm(true)}
-                >
+                <ActionButton onClick={() => setShowCreateForm(true)}>
                   Create New
                 </ActionButton>
               )
@@ -985,7 +1264,7 @@ export default function AssignmentOverview() {
           />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-[#343640]">
-            <table className="w-full min-w-[900px] text-left text-sm">
+            <table className="w-full min-w-[1050px] text-left text-sm">
               <thead className="bg-[#202129] text-xs uppercase tracking-wider text-[#9697A2]">
                 <tr>
                   <th className="px-4 py-3 font-medium">Title</th>
@@ -995,6 +1274,7 @@ export default function AssignmentOverview() {
                   <th className="px-4 py-3 font-medium">Due Date</th>
                   <th className="px-4 py-3 font-medium">Marks</th>
                   <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Actions</th>
                 </tr>
               </thead>
 
@@ -1057,6 +1337,15 @@ export default function AssignmentOverview() {
                     <td className="px-4 py-4">
                       <StatusBadge status={item.status} />
                     </td>
+
+                    <td className="px-4 py-4">
+                      <ActionButton
+                        variant="secondary"
+                        onClick={() => startEditing(item)}
+                      >
+                        Edit
+                      </ActionButton>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1064,19 +1353,6 @@ export default function AssignmentOverview() {
           </div>
         )}
       </SectionCard>
-
-      <div className="mt-5 rounded-xl border border-[#343640] bg-[#191A21] p-4">
-        <p className="text-sm font-medium text-[#D0D0D8]">
-          Current integration scope
-        </p>
-
-        <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-          Records are loaded from the common backend API. Creation currently
-          saves a draft. Dedicated publish, edit, close, direct file upload,
-          and student submission/review flows still need their respective
-          backend and UI integrations.
-        </p>
-      </div>
     </div>
   );
 }

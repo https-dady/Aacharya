@@ -21,6 +21,14 @@ import { Department } from '../models/department.model.js';
 import { Batch } from '../models/batch.model.js';
 import { Section } from '../models/section.model.js';
 
+import {
+  uploadAssignmentAttachments,
+} from '../services/storage/assignment-attachment.service.js';
+
+import {
+  deleteFromCloudinary,
+} from '../services/storage/cloudinary-storage.service.js';
+
 function createControllerError(statusCode, code, message) {
   const error = new Error(message);
 
@@ -50,9 +58,12 @@ function escapeRegex(value) {
 function normalizeContent(item) {
   return {
     id: item._id.toString(),
+
     title: item.title,
+
     contentType:
       item.contentType || ASSIGNMENT_CONTENT_TYPES.ASSIGNMENT,
+
     description: item.description,
 
     course: item.course
@@ -84,6 +95,7 @@ function normalizeContent(item) {
     })),
 
     dueDate: item.dueDate,
+
     totalMarks: item.totalMarks,
 
     attachments: (item.attachments || []).map((attachment) => ({
@@ -91,6 +103,8 @@ function normalizeContent(item) {
       url: attachment.url,
       mimeType: attachment.mimeType || '',
       size: attachment.size || 0,
+      publicId: attachment.publicId || '',
+      resourceType: attachment.resourceType || '',
     })),
 
     status: item.status,
@@ -450,11 +464,113 @@ function normalizeAttachments(attachments) {
       );
     }
 
+    const publicId = typeof attachment.publicId === 'string'
+      ? attachment.publicId.trim()
+      : '';
+
+    const resourceType = typeof attachment.resourceType === 'string'
+      ? attachment.resourceType.trim().toLowerCase()
+      : '';
+
+    if (
+      publicId
+      && !['image', 'raw', 'video'].includes(resourceType)
+    ) {
+      throw createControllerError(
+        400,
+        'INVALID_ATTACHMENT_RESOURCE_TYPE',
+        'Cloudinary attachments must include a valid resource type.',
+      );
+    }
+
     return {
       name,
       url: parsedUrl.toString(),
       mimeType: String(attachment.mimeType || '').trim(),
       size,
+      ...(publicId ? { publicId } : {}),
+      ...(resourceType ? { resourceType } : {}),
+    };
+  });
+}
+
+async function cleanupUploadedAttachments(attachments) {
+  const assets = (attachments || []).filter(
+    (attachment) => attachment?.publicId,
+  );
+
+  return Promise.allSettled(
+    assets.map((attachment) =>
+      deleteFromCloudinary(attachment.publicId, {
+        resourceType: attachment.resourceType || 'raw',
+        invalidate: true,
+      }),
+    ),
+  );
+}
+
+function parseAttachmentsField(value) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      throw createControllerError(
+        400,
+        'INVALID_ATTACHMENTS_JSON',
+        'The attachments field must contain a valid JSON array.',
+      );
+    }
+  }
+
+  return value;
+}
+
+function mapPreviousAttachments(attachments) {
+  return (attachments || []).map((attachment) => ({
+    name: attachment.name,
+    url: attachment.url,
+    mimeType: attachment.mimeType || '',
+    size: attachment.size || 0,
+    publicId: attachment.publicId || '',
+    resourceType: attachment.resourceType || '',
+  }));
+}
+
+function preserveKnownCloudinaryMetadata(
+  requestedAttachments,
+  previousAttachments,
+) {
+  const previousByUrl = new Map(
+    previousAttachments.map((attachment) => [
+      attachment.url,
+      attachment,
+    ]),
+  );
+
+  return requestedAttachments.map((attachment) => {
+    const previous = previousByUrl.get(attachment.url);
+
+    if (!previous) {
+      return {
+        name: attachment.name,
+        url: attachment.url,
+        mimeType: attachment.mimeType || '',
+        size: attachment.size || 0,
+      };
+    }
+
+    return {
+      ...attachment,
+      ...(previous.publicId
+        ? { publicId: previous.publicId }
+        : {}),
+      ...(previous.resourceType
+        ? { resourceType: previous.resourceType }
+        : {}),
     };
   });
 }
@@ -580,10 +696,7 @@ export async function createDepartmentContentController(
 
     const parsedDueDate = new Date(dueDate);
 
-    if (
-      !dueDate
-      || Number.isNaN(parsedDueDate.getTime())
-    ) {
+    if (!dueDate || Number.isNaN(parsedDueDate.getTime())) {
       throw createControllerError(
         400,
         'INVALID_DUE_DATE',
@@ -620,7 +733,20 @@ export async function createDepartmentContentController(
       sectionIds,
     });
 
-    const normalizedAttachments = normalizeAttachments(attachments);
+    const requestedAttachments = parseAttachmentsField(attachments);
+    const normalizedAttachments = normalizeAttachments(
+      requestedAttachments,
+    );
+
+    const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+
+    if (normalizedAttachments.length + uploadedFiles.length > 10) {
+      throw createControllerError(
+        400,
+        'ATTACHMENT_LIMIT_EXCEEDED',
+        'An assignment can contain at most 10 attachments.',
+      );
+    }
 
     const now = new Date();
 
@@ -643,6 +769,37 @@ export async function createDepartmentContentController(
         status === ASSIGNMENT_STATUSES.CLOSED ? now : null,
     });
 
+    let uploadedAttachments = [];
+
+    try {
+      uploadedAttachments = await uploadAssignmentAttachments(
+        uploadedFiles,
+        {
+          departmentId: user.department,
+          assignmentId: content._id,
+        },
+      );
+
+      if (uploadedAttachments.length > 0) {
+        content.attachments = normalizeAttachments([
+          ...normalizedAttachments,
+          ...uploadedAttachments,
+        ]);
+
+        await content.save();
+      }
+    } catch (uploadOrSaveError) {
+      await cleanupUploadedAttachments(uploadedAttachments);
+
+      await Assignment.deleteOne({
+        _id: content._id,
+      })
+        .exec()
+        .catch(() => {});
+
+      throw uploadOrSaveError;
+    }
+
     const populatedContent = await populateContent(content._id);
 
     return res.status(201).json({
@@ -660,23 +817,13 @@ export async function createDepartmentContentController(
   }
 }
 
-/**
- * Update an existing assignment or practical.
- *
- * Route middleware will validate the request and, for multipart
- * uploads, provide successfully uploaded attachment metadata through
- * req.uploadedAttachments.
- *
- * If `attachments` is supplied, it represents the desired list of
- * existing URL attachments. Newly uploaded attachments are appended.
- * If `attachments` is omitted, the current attachments are retained
- * and newly uploaded files are appended.
- */
 export async function updateDepartmentContentController(
   req,
   res,
   next,
 ) {
+  let uploadedAttachments = [];
+
   try {
     const user = await getActiveUser(req.user?.id);
     const { assignmentId } = req.params;
@@ -705,8 +852,7 @@ export async function updateDepartmentContentController(
       assignmentFilter.createdBy = user._id;
     }
 
-    const assignment = await Assignment.findOne(assignmentFilter)
-      .exec();
+    const assignment = await Assignment.findOne(assignmentFilter).exec();
 
     if (!assignment) {
       throw createControllerError(
@@ -765,9 +911,7 @@ export async function updateDepartmentContentController(
       );
     }
 
-    if (
-      !Object.values(ASSIGNMENT_STATUSES).includes(nextStatus)
-    ) {
+    if (!Object.values(ASSIGNMENT_STATUSES).includes(nextStatus)) {
       throw createControllerError(
         400,
         'INVALID_CONTENT_STATUS',
@@ -789,10 +933,7 @@ export async function updateDepartmentContentController(
       ? assignment.sections.map(normalizeId)
       : body.sectionIds;
 
-    if (
-      !Array.isArray(batchIds)
-      || !Array.isArray(sectionIds)
-    ) {
+    if (!Array.isArray(batchIds) || !Array.isArray(sectionIds)) {
       throw createControllerError(
         400,
         'INVALID_ASSIGNMENT_TARGETS',
@@ -849,36 +990,45 @@ export async function updateDepartmentContentController(
       );
     }
 
-    let requestedAttachments = assignment.attachments.map(
-      (attachment) => ({
-        name: attachment.name,
-        url: attachment.url,
-        mimeType: attachment.mimeType || '',
-        size: attachment.size || 0,
-      }),
+    const previousAttachments = mapPreviousAttachments(
+      assignment.attachments,
     );
 
+    let requestedAttachments = previousAttachments;
+
     if (body.attachments !== undefined) {
-      let parsedAttachments = body.attachments;
+      requestedAttachments = parseAttachmentsField(body.attachments);
 
-      if (typeof parsedAttachments === 'string') {
-        try {
-          parsedAttachments = JSON.parse(parsedAttachments);
-        } catch {
-          throw createControllerError(
-            400,
-            'INVALID_ATTACHMENTS_JSON',
-            'The attachments field must contain a valid JSON array.',
-          );
-        }
-      }
+      requestedAttachments = normalizeAttachments(
+        requestedAttachments,
+      );
 
-      requestedAttachments = normalizeAttachments(parsedAttachments);
+      // Only metadata already stored in this assignment can identify
+      // an existing Cloudinary asset. Never trust a client-supplied
+      // publicId for a new URL attachment.
+      requestedAttachments = preserveKnownCloudinaryMetadata(
+        requestedAttachments,
+        previousAttachments,
+      );
     }
 
-    const uploadedAttachments = Array.isArray(req.uploadedAttachments)
-      ? req.uploadedAttachments
-      : [];
+    const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+
+    if (requestedAttachments.length + uploadedFiles.length > 10) {
+      throw createControllerError(
+        400,
+        'ATTACHMENT_LIMIT_EXCEEDED',
+        'An assignment can contain at most 10 attachments.',
+      );
+    }
+
+    uploadedAttachments = await uploadAssignmentAttachments(
+      uploadedFiles,
+      {
+        departmentId,
+        assignmentId: assignment._id,
+      },
+    );
 
     const combinedAttachments = normalizeAttachments([
       ...requestedAttachments,
@@ -886,6 +1036,10 @@ export async function updateDepartmentContentController(
     ]);
 
     if (combinedAttachments.length > 10) {
+      await cleanupUploadedAttachments(uploadedAttachments);
+
+      uploadedAttachments = [];
+
       throw createControllerError(
         400,
         'ATTACHMENT_LIMIT_EXCEEDED',
@@ -914,7 +1068,33 @@ export async function updateDepartmentContentController(
       assignment.closedAt = null;
     }
 
-    await assignment.save();
+    try {
+      await assignment.save();
+    } catch (saveError) {
+      await cleanupUploadedAttachments(uploadedAttachments);
+      uploadedAttachments = [];
+      throw saveError;
+    }
+
+    const retainedCloudinaryIds = new Set(
+      combinedAttachments
+        .filter((attachment) => attachment.publicId)
+        .map((attachment) => attachment.publicId),
+    );
+
+    const removedCloudinaryAttachments = previousAttachments.filter(
+      (attachment) =>
+        attachment.publicId
+        && !retainedCloudinaryIds.has(attachment.publicId),
+    );
+
+    const cleanupResults = await cleanupUploadedAttachments(
+      removedCloudinaryAttachments,
+    );
+
+    const cleanupFailures = cleanupResults.filter(
+      (result) => result.status === 'rejected',
+    ).length;
 
     const populatedAssignment = await populateContent(assignment._id);
 
@@ -924,11 +1104,25 @@ export async function updateDepartmentContentController(
         nextContentType === ASSIGNMENT_CONTENT_TYPES.PRACTICAL
           ? 'Practical updated successfully.'
           : 'Assignment updated successfully.',
+      ...(cleanupFailures > 0
+        ? {
+            warnings: [
+              `${cleanupFailures} removed attachment(s) could not be deleted from Cloudinary. The database has been updated.`,
+            ],
+          }
+        : {}),
       data: {
         item: normalizeContent(populatedAssignment),
       },
     });
   } catch (error) {
+    // The storage service cleans partial uploads when its own upload
+    // operation fails. This handles files uploaded successfully before
+    // a later controller validation or database error.
+    if (uploadedAttachments.length > 0) {
+      await cleanupUploadedAttachments(uploadedAttachments);
+    }
+
     return next(error);
   }
 }
