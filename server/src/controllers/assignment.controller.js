@@ -94,6 +94,7 @@ function normalizeContent(item) {
     })),
 
     status: item.status,
+
     createdBy: item.createdBy
       ? {
           id: normalizeId(item.createdBy._id),
@@ -208,16 +209,11 @@ async function getAuthorizedCourse(user, courseId) {
     );
   }
 
-  /*
-   * Assignment and practical creation is restricted to the user
-   * assigned as the course instructor. This includes an HOD who
-   * has assigned the course to themselves.
-   */
   if (normalizeId(course.faculty) !== user._id.toString()) {
     throw createControllerError(
       403,
       'COURSE_INSTRUCTOR_REQUIRED',
-      'You can create assignments and practicals only for subjects assigned to you.',
+      'You can manage assignments and practicals only for subjects assigned to you.',
     );
   }
 
@@ -355,6 +351,112 @@ function buildContentQuery({ user, department, query }) {
   }
 
   return filter;
+}
+
+async function populateContent(contentId) {
+  return Assignment.findById(contentId)
+    .populate({
+      path: 'course',
+      select: 'title code',
+    })
+    .populate({
+      path: 'department',
+      select: 'name code',
+    })
+    .populate({
+      path: 'batches',
+      select: 'name code',
+    })
+    .populate({
+      path: 'sections',
+      select: 'name code batch',
+    })
+    .populate({
+      path: 'createdBy',
+      select: 'fullName role',
+    })
+    .lean()
+    .exec();
+}
+
+function normalizeAttachments(attachments) {
+  if (!Array.isArray(attachments)) {
+    throw createControllerError(
+      400,
+      'INVALID_ATTACHMENTS',
+      'Attachments must be provided as an array.',
+    );
+  }
+
+  if (attachments.length > 10) {
+    throw createControllerError(
+      400,
+      'ATTACHMENT_LIMIT_EXCEEDED',
+      'An assignment can contain at most 10 attachments.',
+    );
+  }
+
+  return attachments.map((attachment) => {
+    if (
+      !attachment
+      || typeof attachment.name !== 'string'
+      || typeof attachment.url !== 'string'
+    ) {
+      throw createControllerError(
+        400,
+        'INVALID_ATTACHMENT',
+        'Every attachment must contain a name and URL.',
+      );
+    }
+
+    const name = attachment.name.trim();
+    const rawUrl = attachment.url.trim();
+
+    if (!name || name.length > 255) {
+      throw createControllerError(
+        400,
+        'INVALID_ATTACHMENT_NAME',
+        'Attachment names must contain between 1 and 255 characters.',
+      );
+    }
+
+    let parsedUrl;
+
+    try {
+      parsedUrl = new URL(rawUrl);
+    } catch {
+      throw createControllerError(
+        400,
+        'INVALID_ATTACHMENT_URL',
+        'Every attachment must have a valid URL.',
+      );
+    }
+
+    if (!['https:', 'http:'].includes(parsedUrl.protocol)) {
+      throw createControllerError(
+        400,
+        'INVALID_ATTACHMENT_URL',
+        'Attachment URLs must use HTTP or HTTPS.',
+      );
+    }
+
+    const size = Number(attachment.size || 0);
+
+    if (!Number.isFinite(size) || size < 0) {
+      throw createControllerError(
+        400,
+        'INVALID_ATTACHMENT_SIZE',
+        'Attachment size must be zero or a positive number.',
+      );
+    }
+
+    return {
+      name,
+      url: parsedUrl.toString(),
+      mimeType: String(attachment.mimeType || '').trim(),
+      size,
+    };
+  });
 }
 
 export async function listDepartmentContentController(
@@ -509,14 +611,6 @@ export async function createDepartmentContentController(
       );
     }
 
-    if (!Array.isArray(attachments) || attachments.length > 10) {
-      throw createControllerError(
-        400,
-        'INVALID_ATTACHMENTS',
-        'You can provide up to 10 attachments.',
-      );
-    }
-
     const course = await getAuthorizedCourse(user, courseId);
 
     const targets = await validateTargets({
@@ -526,56 +620,7 @@ export async function createDepartmentContentController(
       sectionIds,
     });
 
-    const normalizedAttachments = attachments.map((attachment) => {
-      if (
-        !attachment
-        || typeof attachment.name !== 'string'
-        || typeof attachment.url !== 'string'
-      ) {
-        throw createControllerError(
-          400,
-          'INVALID_ATTACHMENT',
-          'Every attachment must contain a name and URL.',
-        );
-      }
-
-      let parsedUrl;
-
-      try {
-        parsedUrl = new URL(attachment.url);
-      } catch {
-        throw createControllerError(
-          400,
-          'INVALID_ATTACHMENT_URL',
-          'Every attachment must have a valid URL.',
-        );
-      }
-
-      if (!['https:', 'http:'].includes(parsedUrl.protocol)) {
-        throw createControllerError(
-          400,
-          'INVALID_ATTACHMENT_URL',
-          'Attachment URLs must use HTTP or HTTPS.',
-        );
-      }
-
-      const size = Number(attachment.size || 0);
-
-      if (!Number.isFinite(size) || size < 0) {
-        throw createControllerError(
-          400,
-          'INVALID_ATTACHMENT_SIZE',
-          'Attachment size must be zero or a positive number.',
-        );
-      }
-
-      return {
-        name: attachment.name.trim(),
-        url: parsedUrl.toString(),
-        mimeType: String(attachment.mimeType || '').trim(),
-        size,
-      };
-    });
+    const normalizedAttachments = normalizeAttachments(attachments);
 
     const now = new Date();
 
@@ -598,29 +643,7 @@ export async function createDepartmentContentController(
         status === ASSIGNMENT_STATUSES.CLOSED ? now : null,
     });
 
-    const populatedContent = await Assignment.findById(content._id)
-      .populate({
-        path: 'course',
-        select: 'title code',
-      })
-      .populate({
-        path: 'department',
-        select: 'name code',
-      })
-      .populate({
-        path: 'batches',
-        select: 'name code',
-      })
-      .populate({
-        path: 'sections',
-        select: 'name code batch',
-      })
-      .populate({
-        path: 'createdBy',
-        select: 'fullName role',
-      })
-      .lean()
-      .exec();
+    const populatedContent = await populateContent(content._id);
 
     return res.status(201).json({
       success: true,
@@ -630,6 +653,279 @@ export async function createDepartmentContentController(
           : 'Assignment created successfully.',
       data: {
         item: normalizeContent(populatedContent),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * Update an existing assignment or practical.
+ *
+ * Route middleware will validate the request and, for multipart
+ * uploads, provide successfully uploaded attachment metadata through
+ * req.uploadedAttachments.
+ *
+ * If `attachments` is supplied, it represents the desired list of
+ * existing URL attachments. Newly uploaded attachments are appended.
+ * If `attachments` is omitted, the current attachments are retained
+ * and newly uploaded files are appended.
+ */
+export async function updateDepartmentContentController(
+  req,
+  res,
+  next,
+) {
+  try {
+    const user = await getActiveUser(req.user?.id);
+    const { assignmentId } = req.params;
+
+    if (!mongoose.isValidObjectId(assignmentId)) {
+      throw createControllerError(
+        400,
+        'INVALID_ASSIGNMENT_ID',
+        'A valid assignment ID is required.',
+      );
+    }
+
+    let departmentId = user.department;
+
+    if (user.role === USER_ROLES.HOD) {
+      const department = await getActiveDepartmentForHod(user);
+      departmentId = department._id;
+    }
+
+    const assignmentFilter = {
+      _id: assignmentId,
+      department: departmentId,
+    };
+
+    if (user.role !== USER_ROLES.HOD) {
+      assignmentFilter.createdBy = user._id;
+    }
+
+    const assignment = await Assignment.findOne(assignmentFilter)
+      .exec();
+
+    if (!assignment) {
+      throw createControllerError(
+        404,
+        'ASSIGNMENT_NOT_FOUND',
+        'The assignment was not found in your permitted department scope.',
+      );
+    }
+
+    const body = req.body || {};
+
+    const nextTitle = body.title === undefined
+      ? assignment.title
+      : String(body.title).trim();
+
+    const nextDescription = body.description === undefined
+      ? assignment.description
+      : String(body.description).trim();
+
+    const nextContentType = body.contentType === undefined
+      ? assignment.contentType
+      : body.contentType;
+
+    const nextStatus = body.status === undefined
+      ? assignment.status
+      : body.status;
+
+    if (nextTitle.length < 2 || nextTitle.length > 200) {
+      throw createControllerError(
+        400,
+        'INVALID_ASSIGNMENT_TITLE',
+        'The title must contain between 2 and 200 characters.',
+      );
+    }
+
+    if (
+      nextDescription.length < 1
+      || nextDescription.length > 10000
+    ) {
+      throw createControllerError(
+        400,
+        'INVALID_ASSIGNMENT_DESCRIPTION',
+        'The description must contain between 1 and 10000 characters.',
+      );
+    }
+
+    if (
+      !Object.values(ASSIGNMENT_CONTENT_TYPES).includes(
+        nextContentType,
+      )
+    ) {
+      throw createControllerError(
+        400,
+        'INVALID_CONTENT_TYPE',
+        'Content type must be ASSIGNMENT or PRACTICAL.',
+      );
+    }
+
+    if (
+      !Object.values(ASSIGNMENT_STATUSES).includes(nextStatus)
+    ) {
+      throw createControllerError(
+        400,
+        'INVALID_CONTENT_STATUS',
+        'The requested content status is invalid.',
+      );
+    }
+
+    const courseId = body.courseId === undefined
+      ? normalizeId(assignment.course)
+      : body.courseId;
+
+    const course = await getAuthorizedCourse(user, courseId);
+
+    const batchIds = body.batchIds === undefined
+      ? assignment.batches.map(normalizeId)
+      : body.batchIds;
+
+    const sectionIds = body.sectionIds === undefined
+      ? assignment.sections.map(normalizeId)
+      : body.sectionIds;
+
+    if (
+      !Array.isArray(batchIds)
+      || !Array.isArray(sectionIds)
+    ) {
+      throw createControllerError(
+        400,
+        'INVALID_ASSIGNMENT_TARGETS',
+        'Batch IDs and section IDs must be arrays.',
+      );
+    }
+
+    const targets = await validateTargets({
+      user,
+      course,
+      batchIds,
+      sectionIds,
+    });
+
+    const dueDate = body.dueDate === undefined
+      ? assignment.dueDate
+      : new Date(body.dueDate);
+
+    if (
+      !(dueDate instanceof Date)
+      || Number.isNaN(dueDate.getTime())
+    ) {
+      throw createControllerError(
+        400,
+        'INVALID_DUE_DATE',
+        'A valid due date is required.',
+      );
+    }
+
+    if (
+      body.dueDate !== undefined
+      && dueDate.getTime() <= Date.now()
+    ) {
+      throw createControllerError(
+        400,
+        'DUE_DATE_MUST_BE_FUTURE',
+        'The due date must be in the future.',
+      );
+    }
+
+    const totalMarks = body.totalMarks === undefined
+      ? assignment.totalMarks
+      : Number(body.totalMarks);
+
+    if (
+      !Number.isFinite(totalMarks)
+      || totalMarks < 1
+      || totalMarks > 10000
+    ) {
+      throw createControllerError(
+        400,
+        'INVALID_TOTAL_MARKS',
+        'Total marks must be between 1 and 10000.',
+      );
+    }
+
+    let requestedAttachments = assignment.attachments.map(
+      (attachment) => ({
+        name: attachment.name,
+        url: attachment.url,
+        mimeType: attachment.mimeType || '',
+        size: attachment.size || 0,
+      }),
+    );
+
+    if (body.attachments !== undefined) {
+      let parsedAttachments = body.attachments;
+
+      if (typeof parsedAttachments === 'string') {
+        try {
+          parsedAttachments = JSON.parse(parsedAttachments);
+        } catch {
+          throw createControllerError(
+            400,
+            'INVALID_ATTACHMENTS_JSON',
+            'The attachments field must contain a valid JSON array.',
+          );
+        }
+      }
+
+      requestedAttachments = normalizeAttachments(parsedAttachments);
+    }
+
+    const uploadedAttachments = Array.isArray(req.uploadedAttachments)
+      ? req.uploadedAttachments
+      : [];
+
+    const combinedAttachments = normalizeAttachments([
+      ...requestedAttachments,
+      ...uploadedAttachments,
+    ]);
+
+    if (combinedAttachments.length > 10) {
+      throw createControllerError(
+        400,
+        'ATTACHMENT_LIMIT_EXCEEDED',
+        'An assignment can contain at most 10 attachments.',
+      );
+    }
+
+    assignment.title = nextTitle;
+    assignment.contentType = nextContentType;
+    assignment.description = nextDescription;
+    assignment.course = course._id;
+    assignment.batches = targets.batchIds;
+    assignment.sections = targets.sectionIds;
+    assignment.dueDate = dueDate;
+    assignment.totalMarks = totalMarks;
+    assignment.attachments = combinedAttachments;
+    assignment.status = nextStatus;
+
+    if (nextStatus === ASSIGNMENT_STATUSES.PUBLISHED) {
+      assignment.publishedAt = assignment.publishedAt || new Date();
+      assignment.closedAt = null;
+    } else if (nextStatus === ASSIGNMENT_STATUSES.CLOSED) {
+      assignment.closedAt = assignment.closedAt || new Date();
+    } else {
+      assignment.publishedAt = null;
+      assignment.closedAt = null;
+    }
+
+    await assignment.save();
+
+    const populatedAssignment = await populateContent(assignment._id);
+
+    return res.status(200).json({
+      success: true,
+      message:
+        nextContentType === ASSIGNMENT_CONTENT_TYPES.PRACTICAL
+          ? 'Practical updated successfully.'
+          : 'Assignment updated successfully.',
+      data: {
+        item: normalizeContent(populatedAssignment),
       },
     });
   } catch (error) {
