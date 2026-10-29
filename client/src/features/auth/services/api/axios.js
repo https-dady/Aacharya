@@ -29,8 +29,8 @@ function notifyAuthenticationExpired() {
 
 function isFormData(body) {
   return (
-    typeof FormData !== 'undefined'
-    && body instanceof FormData
+    typeof FormData !== 'undefined' &&
+    body instanceof FormData
   );
 }
 
@@ -48,9 +48,9 @@ function buildRequestUrl(path, params) {
   if (params && typeof params === 'object') {
     Object.entries(params).forEach(([key, value]) => {
       if (
-        value === undefined
-        || value === null
-        || value === ''
+        value === undefined ||
+        value === null ||
+        value === ''
       ) {
         return;
       }
@@ -79,9 +79,9 @@ async function parseResponse(response) {
 
   if (!response.ok) {
     const message =
-      data?.message
-      || data?.error?.message
-      || `Request failed with status ${response.status}.`;
+      data?.message ||
+      data?.error?.message ||
+      `Request failed with status ${response.status}.`;
 
     const error = new Error(message);
 
@@ -132,14 +132,14 @@ async function performRequest(path, options = {}) {
   headers.set('Accept', 'application/json');
 
   /*
-   * Browser must generate the multipart Content-Type boundary.
-   * Explicitly setting application/json for FormData breaks uploads.
+   * Let the browser generate the multipart boundary for FormData.
+   * Setting application/json for FormData breaks file uploads.
    */
   if (isFormData(options.body)) {
     headers.delete('Content-Type');
   } else if (
-    options.body !== undefined
-    && !headers.has('Content-Type')
+    options.body !== undefined &&
+    !headers.has('Content-Type')
   ) {
     headers.set('Content-Type', 'application/json');
   }
@@ -212,8 +212,8 @@ async function refreshAccessToken() {
         const tokenData = body?.data ?? body;
 
         const token =
-          tokenData?.accessToken
-          ?? tokenData?.token;
+          tokenData?.accessToken ??
+          tokenData?.token;
 
         if (typeof token !== 'string' || !token.trim()) {
           throw new Error(
@@ -258,9 +258,9 @@ async function requestWithRefresh(path, options = {}) {
     const isUnauthorized = error?.response?.status === 401;
 
     if (
-      !isUnauthorized
-      || isAuthEntryPoint(path)
-      || options.skipAuthorization
+      !isUnauthorized ||
+      isAuthEntryPoint(path) ||
+      options.skipAuthorization
     ) {
       throw error;
     }
@@ -311,8 +311,6 @@ function createGetRequestKey(path, options) {
 
 async function get(path, options = {}) {
   // Requests with an external AbortSignal must remain independent.
-  // Sharing them could allow one component's cancellation to cancel
-  // another component's request.
   if (options.signal) {
     return requestWithRefresh(path, {
       ...options,
@@ -321,7 +319,6 @@ async function get(path, options = {}) {
   }
 
   const requestKey = createGetRequestKey(path, options);
-
   const existingRequest = inFlightGetRequests.get(requestKey);
 
   if (existingRequest) {
@@ -364,10 +361,18 @@ async function patch(path, body, options = {}) {
   });
 }
 
+async function del(path, options = {}) {
+  return requestWithRefresh(path, {
+    ...options,
+    method: 'DELETE',
+  });
+}
+
 const api = {
   get,
   post,
   patch,
+  delete: del,
 };
 
 export {

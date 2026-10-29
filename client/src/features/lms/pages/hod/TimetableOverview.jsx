@@ -1,11 +1,13 @@
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SearchInput from '../../components/SearchInput.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
+
+import timetableService from '../../services/timetableService.js';
 
 const WEEKDAYS = [
   'Monday',
@@ -16,17 +18,131 @@ const WEEKDAYS = [
   'Saturday',
 ];
 
+function getErrorMessage(error) {
+  return (
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unable to load the department timetable. Please try again.'
+  );
+}
+
+function getEntryId(entry) {
+  return entry?.id || entry?._id || '';
+}
+
+function sortEntries(entries) {
+  return [...entries].sort((first, second) => {
+    const timeComparison = String(first.startTime || '').localeCompare(
+      String(second.startTime || ''),
+    );
+
+    if (timeComparison !== 0) {
+      return timeComparison;
+    }
+
+    return String(first.courseName || '').localeCompare(
+      String(second.courseName || ''),
+    );
+  });
+}
+
+function MetricCard({ label, value, description }) {
+  return (
+    <div className="rounded-xl border border-[#343640] bg-[#191A21] p-5">
+      <p className="text-sm text-[#9697A2]">{label}</p>
+
+      <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
+        {value}
+      </p>
+
+      <p className="mt-2 text-xs text-[#777986]">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div
+      className="rounded-xl border border-[#343640] bg-[#191A21] p-8"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex items-center gap-3">
+        <div
+          className="h-5 w-5 animate-spin rounded-full border-2 border-[#B9A4FF] border-t-transparent"
+          aria-hidden="true"
+        />
+
+        <p className="text-sm text-[#D0D0D8]">
+          Loading department timetable...
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export default function TimetableOverview() {
+  const navigate = useNavigate();
+
   const [selectedDay, setSelectedDay] = useState('Monday');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Actual timetable records will be connected during backend integration.
-  const timetableEntries = [];
+  const [timetableEntries, setTimetableEntries] = useState([]);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 100,
+    total: 0,
+    totalPages: 0,
+  });
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [refreshVersion, setRefreshVersion] = useState(0);
+
+  const loadTimetable = useCallback(async () => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await timetableService.getTimetable({
+        page: 1,
+        limit: 100,
+        status: 'ACTIVE',
+      });
+
+      if (!result || !Array.isArray(result.entries)) {
+        throw new Error(
+          'The timetable API returned an unexpected response.',
+        );
+      }
+
+      setTimetableEntries(result.entries);
+      setPagination(result.pagination);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTimetable();
+  }, [loadTimetable, refreshVersion]);
+
+  const activeEntries = useMemo(
+    () =>
+      timetableEntries.filter(
+        (entry) => entry.status === 'ACTIVE',
+      ),
+    [timetableEntries],
+  );
 
   const filteredEntries = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
 
-    return timetableEntries.filter((entry) => {
+    const filtered = activeEntries.filter((entry) => {
       const matchesDay = entry.day === selectedDay;
 
       const searchableValues = [
@@ -34,6 +150,7 @@ export default function TimetableOverview() {
         entry.courseCode,
         entry.facultyName,
         entry.sectionName,
+        entry.batchName,
         entry.room,
       ];
 
@@ -45,20 +162,72 @@ export default function TimetableOverview() {
 
       return matchesDay && matchesSearch;
     });
-  }, [selectedDay, searchTerm]);
+
+    return sortEntries(filtered);
+  }, [activeEntries, selectedDay, searchTerm]);
+
+  const metrics = useMemo(() => {
+    const facultyIds = new Set();
+    const sectionIds = new Set();
+
+    activeEntries.forEach((entry) => {
+      if (entry.facultyId) {
+        facultyIds.add(entry.facultyId);
+      } else if (entry.facultyName) {
+        facultyIds.add(entry.facultyName);
+      }
+
+      if (entry.sectionId) {
+        sectionIds.add(entry.sectionId);
+      } else if (entry.sectionName) {
+        sectionIds.add(entry.sectionName);
+      }
+    });
+
+    return {
+      scheduledClasses: activeEntries.length,
+      facultyAllocations: facultyIds.size,
+      sectionCoverage: sectionIds.size,
+    };
+  }, [activeEntries]);
+
+  function handleRefresh() {
+    setRefreshVersion((current) => current + 1);
+  }
+
+  function handleEdit(entry) {
+    navigate('/hod/timetable/edit', {
+      state: {
+        timetableEntry: entry,
+      },
+    });
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1200px]">
       <PageHeader
         eyebrow="ACADEMIC OPERATIONS"
         title="Timetable Management"
-        description="Review the weekly academic schedule and manage timetable planning for department sections."
+        description="Review the department's weekly academic schedule and manage timetable planning."
         breadcrumbs={[
-          { label: 'HOD Dashboard', to: '/hod/dashboard' },
-          { label: 'Timetable Management' },
+          {
+            label: 'HOD Dashboard',
+            to: '/hod/dashboard',
+          },
+          {
+            label: 'Timetable Management',
+          },
         ]}
         actions={
           <div className="flex flex-wrap gap-3">
+            <ActionButton
+              variant="secondary"
+              onClick={handleRefresh}
+              disabled={loading}
+            >
+              {loading ? 'Refreshing...' : 'Refresh'}
+            </ActionButton>
+
             <Link to="/hod/sections">
               <ActionButton variant="secondary">
                 View Sections
@@ -75,42 +244,30 @@ export default function TimetableOverview() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-[#343640] bg-[#191A21] p-5">
-          <p className="text-sm text-[#9697A2]">Scheduled Classes</p>
-          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
-            —
-          </p>
-          <p className="mt-2 text-xs text-[#777986]">
-            Awaiting timetable records
-          </p>
-        </div>
+        <MetricCard
+          label="Scheduled Classes"
+          value={loading ? '—' : metrics.scheduledClasses}
+          description="Active timetable entries loaded from the API"
+        />
 
-        <div className="rounded-xl border border-[#343640] bg-[#191A21] p-5">
-          <p className="text-sm text-[#9697A2]">Faculty Allocations</p>
-          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
-            —
-          </p>
-          <p className="mt-2 text-xs text-[#777986]">
-            Awaiting faculty assignments
-          </p>
-        </div>
+        <MetricCard
+          label="Faculty Allocations"
+          value={loading ? '—' : metrics.facultyAllocations}
+          description="Distinct faculty assigned to scheduled classes"
+        />
 
-        <div className="rounded-xl border border-[#343640] bg-[#191A21] p-5">
-          <p className="text-sm text-[#9697A2]">Section Coverage</p>
-          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
-            —
-          </p>
-          <p className="mt-2 text-xs text-[#777986]">
-            Awaiting section schedule data
-          </p>
-        </div>
+        <MetricCard
+          label="Section Coverage"
+          value={loading ? '—' : metrics.sectionCoverage}
+          description="Distinct sections with active schedules"
+        />
       </div>
 
       <div className="mt-6">
         <SectionCard
           eyebrow="WEEKLY SCHEDULE"
           title="Department Timetable"
-          description="Choose a day to review its scheduled classes."
+          description="Choose a weekday to review its scheduled classes."
         >
           <div
             className="mb-5 flex gap-2 overflow-x-auto pb-2"
@@ -144,11 +301,35 @@ export default function TimetableOverview() {
               label="Search timetable"
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Search course, faculty, section, or room..."
+              placeholder="Search course, faculty, section, batch, or room..."
             />
           </div>
 
-          {filteredEntries.length === 0 ? (
+          {loading ? (
+            <LoadingState />
+          ) : error ? (
+            <div
+              className="rounded-xl border border-red-500/30 bg-red-500/10 p-5"
+              role="alert"
+            >
+              <p className="font-medium text-red-200">
+                Unable to load timetable
+              </p>
+
+              <p className="mt-2 text-sm leading-6 text-red-200/80">
+                {error}
+              </p>
+
+              <div className="mt-4">
+                <ActionButton
+                  variant="secondary"
+                  onClick={handleRefresh}
+                >
+                  Retry
+                </ActionButton>
+              </div>
+            </div>
+          ) : filteredEntries.length === 0 ? (
             <EmptyState
               title={
                 searchTerm.trim()
@@ -157,8 +338,10 @@ export default function TimetableOverview() {
               }
               description={
                 searchTerm.trim()
-                  ? 'Try changing the search term or selecting another day.'
-                  : 'The timetable will appear here after actual schedule records are connected.'
+                  ? 'Try a different search term or choose another weekday.'
+                  : activeEntries.length === 0
+                    ? 'No active timetable entries were returned. Create a schedule to populate this view.'
+                    : `No active classes are scheduled for ${selectedDay}.`
               }
               action={
                 searchTerm.trim() ? (
@@ -178,62 +361,120 @@ export default function TimetableOverview() {
               }
             />
           ) : (
-            <div className="overflow-x-auto rounded-xl border border-[#343640]">
-              <table className="w-full min-w-[760px] text-left text-sm">
-                <thead className="bg-[#202129] text-xs uppercase tracking-wider text-[#9697A2]">
-                  <tr>
-                    <th className="px-4 py-3 font-medium">Time</th>
-                    <th className="px-4 py-3 font-medium">Course</th>
-                    <th className="px-4 py-3 font-medium">Faculty</th>
-                    <th className="px-4 py-3 font-medium">Section</th>
-                    <th className="px-4 py-3 font-medium">Room</th>
-                  </tr>
-                </thead>
+            <>
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-[#9697A2]">
+                  {filteredEntries.length} class
+                  {filteredEntries.length === 1 ? '' : 'es'} on{' '}
+                  {selectedDay}
+                </p>
 
-                <tbody className="divide-y divide-[#343640]">
-                  {filteredEntries.map((entry, index) => (
-                    <tr
-                      key={entry.id || entry._id || index}
-                      className="bg-[#191A21] hover:bg-[#202129]"
-                    >
-                      <td className="px-4 py-4 text-[#D0D0D8]">
-                        {entry.startTime || '—'} – {entry.endTime || '—'}
-                      </td>
+                <p className="text-xs text-[#777986]">
+                  {pagination.total} total records reported by API
+                </p>
+              </div>
 
-                      <td className="px-4 py-4 text-[#EAEAE6]">
-                        {entry.courseName || '—'}
-                      </td>
+              <div className="overflow-x-auto rounded-xl border border-[#343640]">
+                <table className="w-full min-w-[900px] text-left text-sm">
+                  <thead className="bg-[#202129] text-xs uppercase tracking-wider text-[#9697A2]">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">
+                        Time
+                      </th>
 
-                      <td className="px-4 py-4 text-[#D0D0D8]">
-                        {entry.facultyName || '—'}
-                      </td>
+                      <th className="px-4 py-3 font-medium">
+                        Course
+                      </th>
 
-                      <td className="px-4 py-4 text-[#D0D0D8]">
-                        {entry.sectionName || '—'}
-                      </td>
+                      <th className="px-4 py-3 font-medium">
+                        Faculty
+                      </th>
 
-                      <td className="px-4 py-4 text-[#D0D0D8]">
-                        {entry.room || '—'}
-                      </td>
+                      <th className="px-4 py-3 font-medium">
+                        Batch
+                      </th>
+
+                      <th className="px-4 py-3 font-medium">
+                        Section
+                      </th>
+
+                      <th className="px-4 py-3 font-medium">
+                        Room
+                      </th>
+
+                      <th className="px-4 py-3 font-medium">
+                        Actions
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+
+                  <tbody className="divide-y divide-[#343640]">
+                    {filteredEntries.map((entry, index) => (
+                      <tr
+                        key={getEntryId(entry) || index}
+                        className="bg-[#191A21] hover:bg-[#202129]"
+                      >
+                        <td className="whitespace-nowrap px-4 py-4 text-[#D0D0D8]">
+                          {entry.startTime || '—'} –{' '}
+                          {entry.endTime || '—'}
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <p className="font-medium text-[#EAEAE6]">
+                            {entry.courseName || '—'}
+                          </p>
+
+                          {entry.courseCode && (
+                            <p className="mt-1 text-xs text-[#9697A2]">
+                              {entry.courseCode}
+                            </p>
+                          )}
+                        </td>
+
+                        <td className="px-4 py-4 text-[#D0D0D8]">
+                          {entry.facultyName || '—'}
+                        </td>
+
+                        <td className="px-4 py-4 text-[#D0D0D8]">
+                          {entry.batchName || '—'}
+                        </td>
+
+                        <td className="px-4 py-4 text-[#D0D0D8]">
+                          {entry.sectionName || '—'}
+                        </td>
+
+                        <td className="px-4 py-4 text-[#D0D0D8]">
+                          {entry.room || '—'}
+                        </td>
+
+                        <td className="px-4 py-4">
+                          <ActionButton
+                            variant="secondary"
+                            onClick={() => handleEdit(entry)}
+                          >
+                            Edit
+                          </ActionButton>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </SectionCard>
       </div>
 
       <div className="mt-5 rounded-xl border border-[#343640] bg-[#191A21] p-4">
         <p className="text-sm font-medium text-[#D0D0D8]">
-          Timetable data status
+          Timetable data
         </p>
 
         <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-          This page currently provides the timetable interface only.
-          Schedule creation, faculty availability checks, room-conflict
-          detection, and persistence will be connected when the relevant
-          backend contracts are implemented.
+          This page now requests timetable records from the backend.
+          Schedule creation and editing must use the same API contract,
+          and server-side authorization and conflict validation remain
+          authoritative.
         </p>
       </div>
     </div>
