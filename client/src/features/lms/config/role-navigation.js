@@ -90,6 +90,12 @@ export const ROLE_NAVIGATION = Object.freeze({
       group: 'department',
     },
     {
+      id: 'sections',
+      label: 'Section Management',
+      path: '/hod/sections',
+      group: 'department',
+    },
+    {
       id: 'timetable',
       label: 'Timetable',
       path: '/hod/timetable',
