@@ -8,9 +8,7 @@ import {
 
 import { Department } from '../models/department.model.js';
 import { Batch } from '../models/batch.model.js';
-import {
-  Section,
-} from '../models/section.model.js';
+import { Section } from '../models/section.model.js';
 
 function createError(statusCode, code, message) {
   const error = new Error(message);
@@ -179,6 +177,7 @@ export async function createSectionController(req, res, next) {
 
           status: section.status,
           createdAt: section.createdAt,
+          updatedAt: section.updatedAt,
         },
       },
     });
@@ -313,6 +312,115 @@ export async function listSectionsController(req, res, next) {
       },
     });
   } catch (error) {
+    return next(error);
+  }
+}
+
+export async function updateSectionController(req, res, next) {
+  try {
+    const { department } = await getActiveHodDepartment(
+      req.user?.id,
+    );
+
+    const { sectionId } = req.params;
+
+    if (!mongoose.isValidObjectId(sectionId)) {
+      return next(
+        createError(
+          400,
+          'INVALID_SECTION_ID',
+          'A valid section ID is required.',
+        ),
+      );
+    }
+
+    const section = await Section.findOne({
+      _id: sectionId,
+      department: department._id,
+    });
+
+    if (!section) {
+      return next(
+        createError(
+          404,
+          'SECTION_NOT_FOUND',
+          'No section was found in your department.',
+        ),
+      );
+    }
+
+    const name = req.body.name.trim();
+    const normalizedCode = req.body.code.trim().toUpperCase();
+
+    const existingSection = await Section.exists({
+      _id: { $ne: section._id },
+      batch: section.batch,
+      code: normalizedCode,
+    });
+
+    if (existingSection) {
+      return next(
+        createError(
+          409,
+          'SECTION_ALREADY_EXISTS',
+          'A section with this code already exists in this batch.',
+        ),
+      );
+    }
+
+    section.name = name;
+    section.code = normalizedCode;
+
+    await section.save();
+
+    const [batch, updatedSection] = await Promise.all([
+      Batch.findOne({
+        _id: section.batch,
+        department: department._id,
+      }).select('_id name code academicYear'),
+
+      Section.findById(section._id)
+        .select(
+          'name code status batch department createdAt updatedAt',
+        )
+        .lean(),
+    ]);
+
+    if (!batch || !updatedSection) {
+      return next(
+        createError(
+          500,
+          'SECTION_UPDATE_RESPONSE_FAILED',
+          'The section was updated, but its complete response could not be prepared.',
+        ),
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Section updated successfully.',
+
+      data: {
+        section: normalizeSection(
+          updatedSection,
+          batch,
+          department,
+        ),
+      },
+    });
+  } catch (error) {
+    if (error instanceof mongoose.Error.ValidationError) {
+      error.statusCode = 422;
+      error.code = 'VALIDATION_ERROR';
+    }
+
+    if (error?.code === 11000) {
+      error.statusCode = 409;
+      error.code = 'SECTION_ALREADY_EXISTS';
+      error.message =
+        'A section with this code already exists in this batch.';
+    }
+
     return next(error);
   }
 }

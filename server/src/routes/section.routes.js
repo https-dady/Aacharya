@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   createSectionController,
   listSectionsController,
+  updateSectionController,
 } from '../controllers/section.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
@@ -16,9 +17,21 @@ import { SECTION_STATUSES } from '../models/section.model.js';
 
 const sectionRouter = Router();
 
-const batchIdSchema = z
+const objectIdSchema = z
   .string()
-  .regex(/^[a-f\d]{24}$/i, 'A valid batch ID is required.');
+  .regex(/^[a-f\d]{24}$/i, 'A valid MongoDB ID is required.');
+
+const batchIdSchema = objectIdSchema;
+
+const sectionCodeSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(20)
+  .regex(
+    /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/,
+    'Section code can contain letters, numbers, and hyphens.',
+  );
 
 const createSectionSchema = z.object({
   params: z.object({
@@ -27,16 +40,7 @@ const createSectionSchema = z.object({
 
   body: z.object({
     name: z.string().trim().min(1).max(50),
-
-    code: z
-      .string()
-      .trim()
-      .min(1)
-      .max(20)
-      .regex(
-        /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/,
-        'Section code can contain letters, numbers, and hyphens.',
-      ),
+    code: sectionCodeSchema,
   }).strict(),
 
   query: z.object({}),
@@ -75,9 +79,20 @@ const listSectionsSchema = z.object({
   }).strict(),
 });
 
-// Read-only section listing.
-// Authentication, HOD authorization, and validation remain enforced.
-// The global API rate limiter still applies.
+const updateSectionSchema = z.object({
+  params: z.object({
+    sectionId: objectIdSchema,
+  }).strict(),
+
+  body: z.object({
+    name: z.string().trim().min(1).max(50),
+    code: sectionCodeSchema,
+  }).strict(),
+
+  query: z.object({}),
+});
+
+// List sections belonging to a specific batch.
 sectionRouter.get(
   '/batches/:batchId/sections',
   authenticate,
@@ -86,8 +101,7 @@ sectionRouter.get(
   listSectionsController,
 );
 
-// Creating a section changes system state.
-// Keep the stricter rate limiter and audit logging.
+// Create a section inside a batch.
 sectionRouter.post(
   '/batches/:batchId/sections',
   authenticate,
@@ -97,12 +111,34 @@ sectionRouter.post(
   auditEvent({
     action: 'SECTION_CREATE',
     resourceType: 'Section',
+
     getMetadata: (req) => ({
       batchId: req.params.batchId,
       sectionCode: req.body.code.trim().toUpperCase(),
     }),
   }),
   createSectionController,
+);
+
+// Update an existing section without changing its batch or department.
+sectionRouter.patch(
+  '/sections/:sectionId',
+  authenticate,
+  authorize('HOD'),
+  authRateLimiter,
+  validate(updateSectionSchema),
+  auditEvent({
+    action: 'SECTION_UPDATE',
+    resourceType: 'Section',
+
+    getResourceId: (req) => req.params.sectionId,
+
+    getMetadata: (req) => ({
+      sectionId: req.params.sectionId,
+      sectionCode: req.body.code.trim().toUpperCase(),
+    }),
+  }),
+  updateSectionController,
 );
 
 export default sectionRouter;

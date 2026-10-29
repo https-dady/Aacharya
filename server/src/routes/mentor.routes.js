@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import {
   assignMentorController,
+  clearDepartmentMentorAssignmentsController,
   listMentorsController,
 } from '../controllers/mentor.controller.js';
 
@@ -67,9 +68,29 @@ const listMentorsSchema = z.object({
   }).strict(),
 });
 
-// Read-only mentor listing.
-// Authentication, HOD authorization, and validation remain enforced.
-// The global API rate limiter still applies.
+/*
+ * Department-wide unassignment requires an explicit confirmation
+ * value to reduce the risk of accidental bulk changes.
+ */
+const clearDepartmentMentorAssignmentsSchema = z.object({
+  params: z.object({}),
+
+  body: z.object({
+    confirmation: z.literal(
+      'CLEAR_DEPARTMENT_MENTOR_ASSIGNMENTS',
+    ),
+  }).strict(),
+
+  query: z.object({}),
+});
+
+/*
+ * GET /api/v1/provisioning/mentors
+ *
+ * Retrieves mentors belonging to the authenticated HOD's
+ * department. Authorization and department scoping are enforced
+ * by the middleware and controller.
+ */
 mentorRouter.get(
   '/mentors',
   authenticate,
@@ -78,8 +99,12 @@ mentorRouter.get(
   listMentorsController,
 );
 
-// Updating mentor assignments changes system state.
-// Retain the stricter rate limiter and audit logging.
+/*
+ * PATCH /api/v1/provisioning/faculty/:facultyId/mentor
+ *
+ * Grants the Mentor role to an eligible faculty member or updates
+ * an existing mentor's complete batch and section assignments.
+ */
 mentorRouter.patch(
   '/faculty/:facultyId/mentor',
   authenticate,
@@ -98,6 +123,40 @@ mentorRouter.patch(
     }),
   }),
   assignMentorController,
+);
+
+/*
+ * POST /api/v1/provisioning/mentors/assignments/clear-department
+ *
+ * Clears all mentor-to-section assignments within the authenticated
+ * HOD's department.
+ *
+ * Important:
+ * - Faculty accounts are not deleted or disabled.
+ * - Mentor roles are not removed.
+ * - Assignments belonging to other departments are untouched.
+ * - Explicit confirmation is required.
+ * - The controller executes the operation transactionally.
+ */
+mentorRouter.post(
+  '/mentors/assignments/clear-department',
+  authenticate,
+  authorize('HOD'),
+  authRateLimiter,
+  validate(clearDepartmentMentorAssignmentsSchema),
+  auditEvent({
+    action: 'DEPARTMENT_MENTOR_ASSIGNMENTS_CLEAR',
+    resourceType: 'DepartmentMentorAssignments',
+
+    getResourceId: (req) => req.user?.department
+      ? String(req.user.department)
+      : String(req.user?.id ?? 'unknown'),
+
+    getMetadata: () => ({
+      operation: 'CLEAR_DEPARTMENT_MENTOR_ASSIGNMENTS',
+    }),
+  }),
+  clearDepartmentMentorAssignmentsController,
 );
 
 export default mentorRouter;

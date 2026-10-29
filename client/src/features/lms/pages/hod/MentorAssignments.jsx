@@ -15,6 +15,7 @@ import SearchInput from '../../components/SearchInput.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
 const PAGE_SIZE = 20;
+const CLEAR_CONFIRMATION = 'CLEAR_DEPARTMENT_MENTOR_ASSIGNMENTS';
 
 const INITIAL_PAGINATION = {
   page: 1,
@@ -166,6 +167,12 @@ export default function MentorAssignments() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const [showClearPanel, setShowClearPanel] = useState(false);
+  const [clearConfirmation, setClearConfirmation] = useState('');
+  const [isClearing, setIsClearing] = useState(false);
+  const [clearError, setClearError] = useState('');
+  const [clearNotice, setClearNotice] = useState('');
+
   const loadMentors = useCallback(async (signal) => {
     setIsLoading(true);
     setError('');
@@ -179,7 +186,7 @@ export default function MentorAssignments() {
             ? { search: submittedSearch }
             : {}),
         },
-        signal,
+        ...(signal ? { signal } : {}),
       });
 
       if (signal?.aborted) {
@@ -277,10 +284,59 @@ export default function MentorAssignments() {
   }, []);
 
   const handleRetry = useCallback(() => {
-    const controller = new AbortController();
-
-    loadMentors(controller.signal);
+    loadMentors();
   }, [loadMentors]);
+
+  const handleClearDepartmentAssignments = useCallback(
+    async (event) => {
+      event.preventDefault();
+
+      setClearError('');
+      setClearNotice('');
+
+      if (clearConfirmation !== CLEAR_CONFIRMATION) {
+        setClearError(
+          `Type ${CLEAR_CONFIRMATION} exactly to confirm this action.`,
+        );
+        return;
+      }
+
+      setIsClearing(true);
+
+      try {
+        const response = await api.post(
+          '/v1/provisioning/mentors/assignments/clear-department',
+          {
+            confirmation: CLEAR_CONFIRMATION,
+          },
+        );
+
+        const body = response?.data;
+        const data = body?.data ?? body;
+
+        const sectionCount =
+          Number(data?.unassignedSectionCount) || 0;
+
+        const mentorCount =
+          Number(data?.clearedMentorCount) || 0;
+
+        setClearNotice(
+          `Department assignments cleared. ${sectionCount} section(s) unassigned across ${mentorCount} mentor account(s). Mentor roles and accounts were preserved.`,
+        );
+
+        setClearConfirmation('');
+        setShowClearPanel(false);
+        setPage(1);
+
+        await loadMentors();
+      } catch (requestError) {
+        setClearError(getErrorMessage(requestError));
+      } finally {
+        setIsClearing(false);
+      }
+    },
+    [clearConfirmation, loadMentors],
+  );
 
   const pageBatchCount = useMemo(() => {
     const batchIds = new Set();
@@ -335,27 +391,44 @@ export default function MentorAssignments() {
           },
         ]}
         actions={
-          <Link to="/hod/faculty/grant-mentor">
+          <>
             <ActionButton
-              leadingIcon={
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  className="h-4 w-4"
-                >
-                  <path
-                    d="M12 5v14M5 12h14"
-                    strokeLinecap="round"
-                  />
-                </svg>
-              }
+              variant="danger"
+              onClick={() => {
+                setShowClearPanel((current) => !current);
+                setClearError('');
+                setClearNotice('');
+                setClearConfirmation('');
+              }}
+              disabled={isClearing}
             >
-              Grant Mentor Role
+              {showClearPanel
+                ? 'Cancel Clear All'
+                : 'Clear All Assignments'}
             </ActionButton>
-          </Link>
+
+            <Link to="/hod/faculty/grant-mentor">
+              <ActionButton
+                leadingIcon={
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    className="h-4 w-4"
+                  >
+                    <path
+                      d="M12 5v14M5 12h14"
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                }
+              >
+                Grant Mentor Role
+              </ActionButton>
+            </Link>
+          </>
         }
       />
 
@@ -395,6 +468,110 @@ export default function MentorAssignments() {
           </p>
         </div>
       </div>
+
+      {clearNotice && (
+        <div
+          role="status"
+          className="mb-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm leading-6 text-emerald-200"
+        >
+          {clearNotice}
+        </div>
+      )}
+
+      {showClearPanel && (
+        <form
+          onSubmit={handleClearDepartmentAssignments}
+          className="mb-6 rounded-2xl border border-rose-500/40 bg-rose-500/5 p-5 sm:p-6"
+        >
+          <div className="max-w-3xl">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-rose-300">
+              Destructive department-wide action
+            </p>
+
+            <h2 className="mt-2 text-lg font-semibold text-[#EAEAE6]">
+              Clear every mentor assignment?
+            </h2>
+
+            <p className="mt-2 text-sm leading-6 text-[#C7C7D0]">
+              This unassigns all currently assigned sections and
+              clears saved batch/section allocations for mentors in
+              this department. It does not delete, disable, or change
+              the Mentor role of any account. This action cannot be
+              undone automatically.
+            </p>
+
+            <label
+              htmlFor="clear-department-mentor-confirmation"
+              className="mt-4 block text-sm font-semibold text-[#EAEAE6]"
+            >
+              Type{' '}
+              <span className="font-mono text-rose-300">
+                {CLEAR_CONFIRMATION}
+              </span>{' '}
+              to confirm
+            </label>
+
+            <input
+              id="clear-department-mentor-confirmation"
+              name="clearDepartmentMentorConfirmation"
+              type="text"
+              autoComplete="off"
+              value={clearConfirmation}
+              onChange={(event) => {
+                setClearConfirmation(event.target.value);
+              }}
+              disabled={isClearing}
+              className="mt-2 min-h-11 w-full rounded-xl border border-[#454650] bg-[#14161C] px-3.5 py-2.5 font-mono text-sm text-[#EAEAE6] outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-400/20 disabled:opacity-50"
+              aria-describedby="clear-department-mentor-help"
+            />
+
+            <p
+              id="clear-department-mentor-help"
+              className="mt-2 text-xs leading-5 text-[#858590]"
+            >
+              Only the authenticated HOD&apos;s department is
+              affected. The server independently validates this
+              request.
+            </p>
+
+            {clearError && (
+              <p
+                role="alert"
+                className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm leading-5 text-rose-200"
+              >
+                {clearError}
+              </p>
+            )}
+
+            <div className="mt-5 flex flex-wrap justify-end gap-3">
+              <ActionButton
+                variant="secondary"
+                type="button"
+                onClick={() => {
+                  setShowClearPanel(false);
+                  setClearConfirmation('');
+                  setClearError('');
+                }}
+                disabled={isClearing}
+              >
+                Cancel
+              </ActionButton>
+
+              <ActionButton
+                variant="danger"
+                type="submit"
+                loading={isClearing}
+                disabled={
+                  isClearing
+                  || clearConfirmation !== CLEAR_CONFIRMATION
+                }
+              >
+                Confirm Clear All Assignments
+              </ActionButton>
+            </div>
+          </div>
+        </form>
+      )}
 
       <SectionCard
         eyebrow="MENTOR DIRECTORY"
