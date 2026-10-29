@@ -86,11 +86,11 @@ function sameId(left, right) {
 
 function normalizeMentor(mentor, department, batches, sections) {
   const assignedBatchIds = new Set(
-    (mentor.assignedBatches ?? []).map((id) => String(id)),
+    (mentor.assignedBatches ?? []).map(String),
   );
 
   const assignedSectionIds = new Set(
-    (mentor.assignedSections ?? []).map((id) => String(id)),
+    (mentor.assignedSections ?? []).map(String),
   );
 
   return {
@@ -130,6 +130,53 @@ function normalizeMentor(mentor, department, batches, sections) {
   };
 }
 
+function validateAssignmentPayload(batchIds, sectionIds) {
+  if (!Array.isArray(batchIds) || !Array.isArray(sectionIds)) {
+    throw createError(
+      400,
+      'INVALID_ASSIGNMENT_PAYLOAD',
+      'batchIds and sectionIds must both be arrays.',
+    );
+  }
+
+  if (
+    batchIds.some((id) => !mongoose.isValidObjectId(id))
+    || sectionIds.some((id) => !mongoose.isValidObjectId(id))
+  ) {
+    throw createError(
+      400,
+      'INVALID_ASSIGNMENT_ID',
+      'All batch and section IDs must be valid.',
+    );
+  }
+
+  const uniqueBatchIds = uniqueIds(batchIds);
+  const uniqueSectionIds = uniqueIds(sectionIds);
+
+  if (uniqueSectionIds.length > 0 && uniqueBatchIds.length === 0) {
+    throw createError(
+      422,
+      'INVALID_SECTION_ASSIGNMENT',
+      'A section cannot remain assigned without its batch.',
+    );
+  }
+
+  return {
+    uniqueBatchIds,
+    uniqueSectionIds,
+  };
+}
+
+/**
+ * Assign or update a mentor's complete assignment selection.
+ *
+ * The submitted batchIds and sectionIds are authoritative:
+ * - Selected assignments are retained.
+ * - Previously assigned but deselected sections are unassigned.
+ * - Sections owned by another mentor cannot be taken over.
+ * - Empty arrays clear this mentor's batch and section assignments.
+ * - Clearing assignments does not remove the Mentor role.
+ */
 export async function assignMentorController(req, res, next) {
   const session = await mongoose.startSession();
 
@@ -145,35 +192,10 @@ export async function assignMentorController(req, res, next) {
       );
     }
 
-    if (!Array.isArray(batchIds) || !Array.isArray(sectionIds)) {
-      throw createError(
-        400,
-        'INVALID_ASSIGNMENT_PAYLOAD',
-        'batchIds and sectionIds must both be arrays.',
-      );
-    }
-
-    if (
-      batchIds.some((id) => !mongoose.isValidObjectId(id))
-      || sectionIds.some((id) => !mongoose.isValidObjectId(id))
-    ) {
-      throw createError(
-        400,
-        'INVALID_ASSIGNMENT_ID',
-        'All batch and section IDs must be valid.',
-      );
-    }
-
-    const uniqueBatchIds = uniqueIds(batchIds);
-    const uniqueSectionIds = uniqueIds(sectionIds);
-
-    if (uniqueSectionIds.length > 0 && uniqueBatchIds.length === 0) {
-      throw createError(
-        422,
-        'INVALID_SECTION_ASSIGNMENT',
-        'A section cannot be assigned without its batch.',
-      );
-    }
+    const {
+      uniqueBatchIds,
+      uniqueSectionIds,
+    } = validateAssignmentPayload(batchIds, sectionIds);
 
     let responseData;
 
@@ -218,7 +240,7 @@ export async function assignMentorController(req, res, next) {
         throw createError(
           422,
           'INVALID_BATCH_ASSIGNMENT',
-          'Every assigned batch must be active and belong to your department.',
+          'Every selected batch must be active and belong to your department.',
         );
       }
 
@@ -237,7 +259,26 @@ export async function assignMentorController(req, res, next) {
         throw createError(
           422,
           'INVALID_SECTION_ASSIGNMENT',
-          'Every assigned section must be active, belong to your department, and belong to an assigned batch.',
+          'Every selected section must be active, belong to your department, and belong to a selected batch.',
+        );
+      }
+
+      /*
+       * A section may have only one canonical mentor.
+       * Never silently transfer a section from another mentor.
+       */
+      const conflictingSections = sections.filter(
+        (section) => (
+          section.mentor
+          && !sameId(section.mentor, faculty._id)
+        ),
+      );
+
+      if (conflictingSections.length > 0) {
+        throw createError(
+          409,
+          'SECTION_ALREADY_ASSIGNED',
+          'One or more selected sections are already assigned to another mentor. Remove those sections from the selection or unassign them from their current mentor first.',
         );
       }
 
@@ -246,38 +287,86 @@ export async function assignMentorController(req, res, next) {
       );
 
       /*
-       * Remove selected sections from every other mentor's assignment
-       * list, including stale legacy assignments where Section.mentor
-       * is missing. Other section assignments remain untouched.
+       * Find sections currently owned by this mentor but omitted
+       * from the submitted selection.
+       *
+       * Those sections must become unassigned. Sections belonging
+       * to another mentor are never included in this operation.
        */
-      await User.updateMany(
-        {
-          _id: { $ne: faculty._id },
-          department: department._id,
-          role: USER_ROLES.MENTOR,
-          assignedSections: {
-            $in: selectedSectionObjectIds,
-          },
+      const omittedOwnedSections = await Section.find({
+        department: department._id,
+        mentor: faculty._id,
+        _id: {
+          $nin: selectedSectionObjectIds,
         },
-        {
-          $pull: {
-            assignedSections: {
-              $in: selectedSectionObjectIds,
-            },
-          },
-        },
-        { session },
+      })
+        .session(session)
+        .select('_id');
+
+      const omittedSectionIds = omittedOwnedSections.map(
+        (section) => section._id,
       );
 
+      if (omittedSectionIds.length > 0) {
+        const unassignmentResult = await Section.updateMany(
+          {
+            _id: { $in: omittedSectionIds },
+            department: department._id,
+            mentor: faculty._id,
+          },
+          {
+            $set: {
+              mentor: null,
+            },
+          },
+          { session },
+        );
+
+        if (unassignmentResult.modifiedCount !== omittedSectionIds.length) {
+          throw createError(
+            409,
+            'ASSIGNMENT_UPDATE_CONFLICT',
+            'The section assignments changed while this update was being processed. Please refresh and try again.',
+          );
+        }
+
+        /*
+         * Clean stale legacy references to the released sections
+         * from users in this department. Canonical ownership is
+         * still controlled exclusively by Section.mentor.
+         */
+        await User.updateMany(
+          {
+            department: department._id,
+            _id: { $ne: faculty._id },
+            assignedSections: { $in: omittedSectionIds },
+          },
+          {
+            $pull: {
+              assignedSections: {
+                $in: omittedSectionIds,
+              },
+            },
+          },
+          { session },
+        );
+      }
+
       /*
-       * Section.mentor is the canonical owner of each section.
+       * Selected sections are either unassigned or already owned
+       * by this mentor. The update remains scoped to this department.
        */
-      if (sections.length > 0) {
-        await Section.updateMany(
+      if (selectedSectionObjectIds.length > 0) {
+        const assignmentResult = await Section.updateMany(
           {
             _id: { $in: selectedSectionObjectIds },
             department: department._id,
             status: 'ACTIVE',
+            $or: [
+              { mentor: null },
+              { mentor: { $exists: false } },
+              { mentor: faculty._id },
+            ],
           },
           {
             $set: {
@@ -286,74 +375,67 @@ export async function assignMentorController(req, res, next) {
           },
           { session },
         );
+
+        if (assignmentResult.matchedCount !== selectedSectionObjectIds.length) {
+          throw createError(
+            409,
+            'ASSIGNMENT_UPDATE_CONFLICT',
+            'One or more sections changed ownership while this update was being processed. Please refresh and try again.',
+          );
+        }
       }
 
       /*
-       * Preserve the target mentor's existing assignments and add the
-       * selected sections and batches without duplicating their IDs.
+       * Synchronize the User document with the submitted selection.
+       * This deliberately replaces the arrays rather than appending.
        */
       faculty.role = USER_ROLES.MENTOR;
-
-      faculty.assignedBatches = [
-        ...new Map(
-          [
-            ...(faculty.assignedBatches ?? []),
-            ...batches.map((batch) => batch._id),
-          ].map((id) => [String(id), id]),
-        ).values(),
-      ];
-
-      faculty.assignedSections = [
-        ...new Map(
-          [
-            ...(faculty.assignedSections ?? []),
-            ...selectedSectionObjectIds,
-          ].map((id) => [String(id), id]),
-        ).values(),
-      ];
+      faculty.assignedBatches = batches.map((batch) => batch._id);
+      faculty.assignedSections = selectedSectionObjectIds;
 
       await faculty.save({ session });
 
       /*
-       * Read back the target mentor's current assignments for the
-       * response.
+       * Read the persisted state for the response.
        */
-      const assignedBatchIds = faculty.assignedBatches ?? [];
-      const assignedSectionIds = faculty.assignedSections ?? [];
-
-      const [allAssignedBatches, allAssignedSections] = await Promise.all([
-        assignedBatchIds.length
+      const [savedBatches, ownedSections] = await Promise.all([
+        faculty.assignedBatches.length
           ? Batch.find({
-              _id: { $in: assignedBatchIds },
+              _id: { $in: faculty.assignedBatches },
               department: department._id,
             })
               .session(session)
               .select('_id name code academicYear')
           : [],
 
-        assignedSectionIds.length
-          ? Section.find({
-              _id: { $in: assignedSectionIds },
-              department: department._id,
-            })
-              .session(session)
-              .select('_id name code batch')
-          : [],
+        Section.find({
+          mentor: faculty._id,
+          department: department._id,
+        })
+          .session(session)
+          .select('_id name code batch mentor'),
       ]);
+
+      const responseMentor = {
+        ...faculty.toObject(),
+        assignedSections: ownedSections.map(
+          (section) => section._id,
+        ),
+      };
 
       responseData = {
         mentor: normalizeMentor(
-          faculty.toObject(),
+          responseMentor,
           department,
-          allAssignedBatches,
-          allAssignedSections,
+          savedBatches,
+          ownedSections,
         ),
       };
     });
 
     return res.status(200).json({
       success: true,
-      message: 'Mentor role and assignments updated successfully.',
+      message: 'Mentor assignments updated successfully.',
       data: responseData,
     });
   } catch (error) {
@@ -363,16 +445,171 @@ export async function assignMentorController(req, res, next) {
   }
 }
 
+/**
+ * Clear all mentor assignments within the active HOD's department.
+ *
+ * This operation:
+ * - Unassigns mentors from every section in the department.
+ * - Clears assignedBatches and assignedSections on mentor accounts.
+ * - Cleans stale assignedSections references in department users.
+ * - Does NOT delete or disable faculty accounts.
+ * - Does NOT remove the Mentor role.
+ *
+ * A separate, explicit role-removal action should be used when
+ * a faculty member must stop being a mentor entirely.
+ */
+export async function clearDepartmentMentorAssignmentsController(
+  req,
+  res,
+  next,
+) {
+  const session = await mongoose.startSession();
+
+  try {
+    let responseData;
+
+    await session.withTransaction(async () => {
+      const { department } = await getActiveHodDepartment(
+        req.user?.id,
+        session,
+      );
+
+      const departmentMentors = await User.find({
+        department: department._id,
+        role: USER_ROLES.MENTOR,
+      })
+        .session(session)
+        .select('_id');
+
+      const mentorIds = departmentMentors.map(
+        (mentor) => mentor._id,
+      );
+
+      /*
+       * Clear all canonical mentor relationships within the
+       * department, including any stale relationship pointing
+       * to a user whose role has changed.
+       */
+      const ownedSections = await Section.find({
+        department: department._id,
+        mentor: { $ne: null },
+      })
+        .session(session)
+        .select('_id');
+
+      const sectionIds = ownedSections.map(
+        (section) => section._id,
+      );
+
+      let unassignedSectionCount = 0;
+
+      if (sectionIds.length > 0) {
+        const result = await Section.updateMany(
+          {
+            _id: { $in: sectionIds },
+            department: department._id,
+            mentor: { $ne: null },
+          },
+          {
+            $set: {
+              mentor: null,
+            },
+          },
+          { session },
+        );
+
+        unassignedSectionCount = result.modifiedCount;
+      }
+
+      /*
+       * Clear legacy section references for all department users
+       * so the canonical and denormalized assignment data agree.
+       */
+      if (sectionIds.length > 0) {
+        await User.updateMany(
+          {
+            department: department._id,
+            assignedSections: { $in: sectionIds },
+          },
+          {
+            $pull: {
+              assignedSections: {
+                $in: sectionIds,
+              },
+            },
+          },
+          { session },
+        );
+      }
+
+      /*
+       * Keep the Mentor role, but remove all batch and section
+       * assignments from every mentor in this department.
+       */
+      let clearedMentorCount = 0;
+
+      if (mentorIds.length > 0) {
+        const result = await User.updateMany(
+          {
+            _id: { $in: mentorIds },
+            department: department._id,
+            role: USER_ROLES.MENTOR,
+          },
+          {
+            $set: {
+              assignedBatches: [],
+              assignedSections: [],
+            },
+          },
+          { session },
+        );
+
+        clearedMentorCount = result.modifiedCount;
+      }
+
+      responseData = {
+        department: {
+          id: String(department._id),
+          name: department.name,
+          code: department.code,
+        },
+        unassignedSectionCount,
+        clearedMentorCount,
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'All mentor assignments in the department have been cleared. Mentor roles and faculty accounts remain unchanged.',
+      data: responseData,
+    });
+  } catch (error) {
+    return next(error);
+  } finally {
+    await session.endSession();
+  }
+}
+
+/**
+ * Retrieve mentors for the active HOD's department.
+ */
 export async function listMentorsController(req, res, next) {
   try {
     const { department } = await getActiveHodDepartment(
       req.user?.id,
     );
 
-    const page = Math.max(1, Number.parseInt(req.query.page ?? '1', 10) || 1);
+    const page = Math.max(
+      1,
+      Number.parseInt(req.query.page ?? '1', 10) || 1,
+    );
+
     const limit = Math.min(
       100,
-      Math.max(1, Number.parseInt(req.query.limit ?? '20', 10) || 20),
+      Math.max(
+        1,
+        Number.parseInt(req.query.limit ?? '20', 10) || 20,
+      ),
     );
 
     const search = String(req.query.search ?? '').trim();
@@ -417,58 +654,52 @@ export async function listMentorsController(req, res, next) {
       User.countDocuments(filter),
     ]);
 
-    const batchIds = uniqueIds(
-      mentors.flatMap((mentor) =>
-        (mentor.assignedBatches ?? []).map((id) => String(id)),
-      ),
-    );
-
-    /*
-     * Resolve section assignments from the canonical Section.mentor
-     * relationship instead of relying only on legacy user arrays.
-     */
     const mentorIds = mentors.map((mentor) => mentor._id);
 
-    const [batches, ownedSections] = await Promise.all([
-      batchIds.length
-        ? Batch.find({
-            _id: { $in: batchIds },
-            department: department._id,
-          }).select('_id name code academicYear')
-        : [],
-
+    const [canonicalSections, mentorBatches] = await Promise.all([
       mentorIds.length
         ? Section.find({
             mentor: { $in: mentorIds },
             department: department._id,
           }).select('_id name code batch mentor')
         : [],
+
+      mentors.length
+        ? Batch.find({
+            _id: {
+              $in: uniqueIds(
+                mentors.flatMap((mentor) =>
+                  (mentor.assignedBatches ?? []).map(String),
+                ),
+              ),
+            },
+            department: department._id,
+          }).select('_id name code academicYear')
+        : [],
     ]);
 
+    /*
+     * Use Section.mentor as the source of truth for section
+     * ownership, even if a legacy User array is stale.
+     */
     const mentorsWithCanonicalSections = mentors.map((mentor) => ({
       ...mentor,
-      assignedSections: ownedSections
+      assignedSections: canonicalSections
         .filter((section) => sameId(section.mentor, mentor._id))
         .map((section) => section._id),
     }));
 
-    const allOwnedBatchIds = uniqueIds([
-      ...batchIds,
-      ...ownedSections.map((section) => String(section.batch)),
+    const allBatchIds = uniqueIds([
+      ...mentorBatches.map((batch) => String(batch._id)),
+      ...canonicalSections.map((section) => String(section.batch)),
     ]);
 
-    const missingBatches = allOwnedBatchIds.length
+    const allBatches = allBatchIds.length
       ? await Batch.find({
-          _id: { $in: allOwnedBatchIds },
+          _id: { $in: allBatchIds },
           department: department._id,
         }).select('_id name code academicYear')
       : [];
-
-    const batchMap = new Map(
-      missingBatches.map((batch) => [String(batch._id), batch]),
-    );
-
-    const batchesForResponse = [...batchMap.values()];
 
     return res.status(200).json({
       success: true,
@@ -478,8 +709,8 @@ export async function listMentorsController(req, res, next) {
           normalizeMentor(
             mentor,
             department,
-            batchesForResponse,
-            ownedSections,
+            allBatches,
+            canonicalSections,
           ),
         ),
 
