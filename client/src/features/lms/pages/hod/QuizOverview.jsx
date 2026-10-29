@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 
 import ActionButton from "../../components/ActionButton.jsx";
@@ -7,8 +7,7 @@ import PageHeader from "../../components/PageHeader.jsx";
 import SearchInput from "../../components/SearchInput.jsx";
 import SectionCard from "../../components/SectionCard.jsx";
 
-// Real quiz records will be connected during backend integration.
-const quizzes = [];
+import quizManagementService from "../../services/quizManagementService.js";
 
 function SummaryCard({ label, value, description }) {
   return (
@@ -26,8 +25,136 @@ function SummaryCard({ label, value, description }) {
   );
 }
 
+function getCourseName(quiz) {
+  if (quiz.course && typeof quiz.course === "object") {
+    return quiz.course.title || quiz.course.name || "—";
+  }
+
+  return quiz.courseName || quiz.course || "—";
+}
+
+function getCourseCode(quiz) {
+  if (quiz.course && typeof quiz.course === "object") {
+    return quiz.course.code || quiz.course.courseCode || "";
+  }
+
+  return quiz.courseCode || "";
+}
+
+function getFacultyName(quiz) {
+  if (quiz.faculty && typeof quiz.faculty === "object") {
+    return (
+      quiz.faculty.name ||
+      quiz.faculty.fullName ||
+      quiz.faculty.email ||
+      "—"
+    );
+  }
+
+  return quiz.facultyName || quiz.faculty || "—";
+}
+
+function getSchedule(quiz) {
+  if (!quiz.startAt) {
+    return "Not scheduled";
+  }
+
+  const start = new Date(quiz.startAt);
+
+  if (Number.isNaN(start.getTime())) {
+    return "Invalid schedule";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(start);
+}
+
+function getStatusLabel(status) {
+  const normalized = String(status || "DRAFT").toUpperCase();
+
+  if (normalized === "PUBLISHED") return "Published";
+  if (normalized === "CLOSED") return "Closed";
+
+  return "Draft";
+}
+
+function getStatusStyles(status) {
+  switch (String(status || "DRAFT").toUpperCase()) {
+    case "PUBLISHED":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+
+    case "CLOSED":
+      return "border-[#CDB5F7]/30 bg-[#CDB5F7]/10 text-[#D8CBFF]";
+
+    default:
+      return "border-amber-500/30 bg-amber-500/10 text-amber-200";
+  }
+}
+
+function getScheduleCategory(quiz, now) {
+  if (String(quiz.status).toUpperCase() === "CLOSED") {
+    return "completed";
+  }
+
+  const endAt = quiz.endAt ? new Date(quiz.endAt) : null;
+
+  if (endAt && !Number.isNaN(endAt.getTime()) && endAt < now) {
+    return "completed";
+  }
+
+  const startAt = quiz.startAt ? new Date(quiz.startAt) : null;
+
+  if (
+    startAt &&
+    !Number.isNaN(startAt.getTime()) &&
+    startAt > now
+  ) {
+    return "upcoming";
+  }
+
+  return "other";
+}
+
+function getErrorMessage(error) {
+  return (
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    "Unable to load quizzes. Please try again."
+  );
+}
+
 export default function QuizOverview() {
   const [search, setSearch] = useState("");
+  const [quizzes, setQuizzes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
+
+  const loadQuizzes = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const result = await quizManagementService.listQuizzes({
+        page: 1,
+        limit: 100,
+      });
+
+      setQuizzes(result.items);
+    } catch (requestError) {
+      setQuizzes([]);
+      setError(getErrorMessage(requestError));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadQuizzes();
+  }, [loadQuizzes, refreshKey]);
 
   const filteredQuizzes = useMemo(() => {
     const query = search.trim().toLowerCase();
@@ -36,22 +163,68 @@ export default function QuizOverview() {
       return quizzes;
     }
 
-    return quizzes.filter((quiz) =>
-      [
+    return quizzes.filter((quiz) => {
+      const courseName = getCourseName(quiz);
+      const courseCode = getCourseCode(quiz);
+      const facultyName = getFacultyName(quiz);
+
+      const batchNames = Array.isArray(quiz.batches)
+        ? quiz.batches
+            .map((batch) =>
+              typeof batch === "object"
+                ? batch.name || batch.code || ""
+                : batch,
+            )
+            .join(" ")
+        : "";
+
+      const sectionNames = Array.isArray(quiz.sections)
+        ? quiz.sections
+            .map((section) =>
+              typeof section === "object"
+                ? section.name || section.code || ""
+                : section,
+            )
+            .join(" ")
+        : "";
+
+      return [
         quiz.title,
-        quiz.course,
-        quiz.courseName,
-        quiz.courseCode,
-        quiz.faculty,
-        quiz.facultyName,
-        quiz.batch,
-        quiz.section,
+        quiz.description,
+        courseName,
+        courseCode,
+        facultyName,
+        batchNames,
+        sectionNames,
         quiz.status,
       ]
         .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query)),
-    );
-  }, [search]);
+        .some((value) =>
+          String(value).toLowerCase().includes(query),
+        );
+    });
+  }, [quizzes, search]);
+
+  const summary = useMemo(() => {
+    const now = new Date();
+
+    return {
+      total: quizzes.length,
+
+      upcoming: quizzes.filter(
+        (quiz) => getScheduleCategory(quiz, now) === "upcoming",
+      ).length,
+
+      published: quizzes.filter(
+        (quiz) =>
+          String(quiz.status).toUpperCase() === "PUBLISHED",
+      ).length,
+
+      completed: quizzes.filter(
+        (quiz) => getScheduleCategory(quiz, now) === "completed",
+      ).length,
+    };
+  }, [quizzes]);
 
   return (
     <div className="mx-auto w-full max-w-[1400px] space-y-6">
@@ -64,36 +237,38 @@ export default function QuizOverview() {
           { label: "Quizzes" },
         ]}
         actions={
-          <Link to="/hod/courses">
-            <ActionButton variant="secondary">
-              View Courses
-            </ActionButton>
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link to="/hod/courses">
+              <ActionButton variant="secondary">
+                View Courses
+              </ActionButton>
+            </Link>
+          </div>
         }
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
           label="Total Quizzes"
-          value="—"
+          value={loading ? "—" : summary.total}
           description="Quizzes across academic courses"
         />
 
         <SummaryCard
           label="Upcoming"
-          value="—"
+          value={loading ? "—" : summary.upcoming}
           description="Quizzes scheduled for a future date"
         />
 
         <SummaryCard
           label="Published"
-          value="—"
-          description="Quizzes available to students"
+          value={loading ? "—" : summary.published}
+          description="Quizzes marked as published"
         />
 
         <SummaryCard
           label="Completed"
-          value="—"
+          value={loading ? "—" : summary.completed}
           description="Quizzes whose scheduled window has ended"
         />
       </div>
@@ -101,19 +276,60 @@ export default function QuizOverview() {
       <SectionCard
         eyebrow="ASSESSMENT MANAGEMENT"
         title="Quiz Catalogue"
-        description="Search and review quiz information when records become available."
+        description="Search and review quiz information returned by the backend."
       >
-        <div className="mb-5 max-w-xl">
-          <SearchInput
-            name="quizSearch"
-            label="Search quizzes"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search by title, course, faculty, batch..."
-          />
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end">
+          <div className="w-full max-w-xl">
+            <SearchInput
+              name="quizSearch"
+              label="Search quizzes"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search by title, course, faculty, batch..."
+            />
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setRefreshKey((current) => current + 1)}
+            disabled={loading}
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] bg-[#26272B] px-4 py-2 text-sm font-medium text-[#EAEAE6] transition hover:bg-[#343640] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? "Loading..." : "Refresh"}
+          </button>
         </div>
 
-        {filteredQuizzes.length === 0 ? (
+        {error ? (
+          <div
+            role="alert"
+            className="rounded-xl border border-red-500/30 bg-red-500/10 p-5"
+          >
+            <p className="text-sm font-medium text-red-300">
+              Could not load quizzes
+            </p>
+
+            <p className="mt-2 text-sm leading-6 text-red-200/80">
+              {error}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setRefreshKey((current) => current + 1)}
+              className="mt-4 rounded-lg border border-red-400/30 px-4 py-2 text-sm font-medium text-red-200 transition hover:bg-red-500/10"
+            >
+              Try again
+            </button>
+          </div>
+        ) : loading ? (
+          <div
+            role="status"
+            className="rounded-xl border border-[#343640] bg-[#191A21] px-5 py-12 text-center"
+          >
+            <p className="text-sm text-[#C7C7D0]">
+              Loading quiz records...
+            </p>
+          </div>
+        ) : filteredQuizzes.length === 0 ? (
           <EmptyState
             title={
               search
@@ -123,7 +339,7 @@ export default function QuizOverview() {
             description={
               search
                 ? "Try another search term."
-                : "Quiz records will appear here once assessment data is connected."
+                : "No quizzes are currently available for your account."
             }
           />
         ) : (
@@ -165,29 +381,31 @@ export default function QuizOverview() {
                   >
                     <td className="px-4 py-4">
                       <p className="font-medium text-[#EAEAE6]">
-                        {quiz.title || quiz.name || "Untitled quiz"}
+                        {quiz.title || "Untitled quiz"}
                       </p>
 
                       <p className="mt-1 text-xs text-[#9697A2]">
-                        {quiz.courseCode || "Course code unavailable"}
+                        {getCourseCode(quiz) || "Course code unavailable"}
                       </p>
                     </td>
 
                     <td className="px-4 py-4 text-sm text-[#C7C7D0]">
-                      {quiz.courseName || quiz.course || "—"}
+                      {getCourseName(quiz)}
                     </td>
 
                     <td className="px-4 py-4 text-sm text-[#C7C7D0]">
-                      {quiz.facultyName || quiz.faculty || "—"}
+                      {getFacultyName(quiz)}
                     </td>
 
                     <td className="px-4 py-4 text-sm text-[#C7C7D0]">
-                      {quiz.scheduledAt || "Not scheduled"}
+                      {getSchedule(quiz)}
                     </td>
 
                     <td className="px-4 py-4">
-                      <span className="rounded-full border border-[#454650] bg-[#26272B] px-3 py-1 text-xs text-[#D0D0D8]">
-                        {quiz.status || "Unspecified"}
+                      <span
+                        className={`rounded-full border px-3 py-1 text-xs ${getStatusStyles(quiz.status)}`}
+                      >
+                        {getStatusLabel(quiz.status)}
                       </span>
                     </td>
 
@@ -207,17 +425,6 @@ export default function QuizOverview() {
           </div>
         )}
       </SectionCard>
-
-      <div className="rounded-xl border border-[#454650] bg-[#191A21] p-4">
-        <p className="text-sm font-medium text-[#E5DF98]">
-          Backend integration pending
-        </p>
-
-        <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-          Quiz records and summary counts are not connected to a backend yet.
-          This page does not create, publish, or modify quizzes.
-        </p>
-      </div>
     </div>
   );
 }

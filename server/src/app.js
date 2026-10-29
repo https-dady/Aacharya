@@ -25,6 +25,7 @@ import courseRoutes from './routes/course.routes.js';
 import assignmentRoutes from './routes/assignment.routes.js';
 import studentAssignmentRoutes from './routes/student-assignment.routes.js';
 
+import quizManagementRoutes from './routes/quiz-management.routes.js';
 import studentQuizRoutes from './routes/student-quiz.routes.js';
 import studentQuizAttemptRoutes from './routes/student-quiz-attempt.routes.js';
 import studentQuizResultRoutes from './routes/student-quiz-result.routes.js';
@@ -151,6 +152,13 @@ app.use('/api/v1/assignments', assignmentRoutes);
 
 // Student-specific assignment listing.
 app.use('/api/v1/assignments', studentAssignmentRoutes);
+
+// Quiz management for HOD and Faculty.
+//
+// IMPORTANT:
+// Mount this before the student quiz routers so that /manage
+// is handled by the management router first.
+app.use('/api/v1/quizzes', quizManagementRoutes);
 
 // Student quizzes.
 app.use('/api/v1/quizzes', studentQuizRoutes);

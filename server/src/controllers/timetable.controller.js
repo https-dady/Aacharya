@@ -225,11 +225,16 @@ async function validateScheduleReferences({
       .exec(),
 
     User.findOne({
-      _id: facultyId,
-      department: departmentId,
-      role: USER_ROLES.FACULTY,
-      status: ACCOUNT_STATUSES.ACTIVE,
-    })
+  _id: facultyId,
+  department: departmentId,
+  role: {
+    $in: [
+      USER_ROLES.FACULTY,
+      USER_ROLES.MENTOR,
+    ],
+  },
+  status: ACCOUNT_STATUSES.ACTIVE,
+})
       .select('_id fullName email department role status')
       .lean()
       .exec(),

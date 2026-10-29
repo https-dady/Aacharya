@@ -22,7 +22,7 @@ function getErrorMessage(error) {
   return (
     error?.response?.data?.message ||
     error?.message ||
-    'Unable to load the department timetable. Please try again.'
+    'Unable to complete the timetable operation. Please try again.'
   );
 }
 
@@ -83,6 +83,87 @@ function LoadingState() {
   );
 }
 
+function DeleteConfirmation({
+  entry,
+  loading,
+  error,
+  onCancel,
+  onConfirm,
+}) {
+  if (!entry) {
+    return null;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !loading) {
+          onCancel();
+        }
+      }}
+    >
+      <section
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-timetable-title"
+        aria-describedby="delete-timetable-description"
+        className="w-full max-w-md rounded-2xl border border-[#454650] bg-[#191A21] p-6 shadow-2xl"
+      >
+        <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-xl border border-red-400/30 bg-red-400/10 text-xl text-red-300">
+          !
+        </div>
+
+        <h2
+          id="delete-timetable-title"
+          className="text-lg font-semibold text-[#EAEAE6]"
+        >
+          Delete timetable entry?
+        </h2>
+
+        <p
+          id="delete-timetable-description"
+          className="mt-3 text-sm leading-6 text-[#A5A6B0]"
+        >
+          You are about to delete the schedule for{' '}
+          <span className="font-medium text-[#EAEAE6]">
+            {entry.courseName || 'this course'}
+          </span>{' '}
+          on {entry.day} from {entry.startTime} to {entry.endTime}.
+          This action may not be reversible.
+        </p>
+
+        {error && (
+          <div
+            className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-200"
+            role="alert"
+          >
+            {error}
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <ActionButton
+            variant="secondary"
+            onClick={onCancel}
+            disabled={loading}
+          >
+            Cancel
+          </ActionButton>
+
+          <ActionButton
+            onClick={onConfirm}
+            disabled={loading}
+          >
+            {loading ? 'Deleting...' : 'Confirm Delete'}
+          </ActionButton>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function TimetableOverview() {
   const navigate = useNavigate();
 
@@ -90,6 +171,7 @@ export default function TimetableOverview() {
   const [searchTerm, setSearchTerm] = useState('');
 
   const [timetableEntries, setTimetableEntries] = useState([]);
+
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 100,
@@ -100,6 +182,11 @@ export default function TimetableOverview() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [refreshVersion, setRefreshVersion] = useState(0);
+
+  const [entryToDelete, setEntryToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const loadTimetable = useCallback(async () => {
     setLoading(true);
@@ -192,6 +279,7 @@ export default function TimetableOverview() {
   }, [activeEntries]);
 
   function handleRefresh() {
+    setSuccessMessage('');
     setRefreshVersion((current) => current + 1);
   }
 
@@ -201,6 +289,52 @@ export default function TimetableOverview() {
         timetableEntry: entry,
       },
     });
+  }
+
+  function handleDeleteClick(entry) {
+    setDeleteError('');
+    setSuccessMessage('');
+    setEntryToDelete(entry);
+  }
+
+  function handleDeleteCancel() {
+    if (deleting) {
+      return;
+    }
+
+    setEntryToDelete(null);
+    setDeleteError('');
+  }
+
+  async function handleDeleteConfirm() {
+    if (!entryToDelete || deleting) {
+      return;
+    }
+
+    const timetableId = getEntryId(entryToDelete);
+
+    if (!timetableId) {
+      setDeleteError(
+        'This timetable entry has no valid ID. Refresh the page and try again.',
+      );
+      return;
+    }
+
+    setDeleting(true);
+    setDeleteError('');
+
+    try {
+      await timetableService.deleteTimetable(timetableId);
+
+      setEntryToDelete(null);
+      setSuccessMessage('Timetable entry deleted successfully.');
+
+      setRefreshVersion((current) => current + 1);
+    } catch (requestError) {
+      setDeleteError(getErrorMessage(requestError));
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
@@ -269,6 +403,16 @@ export default function TimetableOverview() {
           title="Department Timetable"
           description="Choose a weekday to review its scheduled classes."
         >
+          {successMessage && (
+            <div
+              className="mb-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200"
+              role="status"
+              aria-live="polite"
+            >
+              {successMessage}
+            </div>
+          )}
+
           <div
             className="mb-5 flex gap-2 overflow-x-auto pb-2"
             role="group"
@@ -375,7 +519,7 @@ export default function TimetableOverview() {
               </div>
 
               <div className="overflow-x-auto rounded-xl border border-[#343640]">
-                <table className="w-full min-w-[900px] text-left text-sm">
+                <table className="w-full min-w-[1000px] text-left text-sm">
                   <thead className="bg-[#202129] text-xs uppercase tracking-wider text-[#9697A2]">
                     <tr>
                       <th className="px-4 py-3 font-medium">
@@ -448,12 +592,23 @@ export default function TimetableOverview() {
                         </td>
 
                         <td className="px-4 py-4">
-                          <ActionButton
-                            variant="secondary"
-                            onClick={() => handleEdit(entry)}
-                          >
-                            Edit
-                          </ActionButton>
+                          <div className="flex items-center gap-2">
+                            <ActionButton
+                              variant="secondary"
+                              onClick={() => handleEdit(entry)}
+                            >
+                              Edit
+                            </ActionButton>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteClick(entry)}
+                              className="inline-flex items-center justify-center rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm font-medium text-red-200 transition-colors hover:border-red-400 hover:bg-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-400/60"
+                              aria-label={`Delete timetable entry for ${entry.courseName || 'course'} on ${entry.day}`}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -471,12 +626,20 @@ export default function TimetableOverview() {
         </p>
 
         <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-          This page now requests timetable records from the backend.
-          Schedule creation and editing must use the same API contract,
-          and server-side authorization and conflict validation remain
+          Timetable entries are loaded from the backend. Schedule
+          creation, editing and deletion use the timetable API, while
+          server-side authorization and conflict validation remain
           authoritative.
         </p>
       </div>
+
+      <DeleteConfirmation
+        entry={entryToDelete}
+        loading={deleting}
+        error={deleteError}
+        onCancel={handleDeleteCancel}
+        onConfirm={handleDeleteConfirm}
+      />
     </div>
   );
 }
