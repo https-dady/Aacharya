@@ -119,7 +119,7 @@ const FACULTY_COLUMNS = [
       );
     },
   },
-  {
+    {
     key: 'actions',
     header: 'Actions',
     render: (_value, faculty) => (
@@ -143,6 +143,25 @@ const FACULTY_COLUMNS = [
             Edit
           </ActionButton>
         </Link>
+
+        {faculty.status === 'ACTIVE'
+          && ['FACULTY', 'MENTOR'].includes(faculty.role) && (
+            <Link
+              to="/hod/faculty/grant-mentor"
+              state={{ faculty }}
+              aria-label={
+                faculty.role === 'MENTOR'
+                  ? `Manage mentor assignments for ${faculty.fullName || 'faculty member'}`
+                  : `Grant mentor role to ${faculty.fullName || 'faculty member'}`
+              }
+            >
+              <ActionButton variant="outline" size="sm">
+                {faculty.role === 'MENTOR'
+                  ? 'Manage Assignments'
+                  : 'Grant Mentor'}
+              </ActionButton>
+            </Link>
+          )}
       </div>
     ),
   },

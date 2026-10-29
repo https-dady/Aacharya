@@ -1,9 +1,6 @@
 import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 
 const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
-
-// The global limiter should accommodate normal LMS navigation and
-// bursts of requests from users sharing a campus or office IP.
 const DEFAULT_MAX_REQUESTS = 3000;
 
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
@@ -13,6 +10,7 @@ function createRateLimiter({
   windowMs,
   limit,
   keyGenerator,
+  scope,
 }) {
   return rateLimit({
     windowMs,
@@ -21,16 +19,23 @@ function createRateLimiter({
     legacyHeaders: false,
     keyGenerator,
 
-    message: {
-      success: false,
-      error: {
-        code: 'TOO_MANY_REQUESTS',
-        message: 'Too many requests. Please try again later.',
-      },
-    },
+    handler: (req, res) => {
+      res.setHeader('X-RateLimit-Scope', scope);
 
-    handler: (_req, res) => {
-      res.status(429).json({
+      req.log?.warn(
+        {
+          event: 'rate_limit_exceeded',
+          scope,
+          method: req.method,
+          path: req.originalUrl,
+          ip: req.ip,
+          windowMs,
+          limit,
+        },
+        'Request rejected by rate limiter',
+      );
+
+      return res.status(429).json({
         success: false,
         error: {
           code: 'TOO_MANY_REQUESTS',
@@ -48,19 +53,17 @@ export function createApiRateLimiter({
   return createRateLimiter({
     windowMs,
     limit,
+    scope: 'global_api',
     keyGenerator: (req) => ipKeyGenerator(req.ip),
   });
 }
 
-// General API traffic: shared IP-based protection with a higher ceiling.
-export const apiRateLimiter = createApiRateLimiter();
-
-// Strict protection for sensitive operations.
-// Separate endpoint paths get separate counters so requests to unrelated
-// endpoints do not all consume the same 10-request allowance.
+// Strict rate limiting for sensitive operations.
+// Each matched route receives its own counter per client IP.
 export const authRateLimiter = createRateLimiter({
   windowMs: AUTH_WINDOW_MS,
   limit: AUTH_MAX_REQUESTS,
+  scope: 'sensitive_operation',
 
   keyGenerator: (req) => {
     const ipKey = ipKeyGenerator(req.ip);
@@ -70,3 +73,6 @@ export const authRateLimiter = createRateLimiter({
     return `${ipKey}:${routeScope}`;
   },
 });
+
+// Global API protection.
+export const apiRateLimiter = createApiRateLimiter();

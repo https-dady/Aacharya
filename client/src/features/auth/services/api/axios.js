@@ -7,6 +7,8 @@ const REQUEST_TIMEOUT_MS = 15000;
 
 let refreshPromise = null;
 
+const inFlightGetRequests = new Map();
+
 function getAccessToken() {
   return sessionStorage.getItem(ACCESS_TOKEN_KEY);
 }
@@ -30,7 +32,11 @@ function buildRequestUrl(path, params) {
 
   if (params && typeof params === 'object') {
     Object.entries(params).forEach(([key, value]) => {
-      if (value === undefined || value === null || value === '') {
+      if (
+        value === undefined
+        || value === null
+        || value === ''
+      ) {
         return;
       }
 
@@ -58,9 +64,9 @@ async function parseResponse(response) {
 
   if (!response.ok) {
     const message =
-      data?.message ||
-      data?.error?.message ||
-      `Request failed with status ${response.status}.`;
+      data?.message
+      || data?.error?.message
+      || `Request failed with status ${response.status}.`;
 
     const error = new Error(message);
 
@@ -83,11 +89,28 @@ async function parseResponse(response) {
 
 async function performRequest(path, options = {}) {
   const controller = new AbortController();
+  const externalSignal = options.signal;
 
-  const timeoutId = setTimeout(
-    () => controller.abort(),
-    REQUEST_TIMEOUT_MS,
-  );
+  let timedOut = false;
+
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, REQUEST_TIMEOUT_MS);
+
+  const abortFromExternalSignal = () => {
+    controller.abort(externalSignal?.reason);
+  };
+
+  if (externalSignal?.aborted) {
+    abortFromExternalSignal();
+  } else {
+    externalSignal?.addEventListener(
+      'abort',
+      abortFromExternalSignal,
+      { once: true },
+    );
+  }
 
   const headers = new Headers(options.headers || {});
 
@@ -121,7 +144,15 @@ async function performRequest(path, options = {}) {
 
     return await parseResponse(response);
   } catch (error) {
-    if (error?.name === 'AbortError') {
+    if (externalSignal?.aborted) {
+      const cancellationError = new Error('Request canceled.');
+
+      cancellationError.code = 'ERR_CANCELED';
+
+      throw cancellationError;
+    }
+
+    if (timedOut || error?.name === 'AbortError') {
       throw new Error(
         'The server took too long to respond. Please try again.',
         { cause: error },
@@ -138,6 +169,11 @@ async function performRequest(path, options = {}) {
     throw error;
   } finally {
     clearTimeout(timeoutId);
+
+    externalSignal?.removeEventListener(
+      'abort',
+      abortFromExternalSignal,
+    );
   }
 }
 
@@ -152,8 +188,8 @@ async function refreshAccessToken() {
         const tokenData = body?.data ?? body;
 
         const token =
-          tokenData?.accessToken ??
-          tokenData?.token;
+          tokenData?.accessToken
+          ?? tokenData?.token;
 
         if (typeof token !== 'string' || !token.trim()) {
           throw new Error(
@@ -191,12 +227,16 @@ async function requestWithRefresh(path, options = {}) {
   try {
     return await performRequest(path, options);
   } catch (error) {
+    if (error?.code === 'ERR_CANCELED') {
+      throw error;
+    }
+
     const isUnauthorized = error?.response?.status === 401;
 
     if (
-      !isUnauthorized ||
-      isAuthEntryPoint(path) ||
-      options.skipAuthorization
+      !isUnauthorized
+      || isAuthEntryPoint(path)
+      || options.skipAuthorization
     ) {
       throw error;
     }
@@ -204,8 +244,20 @@ async function requestWithRefresh(path, options = {}) {
     try {
       await refreshAccessToken();
 
+      if (options.signal?.aborted) {
+        const cancellationError = new Error('Request canceled.');
+
+        cancellationError.code = 'ERR_CANCELED';
+
+        throw cancellationError;
+      }
+
       return await performRequest(path, options);
     } catch (refreshError) {
+      if (refreshError?.code === 'ERR_CANCELED') {
+        throw refreshError;
+      }
+
       setAccessToken(null);
       notifyAuthenticationExpired();
 
@@ -217,11 +269,55 @@ async function requestWithRefresh(path, options = {}) {
   }
 }
 
+function createGetRequestKey(path, options) {
+  const url = buildRequestUrl(path, options.params);
+  const token = getAccessToken() || '';
+
+  const headers = Array.from(
+    new Headers(options.headers || {}).entries(),
+  ).sort(([keyA], [keyB]) => keyA.localeCompare(keyB));
+
+  return JSON.stringify({
+    url,
+    token,
+    headers,
+    skipAuthorization: Boolean(options.skipAuthorization),
+  });
+}
+
 async function get(path, options = {}) {
-  return requestWithRefresh(path, {
+  // Requests with an external AbortSignal must remain independent.
+  // Sharing them could allow one component's cancellation to cancel
+  // another component's request.
+  if (options.signal) {
+    return requestWithRefresh(path, {
+      ...options,
+      method: 'GET',
+    });
+  }
+
+  const requestKey = createGetRequestKey(path, options);
+
+  const existingRequest = inFlightGetRequests.get(requestKey);
+
+  if (existingRequest) {
+    return existingRequest;
+  }
+
+  const requestPromise = requestWithRefresh(path, {
     ...options,
     method: 'GET',
   });
+
+  inFlightGetRequests.set(requestKey, requestPromise);
+
+  try {
+    return await requestPromise;
+  } finally {
+    if (inFlightGetRequests.get(requestKey) === requestPromise) {
+      inFlightGetRequests.delete(requestKey);
+    }
+  }
 }
 
 async function post(path, body, options = {}) {

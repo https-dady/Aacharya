@@ -230,10 +230,12 @@ export default function SuperAdminDashboard() {
         </h2>
 
         <p className="mt-2 text-sm leading-6 text-[#A5A6B0]">
-          Department creation and HOD account provisioning use the
-          available backend endpoints. Department and HOD directories
-          still require supported listing endpoints before they can
-          display persisted records.
+          Department creation, department details, HOD account creation,
+          HOD listings and HOD details are connected to backend API
+          endpoints. Department–HOD assignment and transfer workflows
+          are also connected to the department management API.
+          Runtime behavior still needs to be verified against the
+          running backend.
         </p>
       </section>
     </div>
