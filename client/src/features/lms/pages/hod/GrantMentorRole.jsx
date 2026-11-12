@@ -4,7 +4,6 @@ import { Link, useLocation } from 'react-router-dom';
 import mentorManagementService from '../../services/mentorManagementService.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
-import EmptyState from '../../components/EmptyState.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
@@ -283,12 +282,16 @@ export default function GrantMentorRole() {
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
+  const controller = new AbortController();
 
-    loadOptions(controller.signal);
+  Promise.resolve().then(() => {
+    if (!controller.signal.aborted) {
+      loadOptions(controller.signal);
+    }
+  });
 
-    return () => controller.abort();
-  }, [loadOptions, reloadKey]);
+  return () => controller.abort();
+}, [loadOptions, reloadKey]);
 
   const loadMentors = useCallback(async (signal) => {
     setIsLoadingMentors(true);
@@ -318,12 +321,16 @@ export default function GrantMentorRole() {
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
+  const controller = new AbortController();
 
-    loadMentors(controller.signal);
+  Promise.resolve().then(() => {
+    if (!controller.signal.aborted) {
+      loadMentors(controller.signal);
+    }
+  });
 
-    return () => controller.abort();
-  }, [loadMentors, reloadKey]);
+  return () => controller.abort();
+}, [loadMentors, reloadKey]);
 
   useEffect(() => {
     const controller = new AbortController();
