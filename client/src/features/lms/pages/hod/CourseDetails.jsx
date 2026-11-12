@@ -5,6 +5,55 @@ import EmptyState from '../../components/EmptyState.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
+function getReferenceId(reference) {
+  if (!reference) {
+    return '';
+  }
+
+  if (typeof reference === 'string') {
+    return reference;
+  }
+
+  return String(reference.id ?? reference._id ?? '');
+}
+
+function getReferenceName(reference) {
+  if (!reference) {
+    return '';
+  }
+
+  if (typeof reference === 'string') {
+    return reference;
+  }
+
+  return (
+    reference.name ||
+    reference.fullName ||
+    reference.code ||
+    ''
+  );
+}
+
+function formatDate(value) {
+  if (!value) {
+    return 'Not available';
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return 'Not available';
+  }
+
+  return new Intl.DateTimeFormat('en-IN', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
 function DetailField({ label, value }) {
   return (
     <div className="min-w-0 rounded-xl border border-[#343640] bg-[#191A21] p-4">
@@ -13,32 +62,112 @@ function DetailField({ label, value }) {
       </p>
 
       <p className="mt-2 break-words text-sm font-medium text-[#EAEAE6]">
-        {value || 'Not available'}
+        {value !== undefined &&
+        value !== null &&
+        String(value).trim() !== ''
+          ? value
+          : 'Not available'}
       </p>
     </div>
   );
 }
 
-export default function CourseDetails() {
-  const location = useLocation();
-  const course = location.state?.course ?? null;
-
-  const courseName =
-    course?.name || course?.courseName || 'Course Details';
-
-  const courseCode =
-    course?.code || course?.courseCode;
+function ReferenceList({
+  title,
+  references,
+  emptyMessage,
+}) {
+  const items = Array.isArray(references)
+    ? references
+    : [];
 
   return (
-    <div className="mx-auto w-full max-w-[1100px]">
+    <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+      <p className="text-xs font-medium uppercase tracking-wider text-[#858590]">
+        {title}
+      </p>
+
+      {items.length === 0 ? (
+        <p className="mt-3 text-sm text-[#9697A2]">
+          {emptyMessage}
+        </p>
+      ) : (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {items.map((reference, index) => {
+            const id = getReferenceId(reference);
+
+            const name =
+              getReferenceName(reference) ||
+              `Assigned record ${index + 1}`;
+
+            return (
+              <span
+                key={id || `${name}-${index}`}
+                className="rounded-lg border border-[#454650] bg-[#26272B] px-3 py-2 text-xs font-medium text-[#D0D0D8]"
+              >
+                {name}
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CourseStatus({ status }) {
+  const normalizedStatus = String(
+    status || '',
+  ).toUpperCase();
+
+  const isActive = normalizedStatus === 'ACTIVE';
+
+  return (
+    <span
+      className={`inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold ${
+        isActive
+          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+          : 'border-[#454650] bg-[#292A32] text-[#D0D0D8]'
+      }`}
+    >
+      {normalizedStatus || 'STATUS UNAVAILABLE'}
+    </span>
+  );
+}
+
+export default function CourseDetails() {
+  const location = useLocation();
+
+  const course = location.state?.course ?? null;
+
+  const courseName = course?.title || 'Course Details';
+
+  const courseCode = course?.code || '';
+
+  const facultyName =
+    course?.facultyName ||
+    getReferenceName(course?.faculty);
+
+  const courseId = course?.id || course?._id || '';
+
+  return (
+    <div className="mx-auto w-full max-w-[1100px] space-y-5">
       <PageHeader
         eyebrow="ACADEMIC OVERSIGHT"
         title="Course Details"
-        description="Review course information and its academic associations."
+        description="Review department course information and its academic associations."
         breadcrumbs={[
-          { label: 'HOD Dashboard', to: '/hod/dashboard' },
-          { label: 'Courses', to: '/hod/courses' },
-          { label: 'Course Details' },
+          {
+            label: 'HOD Dashboard',
+            to: '/hod/dashboard',
+          },
+          {
+            label: 'Courses',
+            to: '/hod/courses',
+          },
+          {
+            label: 'Course Details',
+          },
         ]}
         actions={
           <Link to="/hod/courses">
@@ -52,7 +181,7 @@ export default function CourseDetails() {
       {!course ? (
         <EmptyState
           title="Course record unavailable"
-          description="No course record was provided to this page. Open a course from the directory when actual course records are available."
+          description="This page requires a course record from the department course directory. Return to the directory and open the course again."
           action={
             <Link to="/hod/courses">
               <ActionButton variant="secondary">
@@ -69,48 +198,31 @@ export default function CourseDetails() {
             description={
               courseCode
                 ? `Course code: ${courseCode}`
-                : 'Academic course information'
+                : 'Department academic course information'
             }
             action={
-              <span className="inline-flex rounded-full border border-[#454650] bg-[#292A32] px-3 py-1.5 text-xs font-medium text-[#D0D0D8]">
-                {course.status || 'Status unavailable'}
-              </span>
+              <CourseStatus status={course.status} />
             }
           >
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <DetailField
-                label="Course Name"
-                value={courseName}
+                label="Course Title"
+                value={course.title}
               />
 
               <DetailField
                 label="Course Code"
-                value={courseCode}
+                value={course.code}
               />
 
               <DetailField
-                label="Faculty"
-                value={course.facultyName}
-              />
-
-              <DetailField
-                label="Batch"
-                value={course.batchName}
-              />
-
-              <DetailField
-                label="Section"
-                value={course.sectionName}
+                label="Category"
+                value={course.category}
               />
 
               <DetailField
                 label="Credits"
-                value={
-                  course.credits !== undefined &&
-                  course.credits !== null
-                    ? String(course.credits)
-                    : null
-                }
+                value={course.credits}
               />
 
               <DetailField
@@ -119,106 +231,129 @@ export default function CourseDetails() {
               />
 
               <DetailField
+                label="Assigned Faculty"
+                value={facultyName}
+              />
+
+              <DetailField
                 label="Course ID"
-                value={course.id || course._id}
+                value={courseId}
+              />
+
+              <DetailField
+                label="Created On"
+                value={formatDate(course.createdAt)}
+              />
+
+              <DetailField
+                label="Last Updated"
+                value={formatDate(course.updatedAt)}
               />
             </div>
 
-            {course.description && (
-              <div className="mt-4 rounded-xl border border-[#343640] bg-[#191A21] p-4">
-                <p className="text-xs font-medium uppercase tracking-wider text-[#858590]">
-                  Description
-                </p>
+            <div className="mt-5 rounded-xl border border-[#343640] bg-[#191A21] p-4">
+              <p className="text-xs font-medium uppercase tracking-wider text-[#858590]">
+                Course Description
+              </p>
 
-                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-[#D0D0D8]">
-                  {course.description}
-                </p>
-              </div>
-            )}
+              <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[#D0D0D8]">
+                {course.description || 'No course description provided.'}
+              </p>
+            </div>
           </SectionCard>
 
-          <div className="mt-5">
-            <SectionCard
-              eyebrow="ACADEMIC OPERATIONS"
-              title="Course Resources"
-              description="Review the academic activities associated with this course."
-            >
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-                <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
-                  <h3 className="text-sm font-semibold text-[#EAEAE6]">
-                    Assignments
-                  </h3>
+          <SectionCard
+            eyebrow="ACADEMIC ASSOCIATIONS"
+            title="Assigned Batches & Sections"
+            description="Review the batches and sections associated with this course."
+          >
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <ReferenceList
+                title="Assigned Batches"
+                references={course.batches}
+                emptyMessage="No batches are currently assigned."
+              />
 
-                  <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-                    Assignment records will be available when the
-                    corresponding academic data is connected.
-                  </p>
+              <ReferenceList
+                title="Assigned Sections"
+                references={course.sections}
+                emptyMessage="No sections are currently assigned."
+              />
+            </div>
+          </SectionCard>
 
-                  <Link
-                    to="/hod/assignments"
-                    className="mt-4 inline-block text-sm font-medium text-[#C4B5FD] hover:text-[#DDD3FF]"
-                  >
-                    View Assignments
-                  </Link>
-                </div>
+          <SectionCard
+            eyebrow="ACADEMIC OPERATIONS"
+            title="Related Academic Modules"
+            description="Navigate to the available department academic modules."
+          >
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+                <h3 className="text-sm font-semibold text-[#EAEAE6]">
+                  Assignments
+                </h3>
 
-                <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
-                  <h3 className="text-sm font-semibold text-[#EAEAE6]">
-                    Quizzes
-                  </h3>
+                <p className="mt-2 text-sm leading-6 text-[#9697A2]">
+                  Review department assignment records.
+                </p>
 
-                  <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-                    Quiz records will be available through the
-                    academic assessment module.
-                  </p>
-
-                  <Link
-                    to="/hod/quizzes"
-                    className="mt-4 inline-block text-sm font-medium text-[#C4B5FD] hover:text-[#DDD3FF]"
-                  >
-                    View Quizzes
-                  </Link>
-                </div>
-
-                <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
-                  <h3 className="text-sm font-semibold text-[#EAEAE6]">
-                    Results
-                  </h3>
-
-                  <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-                    Course assessment results will be available
-                    when the relevant records are connected.
-                  </p>
-
-                  <Link
-                    to="/hod/results"
-                    className="mt-4 inline-block text-sm font-medium text-[#C4B5FD] hover:text-[#DDD3FF]"
-                  >
-                    View Results
-                  </Link>
-                </div>
+                <Link
+                  to="/hod/assignments"
+                  className="mt-4 inline-block text-sm font-medium text-[#CDB5F7] transition hover:text-[#DDCEFA]"
+                >
+                  View Assignments
+                </Link>
               </div>
-            </SectionCard>
-          </div>
 
-          <div className="mt-5 flex justify-end">
-            <Link
-              to="/hod/courses/edit"
-              state={{ course }}
-            >
-              <ActionButton>
-                Edit Course Details
-              </ActionButton>
-            </Link>
+              <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+                <h3 className="text-sm font-semibold text-[#EAEAE6]">
+                  Quizzes
+                </h3>
+
+                <p className="mt-2 text-sm leading-6 text-[#9697A2]">
+                  Review department assessment activities.
+                </p>
+
+                <Link
+                  to="/hod/quizzes"
+                  className="mt-4 inline-block text-sm font-medium text-[#CDB5F7] transition hover:text-[#DDCEFA]"
+                >
+                  View Quizzes
+                </Link>
+              </div>
+
+              <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+                <h3 className="text-sm font-semibold text-[#EAEAE6]">
+                  Results
+                </h3>
+
+                <p className="mt-2 text-sm leading-6 text-[#9697A2]">
+                  Review department assessment results.
+                </p>
+
+                <Link
+                  to="/hod/results"
+                  className="mt-4 inline-block text-sm font-medium text-[#CDB5F7] transition hover:text-[#DDCEFA]"
+                >
+                  View Results
+                </Link>
+              </div>
+            </div>
+          </SectionCard>
+
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
+            <p className="text-sm font-semibold text-amber-200">
+              Course modification
+            </p>
+
+            <p className="mt-2 text-sm leading-6 text-[#A5A6B0]">
+              This page currently provides read-only course details.
+              Course modification is not exposed because the existing
+              backend does not provide a supported course update endpoint.
+            </p>
           </div>
         </>
       )}
-
-      <p className="mt-5 text-xs leading-5 text-[#777986]">
-        This page displays information supplied through navigation.
-        Course retrieval, editing, and persistence will be connected
-        during backend integration.
-      </p>
     </div>
   );
 }
