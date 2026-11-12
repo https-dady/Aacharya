@@ -27,6 +27,13 @@ const assessmentStatusSchema = z.enum(
   Object.values(ASSESSMENT_STATUSES),
 );
 
+const resultStatusSchema = z.enum([
+  'PENDING',
+  'ENTERED',
+  'ABSENT',
+  'EXEMPT',
+]);
+
 const titleSchema = z
   .string()
   .trim()
@@ -55,12 +62,6 @@ const passingMarksSchema = z
 
 const assessmentDateSchema = z.coerce.date();
 
-const idArraySchema = z
-  .array(objectIdSchema)
-  .max(100)
-  .optional()
-  .default([]);
-
 const assessmentFieldsSchema = {
   title: titleSchema.optional(),
 
@@ -70,9 +71,15 @@ const assessmentFieldsSchema = {
 
   courseId: objectIdSchema.optional(),
 
-  batchIds: idArraySchema,
+  batchIds: z
+    .array(objectIdSchema)
+    .max(100)
+    .optional(),
 
-  sectionIds: idArraySchema,
+  sectionIds: z
+    .array(objectIdSchema)
+    .max(100)
+    .optional(),
 
   assessmentDate: assessmentDateSchema.optional(),
 
@@ -108,6 +115,15 @@ const createAssessmentBodySchema = z
       message: 'Passing marks cannot exceed total marks.',
       path: ['passingMarks'],
     },
+  )
+  .refine(
+    (body) =>
+      (body.batchIds?.length ?? 0) > 0 ||
+      (body.sectionIds?.length ?? 0) > 0,
+    {
+      message: 'Select at least one batch or section.',
+      path: ['batchIds'],
+    },
   );
 
 const updateAssessmentBodySchema = z
@@ -117,16 +133,6 @@ const updateAssessmentBodySchema = z
     (body) => Object.keys(body).length > 0,
     {
       message: 'At least one field must be provided for an update.',
-    },
-  )
-  .refine(
-    (body) =>
-      body.totalMarks === undefined ||
-      body.passingMarks === undefined ||
-      body.passingMarks <= body.totalMarks,
-    {
-      message: 'Passing marks cannot exceed total marks.',
-      path: ['passingMarks'],
     },
   );
 
@@ -225,12 +231,7 @@ export const listAssessmentResultsSchema = z.object({
 
       search: z.string().trim().max(200).optional(),
 
-      status: z.enum([
-        'PENDING',
-        'ENTERED',
-        'ABSENT',
-        'EXEMPT',
-      ]).optional(),
+      status: resultStatusSchema.optional(),
     })
     .strict(),
 
@@ -254,12 +255,7 @@ export const updateAssessmentResultsSchema = z.object({
             .object({
               studentId: objectIdSchema,
 
-              status: z.enum([
-                'PENDING',
-                'ENTERED',
-                'ABSENT',
-                'EXEMPT',
-              ]),
+              status: resultStatusSchema,
 
               marksObtained: z
                 .number()
