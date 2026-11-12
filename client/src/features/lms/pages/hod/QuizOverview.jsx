@@ -152,9 +152,19 @@ export default function QuizOverview() {
     }
   }, []);
 
-  useEffect(() => {
-    loadQuizzes();
-  }, [loadQuizzes, refreshKey]);
+ useEffect(() => {
+  let isActive = true;
+
+  Promise.resolve().then(() => {
+    if (isActive) {
+      loadQuizzes();
+    }
+  });
+
+  return () => {
+    isActive = false;
+  };
+}, [loadQuizzes, refreshKey]);
 
   const filteredQuizzes = useMemo(() => {
     const query = search.trim().toLowerCase();
