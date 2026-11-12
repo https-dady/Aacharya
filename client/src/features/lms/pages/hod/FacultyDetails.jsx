@@ -10,11 +10,53 @@ import {
   useParams,
 } from 'react-router-dom';
 
-import api from '../../../auth/services/api/axios.js';
+import facultyManagementService, {
+  FACULTY_STATUSES,
+} from '../../services/facultyManagementService.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
+
+const STATUS_CONFIG = {
+  ACTIVE: {
+    label: 'Active',
+    className: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
+  },
+
+  SUSPENDED: {
+    label: 'Suspended',
+    className: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
+  },
+
+  DISABLED: {
+    label: 'Disabled',
+    className: 'border-rose-500/25 bg-rose-500/10 text-rose-300',
+  },
+};
+
+const ACTION_CONFIG = {
+  ACTIVE: {
+    label: 'Activate',
+    description:
+      'The faculty member will regain LMS access and must sign in again.',
+    variant: 'primary',
+  },
+
+  SUSPENDED: {
+    label: 'Suspend',
+    description:
+      'The faculty member will lose access to the LMS and existing sessions will be revoked.',
+    variant: 'secondary',
+  },
+
+  DISABLED: {
+    label: 'Disable',
+    description:
+      'The faculty account will be disabled and existing sessions will be revoked.',
+    variant: 'danger',
+  },
+};
 
 function DetailField({ label, value }) {
   return (
@@ -31,53 +73,132 @@ function DetailField({ label, value }) {
 }
 
 function StatusBadge({ status }) {
-  const styles = {
-    ACTIVE: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-300',
-    SUSPENDED: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
-    DISABLED: 'border-rose-500/25 bg-rose-500/10 text-rose-300',
-  };
+  const config = STATUS_CONFIG[status];
 
   return (
     <span
       className={[
-        'inline-flex rounded-full border px-3 py-1.5 text-xs font-semibold',
-        styles[status]
+        'inline-flex rounded-full border px-3 py-1.5',
+        'text-xs font-semibold',
+        config?.className
           || 'border-[#454650] bg-[#292A32] text-[#A5A6B0]',
       ].join(' ')}
     >
-      {status || 'Unknown status'}
+      {config?.label || status || 'Unknown status'}
     </span>
   );
 }
 
-function getResponseData(response) {
-  const body = response?.data;
+function StatusConfirmation({
+  faculty,
+  targetStatus,
+  loading,
+  onCancel,
+  onConfirm,
+}) {
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.key === 'Escape' && !loading) {
+        onCancel();
+      }
+    }
 
-  return body?.data ?? body ?? {};
-}
+    window.addEventListener('keydown', handleKeyDown);
 
-function normalizeFaculty(data) {
-  return data?.faculty ?? data?.user ?? data ?? null;
-}
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [loading, onCancel]);
 
-function getErrorMessage(error, fallback) {
+  if (!faculty || !targetStatus) {
+    return null;
+  }
+
+  const config = ACTION_CONFIG[targetStatus];
+
   return (
-    error?.response?.data?.error?.message
-    || error?.response?.data?.message
-    || error?.message
-    || fallback
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (
+          event.target === event.currentTarget
+          && !loading
+        ) {
+          onCancel();
+        }
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="faculty-status-title"
+        className="w-full max-w-md rounded-2xl border border-[#454650] bg-[#1D1F27] p-6 shadow-2xl"
+      >
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#CDB5F7]">
+          ACCOUNT MANAGEMENT
+        </p>
+
+        <h2
+          id="faculty-status-title"
+          className="mt-2 text-xl font-semibold text-[#EAEAE6]"
+        >
+          {config.label} faculty account?
+        </h2>
+
+        <div className="mt-5 rounded-xl border border-[#383943] bg-[#14161C] p-4">
+          <p className="text-sm font-semibold text-[#EAEAE6]">
+            {faculty.fullName}
+          </p>
+
+          <p className="mt-1 text-xs text-[#A5A6B0]">
+            {faculty.institutionalId}
+          </p>
+        </div>
+
+        <p className="mt-5 text-sm leading-6 text-[#B5B5C0]">
+          {config.description}
+        </p>
+
+        <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+          <ActionButton
+            variant="secondary"
+            disabled={loading}
+            onClick={onCancel}
+          >
+            Cancel
+          </ActionButton>
+
+          <ActionButton
+            variant={config.variant}
+            loading={loading}
+            onClick={onConfirm}
+          >
+            Confirm {config.label}
+          </ActionButton>
+        </div>
+      </section>
+    </div>
   );
 }
 
 export default function FacultyDetails() {
   const navigate = useNavigate();
+
   const { facultyId, id } = useParams();
 
   const selectedFacultyId = facultyId || id || '';
 
   const [faculty, setFaculty] = useState(null);
+
   const [isLoading, setIsLoading] = useState(true);
+
+  const [isUpdating, setIsUpdating] = useState(false);
+
   const [error, setError] = useState('');
+
+  const [notice, setNotice] = useState('');
+
+  const [confirmation, setConfirmation] = useState(null);
 
   const loadFaculty = useCallback(async (signal) => {
     if (!selectedFacultyId) {
@@ -91,36 +212,27 @@ export default function FacultyDetails() {
     setError('');
 
     try {
-      const response = await api.get(
-        `/v1/provisioning/faculty/${encodeURIComponent(selectedFacultyId)}`,
+      const result = await facultyManagementService.getFaculty(
+        selectedFacultyId,
         { signal },
       );
 
-      const fetchedFaculty = normalizeFaculty(
-        getResponseData(response),
-      );
-
-      if (!fetchedFaculty?.id && !fetchedFaculty?._id) {
-        throw new Error(
-          'The server did not return the requested faculty record.',
-        );
+      if (signal?.aborted) {
+        return;
       }
 
-      setFaculty(fetchedFaculty);
+      setFaculty(result);
     } catch (requestError) {
       if (
         requestError?.code === 'ERR_CANCELED'
-        || requestError?.name === 'AbortError'
-        || requestError?.name === 'CanceledError'
+        || signal?.aborted
       ) {
         return;
       }
 
       setError(
-        getErrorMessage(
-          requestError,
-          'Unable to load faculty details.',
-        ),
+        requestError?.message
+        || 'Unable to load faculty details.',
       );
     } finally {
       if (!signal?.aborted) {
@@ -139,6 +251,62 @@ export default function FacultyDetails() {
     };
   }, [loadFaculty]);
 
+  const cancelStatusChange = useCallback(() => {
+    if (!isUpdating) {
+      setConfirmation(null);
+    }
+  }, [isUpdating]);
+
+  async function confirmStatusChange() {
+    if (!confirmation || isUpdating || !selectedFacultyId) {
+      return;
+    }
+
+    setIsUpdating(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const updatedFaculty =
+        await facultyManagementService.updateFacultyStatus(
+          selectedFacultyId,
+          confirmation.targetStatus,
+        );
+
+      setFaculty(updatedFaculty);
+
+      setNotice(
+        `Faculty account status successfully updated to ${updatedFaculty.status}.`,
+      );
+
+      setConfirmation(null);
+    } catch (requestError) {
+      setError(
+        requestError?.message
+        || 'Unable to update faculty account status.',
+      );
+    } finally {
+      setIsUpdating(false);
+    }
+  }
+
+  function requestStatusChange(targetStatus) {
+    if (
+      !faculty
+      || isUpdating
+      || faculty.status === targetStatus
+    ) {
+      return;
+    }
+
+    setNotice('');
+    setError('');
+
+    setConfirmation({
+      targetStatus,
+    });
+  }
+
   function handleEdit() {
     if (!selectedFacultyId) {
       return;
@@ -147,17 +315,26 @@ export default function FacultyDetails() {
     navigate(
       `/hod/faculty/${encodeURIComponent(selectedFacultyId)}/edit`,
       {
-        state: { faculty },
+        state: {
+          faculty,
+        },
       },
     );
   }
 
+  const availableActions = faculty
+    ? Object.values(FACULTY_STATUSES).filter(
+        (status) => status !== faculty.status,
+      )
+    : [];
+
   return (
     <div className="mx-auto w-full max-w-[1000px]">
+
       <PageHeader
         eyebrow="DEPARTMENT ADMINISTRATION"
         title="Faculty Details"
-        description="Review a faculty member's institutional account and departmental role."
+        description="Review and manage institutional faculty accounts."
         breadcrumbs={[
           {
             label: 'HOD Dashboard',
@@ -173,6 +350,40 @@ export default function FacultyDetails() {
         ]}
       />
 
+      {notice && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200"
+        >
+          {notice}
+        </div>
+      )}
+
+      {error && (
+        <div
+          role="alert"
+          className="mb-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-5"
+        >
+          <h2 className="text-sm font-semibold text-rose-200">
+            Faculty operation unsuccessful
+          </h2>
+
+          <p className="mt-2 text-sm leading-6 text-rose-100/90">
+            {error}
+          </p>
+
+          <ActionButton
+            variant="secondary"
+            size="sm"
+            className="mt-4"
+            onClick={() => loadFaculty()}
+          >
+            Reload faculty details
+          </ActionButton>
+        </div>
+      )}
+
       {isLoading && (
         <div
           role="status"
@@ -183,48 +394,18 @@ export default function FacultyDetails() {
         </div>
       )}
 
-      {!isLoading && error && (
-        <div
-          role="alert"
-          className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-5"
-        >
-          <h2 className="text-sm font-semibold text-rose-200">
-            Faculty record unavailable
-          </h2>
-
-          <p className="mt-2 text-sm leading-6 text-rose-100/90">
-            {error}
-          </p>
-
-          <div className="mt-4 flex flex-wrap gap-3">
-            {selectedFacultyId && (
-              <ActionButton
-                type="button"
-                variant="secondary"
-                onClick={() => loadFaculty()}
-              >
-                Retry
-              </ActionButton>
-            )}
-
-            <Link to="/hod/faculty">
-              <ActionButton variant="secondary">
-                Return to Directory
-              </ActionButton>
-            </Link>
-          </div>
-        </div>
-      )}
-
-      {!isLoading && !error && faculty && (
+      {!isLoading && faculty && (
         <>
           <SectionCard
             eyebrow="FACULTY ACCOUNT"
             title={faculty.fullName || 'Faculty Member'}
-            description="Institutional account information retrieved from the backend."
-            action={<StatusBadge status={faculty.status} />}
+            description="Institutional account information retrieved from the department database."
+            action={
+              <StatusBadge status={faculty.status} />
+            }
           >
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+
               <DetailField
                 label="Full Name"
                 value={faculty.fullName}
@@ -245,7 +426,7 @@ export default function FacultyDetails() {
                 value={
                   faculty.role === 'MENTOR'
                     ? 'Mentor / TG'
-                    : faculty.role || 'Faculty'
+                    : 'Faculty'
                 }
               />
 
@@ -256,20 +437,29 @@ export default function FacultyDetails() {
 
               <DetailField
                 label="Department"
-                value={
-                  faculty.department?.name
-                  || faculty.departmentName
-                }
+                value={faculty.department?.name}
+              />
+
+              <DetailField
+                label="Department Code"
+                value={faculty.department?.code}
               />
 
               <DetailField
                 label="Email Verification"
                 value={
-                  faculty.isEmailVerified === true
+                  faculty.isEmailVerified
                     ? 'Verified'
-                    : faculty.isEmailVerified === false
-                      ? 'Not verified'
-                      : 'Not available'
+                    : 'Not verified'
+                }
+              />
+
+              <DetailField
+                label="Last Login"
+                value={
+                  faculty.lastLoginAt
+                    ? new Date(faculty.lastLoginAt).toLocaleString()
+                    : 'Never logged in'
                 }
               />
 
@@ -281,10 +471,102 @@ export default function FacultyDetails() {
                     : 'Not available'
                 }
               />
+
+              <DetailField
+                label="Last Updated"
+                value={
+                  faculty.updatedAt
+                    ? new Date(faculty.updatedAt).toLocaleString()
+                    : 'Not available'
+                }
+              />
+
             </div>
+
+            <div className="mt-6 border-t border-[#343640] pt-5">
+
+              <h3 className="text-sm font-semibold text-[#EAEAE6]">
+                Academic Assignments
+              </h3>
+
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+
+                <DetailField
+                  label="Assigned Batches"
+                  value={faculty.assignedBatches?.length ?? 0}
+                />
+
+                <DetailField
+                  label="Assigned Sections"
+                  value={faculty.assignedSections?.length ?? 0}
+                />
+
+              </div>
+            </div>
+
+          </SectionCard>
+
+          <SectionCard
+            eyebrow="ACCOUNT LIFECYCLE"
+            title="Faculty account actions"
+            description="Control the faculty member's institutional account access."
+            className="mt-5"
+          >
+            <div className="flex flex-wrap gap-3">
+
+              {availableActions.includes(FACULTY_STATUSES.ACTIVE) && (
+                <ActionButton
+                  variant="primary"
+                  disabled={isUpdating}
+                  onClick={() => {
+                    requestStatusChange(
+                      FACULTY_STATUSES.ACTIVE,
+                    );
+                  }}
+                >
+                  Activate Account
+                </ActionButton>
+              )}
+
+              {availableActions.includes(FACULTY_STATUSES.SUSPENDED) && (
+                <ActionButton
+                  variant="secondary"
+                  disabled={isUpdating}
+                  onClick={() => {
+                    requestStatusChange(
+                      FACULTY_STATUSES.SUSPENDED,
+                    );
+                  }}
+                >
+                  Suspend Account
+                </ActionButton>
+              )}
+
+              {availableActions.includes(FACULTY_STATUSES.DISABLED) && (
+                <ActionButton
+                  variant="danger"
+                  disabled={isUpdating}
+                  onClick={() => {
+                    requestStatusChange(
+                      FACULTY_STATUSES.DISABLED,
+                    );
+                  }}
+                >
+                  Disable Account
+                </ActionButton>
+              )}
+
+            </div>
+
+            <p className="mt-4 text-xs leading-5 text-[#858590]">
+              Status changes are enforced by the backend. Existing
+              sessions are revoked when the account status changes.
+              Reactivated accounts must sign in again.
+            </p>
           </SectionCard>
 
           <div className="mt-5 flex flex-wrap justify-end gap-3">
+
             <Link to="/hod/faculty">
               <ActionButton variant="secondary">
                 Back to Directory
@@ -292,20 +574,24 @@ export default function FacultyDetails() {
             </Link>
 
             <ActionButton
-              type="button"
               onClick={handleEdit}
+              disabled={isUpdating}
             >
               Edit Faculty Details
             </ActionButton>
+
           </div>
         </>
       )}
 
-      <p className="mt-5 text-xs leading-5 text-[#777986]">
-        Faculty records are loaded through the authenticated HOD's
-        department-scoped backend endpoint. Access restrictions are
-        enforced by the server.
-      </p>
+      <StatusConfirmation
+        faculty={faculty}
+        targetStatus={confirmation?.targetStatus}
+        loading={isUpdating}
+        onCancel={cancelStatusChange}
+        onConfirm={confirmStatusChange}
+      />
+
     </div>
   );
 }
