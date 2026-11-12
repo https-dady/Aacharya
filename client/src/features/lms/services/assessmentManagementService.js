@@ -1,4 +1,5 @@
-import api from '../../../auth/services/api/axios.js';
+import api from '../../auth/services/api/axios.js';
+
 const ASSESSMENT_BASE_PATH = '/v1/assessments/manage';
 
 const DEFAULT_PAGE = 1;
