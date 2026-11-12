@@ -234,12 +234,18 @@ export default function SectionList() {
   }, [loadSections]);
 
   useEffect(() => {
-    const controller = refreshSections();
+  const controller = new AbortController();
 
-    return () => {
-      controller.abort();
-    };
-  }, [refreshSections]);
+  Promise.resolve().then(() => {
+    if (!controller.signal.aborted) {
+      loadSections(controller.signal);
+    }
+  });
+
+  return () => {
+    controller.abort();
+  };
+}, [loadSections]);
 
   const filteredSections = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
