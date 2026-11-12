@@ -223,7 +223,10 @@ async function getAuthorizedCourse(user, courseId) {
     );
   }
 
-  if (normalizeId(course.faculty) !== user._id.toString()) {
+  if (
+    user.role !== USER_ROLES.HOD
+    && normalizeId(course.faculty) !== user._id.toString()
+  ) {
     throw createControllerError(
       403,
       'COURSE_INSTRUCTOR_REQUIRED',
@@ -334,7 +337,7 @@ async function validateTargets({
   };
 }
 
-function buildContentQuery({ user, department, query }) {
+async function buildContentQuery({ user, department, query }) {
   const filter = {
     department,
   };
@@ -347,12 +350,39 @@ function buildContentQuery({ user, department, query }) {
     filter.contentType = query.contentType;
   }
 
-  if (user.role !== USER_ROLES.HOD) {
+  let assignedCourseIds = null;
+
+  if (user.role === USER_ROLES.FACULTY) {
+    const assignedCourses = await Course.find({
+      department: user.department,
+      faculty: user._id,
+      status: COURSE_STATUSES.ACTIVE,
+    })
+      .select('_id')
+      .lean()
+      .exec();
+
+    assignedCourseIds = assignedCourses.map((course) => course._id);
+
+    filter.course = {
+      $in: assignedCourseIds,
+    };
+  } else if (user.role !== USER_ROLES.HOD) {
     filter.createdBy = user._id;
   }
 
   if (query.courseId) {
-    filter.course = query.courseId;
+    if (assignedCourseIds) {
+      const hasCourseAccess = assignedCourseIds.some(
+        (courseId) => courseId.toString() === query.courseId,
+      );
+
+      filter.course = hasCourseAccess
+        ? query.courseId
+        : { $in: [] };
+    } else {
+      filter.course = query.courseId;
+    }
   }
 
   if (query.search) {
@@ -594,7 +624,7 @@ export async function listDepartmentContentController(
     const limit = Number.parseInt(req.query.limit, 10) || 20;
     const skip = (page - 1) * limit;
 
-    const filter = buildContentQuery({
+    const filter = await buildContentQuery({
       user,
       department: departmentId,
       query: req.query,
@@ -848,7 +878,20 @@ export async function updateDepartmentContentController(
       department: departmentId,
     };
 
-    if (user.role !== USER_ROLES.HOD) {
+    if (user.role === USER_ROLES.FACULTY) {
+      const assignedCourses = await Course.find({
+        department: user.department,
+        faculty: user._id,
+        status: COURSE_STATUSES.ACTIVE,
+      })
+        .select('_id')
+        .lean()
+        .exec();
+
+      assignmentFilter.course = {
+        $in: assignedCourses.map((course) => course._id),
+      };
+    } else if (user.role !== USER_ROLES.HOD) {
       assignmentFilter.createdBy = user._id;
     }
 

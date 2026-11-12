@@ -1,7 +1,21 @@
 import mongoose from 'mongoose';
 
-import { User, USER_ROLES } from '../models/user.model.js';
-import { Quiz, QUIZ_STATUSES } from '../models/quiz.model.js';
+import {
+  User,
+  USER_ROLES,
+  ACCOUNT_STATUSES,
+} from '../models/user.model.js';
+
+import {
+  Course,
+  COURSE_STATUSES,
+} from '../models/course.model.js';
+
+import {
+  Quiz,
+  QUIZ_STATUSES,
+} from '../models/quiz.model.js';
+
 import {
   QuizAttempt,
   QUIZ_ATTEMPT_STATUSES,
@@ -24,7 +38,7 @@ function createControllerError(
 function getAuthenticatedUserId(req) {
   const userId = req.user?._id ?? req.user?.id;
 
-  if (!userId) {
+  if (!mongoose.isValidObjectId(userId)) {
     throw createControllerError(
       'Authentication is required.',
       'AUTHENTICATION_REQUIRED',
@@ -35,19 +49,123 @@ function getAuthenticatedUserId(req) {
   return userId;
 }
 
+function normalizeIds(values) {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return values
+    .filter(Boolean)
+    .map((value) => String(value._id ?? value));
+}
+
+function hasIntersection(first, second) {
+  if (first.length === 0 || second.length === 0) {
+    return false;
+  }
+
+  const allowedIds = new Set(second);
+
+  return first.some((id) => allowedIds.has(id));
+}
+
+/**
+ * Course allocation is the source of truth.
+ *
+ * If a course restricts batches or sections, the student must
+ * satisfy each configured restriction.
+ */
+function studentMatchesCourseAllocation(student, course) {
+  const studentBatches = normalizeIds(student.assignedBatches);
+  const studentSections = normalizeIds(student.assignedSections);
+
+  const courseBatches = normalizeIds(course.batches);
+  const courseSections = normalizeIds(course.sections);
+
+  if (
+    courseBatches.length > 0
+    && !hasIntersection(studentBatches, courseBatches)
+  ) {
+    return false;
+  }
+
+  if (
+    courseSections.length > 0
+    && !hasIntersection(studentSections, courseSections)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * The quiz can impose additional restrictions within its course.
+ * Both batch and section restrictions must pass when configured.
+ */
+function studentMatchesQuizAssignment(student, quiz) {
+  const studentBatches = normalizeIds(student.assignedBatches);
+  const studentSections = normalizeIds(student.assignedSections);
+
+  const quizBatches = normalizeIds(quiz.batches);
+  const quizSections = normalizeIds(quiz.sections);
+
+  if (
+    quizBatches.length > 0
+    && !hasIntersection(studentBatches, quizBatches)
+  ) {
+    return false;
+  }
+
+  if (
+    quizSections.length > 0
+    && !hasIntersection(studentSections, quizSections)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function studentCanAccessQuiz(student, quiz) {
+  if (!quiz.course || !student.department) {
+    return false;
+  }
+
+  if (
+    String(quiz.department) !== String(student.department)
+    || String(quiz.course.department) !== String(student.department)
+  ) {
+    return false;
+  }
+
+  if (quiz.course.status !== COURSE_STATUSES.ACTIVE) {
+    return false;
+  }
+
+  return (
+    studentMatchesCourseAllocation(student, quiz.course)
+    && studentMatchesQuizAssignment(student, quiz)
+  );
+}
+
 function serializeQuestion(question) {
   return {
     id: question._id.toString(),
-    questionText: question.questionText,
-    options: question.options.map((option) => ({
-      label: option.label,
-      text: option.text,
+    questionText: question.question,
+    options: question.options.map((option, index) => ({
+      label: String.fromCharCode(65 + index),
+      text: option,
     })),
     marks: question.marks,
   };
 }
 
-function serializeAttempt(attempt, quiz, includeQuestions = false) {
+function serializeAttempt(
+  attempt,
+  quiz,
+  includeQuestions = false,
+) {
   const result = {
     id: attempt._id.toString(),
     quizId: attempt.quiz.toString(),
@@ -72,6 +190,7 @@ function serializeAttempt(attempt, quiz, includeQuestions = false) {
       totalMarks: quiz.totalMarks,
     };
 
+    // Never send correctOptionIndex to the student.
     result.questions = quiz.questions.map(serializeQuestion);
   }
 
@@ -106,37 +225,58 @@ function isWithinQuizWindow(quiz, now) {
   return { allowed: true };
 }
 
-function studentMatchesQuiz(student, quiz) {
-  if (
-    quiz.department &&
-    String(quiz.department) !== String(student.department)
-  ) {
-    return false;
-  }
+async function getActiveStudent(studentId) {
+  const student = await User.findOne({
+    _id: studentId,
+    role: USER_ROLES.STUDENT,
+    status: ACCOUNT_STATUSES.ACTIVE,
+  })
+    .select(
+      '_id department assignedBatches assignedSections status',
+    )
+    .lean()
+    .exec();
 
-  const assignedBatches = (student.assignedBatches || [])
-    .map(String);
-
-  const assignedSections = (student.assignedSections || [])
-    .map(String);
-
-  if (Array.isArray(quiz.batches) && quiz.batches.length > 0) {
-    const batchMatch = quiz.batches.some((batchId) =>
-      assignedBatches.includes(String(batchId)),
+  if (!student) {
+    throw createControllerError(
+      'The active student account could not be found.',
+      'STUDENT_NOT_FOUND',
+      404,
     );
-
-    if (!batchMatch) return false;
   }
 
-  if (Array.isArray(quiz.sections) && quiz.sections.length > 0) {
-    const sectionMatch = quiz.sections.some((sectionId) =>
-      assignedSections.includes(String(sectionId)),
+  return student;
+}
+
+async function getAccessiblePublishedQuiz(student, quizId) {
+  const quiz = await Quiz.findOne({
+    _id: quizId,
+    status: QUIZ_STATUSES.PUBLISHED,
+  })
+    .populate({
+      path: 'course',
+      model: Course,
+      select: 'title code semester department batches sections status',
+    })
+    .exec();
+
+  if (!quiz) {
+    throw createControllerError(
+      'The quiz was not found or is not published.',
+      'QUIZ_NOT_AVAILABLE',
+      404,
     );
-
-    if (!sectionMatch) return false;
   }
 
-  return true;
+  if (!studentCanAccessQuiz(student, quiz)) {
+    throw createControllerError(
+      'You do not have access to this quiz.',
+      'QUIZ_ACCESS_DENIED',
+      403,
+    );
+  }
+
+  return quiz;
 }
 
 /**
@@ -162,46 +302,17 @@ export async function startStudentQuizAttemptController(
       );
     }
 
-    const student = await User.findOne({
-      _id: studentId,
-      role: USER_ROLES.STUDENT,
-    })
-      .select('_id department assignedBatches assignedSections status')
-      .lean()
-      .exec();
+    const student = await getActiveStudent(studentId);
 
-    if (!student) {
-      throw createControllerError(
-        'The student account could not be found.',
-        'STUDENT_NOT_FOUND',
-        404,
-      );
-    }
+    const quiz = await getAccessiblePublishedQuiz(
+      student,
+      quizId,
+    );
 
-    const quiz = await Quiz.findOne({
-      _id: quizId,
-      status: QUIZ_STATUSES.PUBLISHED,
-    })
-      .populate('course', 'name title code courseCode')
-      .exec();
-
-    if (!quiz) {
-      throw createControllerError(
-        'The quiz was not found or is not published.',
-        'QUIZ_NOT_AVAILABLE',
-        404,
-      );
-    }
-
-    if (!studentMatchesQuiz(student, quiz)) {
-      throw createControllerError(
-        'You do not have access to this quiz.',
-        'QUIZ_ACCESS_DENIED',
-        403,
-      );
-    }
-
-    if (!Array.isArray(quiz.questions) || quiz.questions.length === 0) {
+    if (
+      !Array.isArray(quiz.questions)
+      || quiz.questions.length === 0
+    ) {
       throw createControllerError(
         'This quiz does not contain any questions.',
         'QUIZ_HAS_NO_QUESTIONS',
@@ -249,8 +360,8 @@ export async function startStudentQuizAttemptController(
     const durationMinutes = Number(quiz.durationMinutes);
 
     if (
-      !Number.isFinite(durationMinutes) ||
-      durationMinutes <= 0
+      !Number.isFinite(durationMinutes)
+      || durationMinutes <= 0
     ) {
       throw createControllerError(
         'The quiz duration is not configured correctly.',
@@ -267,10 +378,12 @@ export async function startStudentQuizAttemptController(
       ? new Date(quiz.endAt)
       : null;
 
-    const expiresAt =
-      quizWindowEnd && quizWindowEnd < attemptExpiry
-        ? quizWindowEnd
-        : attemptExpiry;
+    const expiresAt = (
+      quizWindowEnd
+      && quizWindowEnd < attemptExpiry
+    )
+      ? quizWindowEnd
+      : attemptExpiry;
 
     const attempt = await QuizAttempt.create({
       quiz: quiz._id,
@@ -318,9 +431,11 @@ export async function getStudentQuizAttemptController(
       );
     }
 
+    const student = await getActiveStudent(studentId);
+
     const attempt = await QuizAttempt.findOne({
       _id: attemptId,
-      student: studentId,
+      student: student._id,
     }).exec();
 
     if (!attempt) {
@@ -331,7 +446,13 @@ export async function getStudentQuizAttemptController(
       );
     }
 
-    const quiz = await Quiz.findById(attempt.quiz).exec();
+    const quiz = await Quiz.findById(attempt.quiz)
+      .populate({
+        path: 'course',
+        model: Course,
+        select: 'title code semester department batches sections status',
+      })
+      .exec();
 
     if (!quiz) {
       throw createControllerError(
@@ -341,11 +462,22 @@ export async function getStudentQuizAttemptController(
       );
     }
 
+    // Re-check authorization on every attempt read.
+    // This also blocks suspended students and students whose
+    // course/batch/section access has since been revoked.
+    if (!studentCanAccessQuiz(student, quiz)) {
+      throw createControllerError(
+        'You no longer have access to this quiz.',
+        'QUIZ_ACCESS_DENIED',
+        403,
+      );
+    }
+
     const now = new Date();
 
     if (
-      attempt.status === QUIZ_ATTEMPT_STATUSES.IN_PROGRESS &&
-      now >= attempt.expiresAt
+      attempt.status === QUIZ_ATTEMPT_STATUSES.IN_PROGRESS
+      && now >= attempt.expiresAt
     ) {
       attempt.status = QUIZ_ATTEMPT_STATUSES.EXPIRED;
       await attempt.save();
