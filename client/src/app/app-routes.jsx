@@ -50,6 +50,7 @@ import AssignmentDetails from "../features/lms/pages/hod/AssignmentDetails.jsx";
 import EditAssignment from "../features/lms/pages/hod/EditAssignment.jsx";
 
 import QuizOverview from "../features/lms/pages/hod/QuizOverview.jsx";
+import CreateQuiz from "../features/lms/pages/hod/CreateQuiz.jsx";
 import QuizDetails from "../features/lms/pages/hod/QuizDetails.jsx";
 import QuizEdit from "../features/lms/pages/hod/QuizEdit.jsx";
 
@@ -336,6 +337,11 @@ export const applicationRoutes = [
         id: "hod-quizzes",
         path: "quizzes",
         element: <QuizOverview />,
+      },
+      {
+        id: "hod-quiz-create",
+        path: "quizzes/new",
+        element: <CreateQuiz />,
       },
       {
         id: "hod-quiz-details",
