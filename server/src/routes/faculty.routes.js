@@ -8,6 +8,10 @@ import {
   updateFacultyController,
 } from '../controllers/faculty.controller.js';
 
+import {
+  updateFacultyStatusController,
+} from '../controllers/faculty-status.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
@@ -22,6 +26,13 @@ import {
 const facultyRouter = Router();
 
 const emptyObjectSchema = z.object({}).strict();
+
+const facultyIdParamsSchema = z.object({
+  facultyId: z.string().regex(
+    /^[a-f\d]{24}$/i,
+    'A valid faculty account ID is required.',
+  ),
+});
 
 const createFacultySchema = z.object({
   body: z.object({
@@ -58,13 +69,6 @@ const listFacultySchema = z.object({
   }).strict(),
 });
 
-const facultyIdParamsSchema = z.object({
-  facultyId: z.string().regex(
-    /^[a-f\d]{24}$/i,
-    'A valid faculty account ID is required.',
-  ),
-});
-
 const getFacultyByIdSchema = z.object({
   body: emptyObjectSchema,
   params: facultyIdParamsSchema,
@@ -89,10 +93,23 @@ const updateFacultySchema = z.object({
   query: emptyObjectSchema,
 });
 
-// List faculty and mentor accounts within the authenticated HOD's
-// department.
+const updateFacultyStatusSchema = z.object({
+  body: z.object({
+    status: z.enum([
+      ACCOUNT_STATUSES.ACTIVE,
+      ACCOUNT_STATUSES.SUSPENDED,
+      ACCOUNT_STATUSES.DISABLED,
+    ]),
+  }).strict(),
+
+  params: facultyIdParamsSchema,
+  query: emptyObjectSchema,
+});
+
+// List faculty and mentor accounts.
 //
 // GET /api/v1/provisioning/faculty
+
 facultyRouter.get(
   '/',
   authenticate,
@@ -101,9 +118,10 @@ facultyRouter.get(
   listFacultyController,
 );
 
-// Create a faculty account within the authenticated HOD's department.
+// Create faculty account.
 //
 // POST /api/v1/provisioning/faculty
+
 facultyRouter.post(
   '/',
   authenticate,
@@ -120,9 +138,31 @@ facultyRouter.post(
   createFacultyController,
 );
 
-// Retrieve an individual faculty or mentor account.
+// Update faculty or mentor account status.
+//
+// PATCH /api/v1/provisioning/faculty/:facultyId/status
+
+facultyRouter.patch(
+  '/:facultyId/status',
+  authenticate,
+  authorize('HOD'),
+  authRateLimiter,
+  validate(updateFacultyStatusSchema),
+  auditEvent({
+    action: 'FACULTY_ACCOUNT_STATUS_UPDATE',
+    resourceType: 'FacultyAccount',
+    getResourceId: (req) => req.params.facultyId,
+    getMetadata: (req) => ({
+      requestedStatus: req.body.status,
+    }),
+  }),
+  updateFacultyStatusController,
+);
+
+// Retrieve faculty or mentor account.
 //
 // GET /api/v1/provisioning/faculty/:facultyId
+
 facultyRouter.get(
   '/:facultyId',
   authenticate,
@@ -131,9 +171,10 @@ facultyRouter.get(
   getFacultyByIdController,
 );
 
-// Update permitted fields on an individual faculty or mentor account.
+// Update faculty or mentor details.
 //
 // PATCH /api/v1/provisioning/faculty/:facultyId
+
 facultyRouter.patch(
   '/:facultyId',
   authenticate,
