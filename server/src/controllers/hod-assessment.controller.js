@@ -1,0 +1,1147 @@
+import mongoose from 'mongoose';
+
+import {
+  Assessment,
+  ASSESSMENT_STATUSES,
+} from '../models/assessment.model.js';
+
+import {
+  AssessmentResult,
+  ASSESSMENT_RESULT_STATUSES,
+} from '../models/assessment-result.model.js';
+
+import { Batch } from '../models/batch.model.js';
+import { Course } from '../models/course.model.js';
+import { Department } from '../models/department.model.js';
+import { Section } from '../models/section.model.js';
+
+import {
+  User,
+  USER_ROLES,
+  ACCOUNT_STATUSES,
+} from '../models/user.model.js';
+
+const DEFAULT_PAGE = 1;
+const DEFAULT_LIMIT = 20;
+const MAX_LIMIT = 100;
+
+function createHttpError(statusCode, message, code) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+
+  if (code) {
+    error.code = code;
+  }
+
+  return error;
+}
+
+function getAuthenticatedUserId(req) {
+  const userId = req.user?.id || req.user?._id;
+
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    return null;
+  }
+
+  return new mongoose.Types.ObjectId(userId);
+}
+
+function getPagination(query = {}) {
+  const page = Number(query.page ?? DEFAULT_PAGE);
+  const limit = Number(query.limit ?? DEFAULT_LIMIT);
+
+  if (
+    !Number.isInteger(page) ||
+    page < 1 ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > MAX_LIMIT
+  ) {
+    throw createHttpError(
+      400,
+      `Pagination requires a positive page and a limit between 1 and ${MAX_LIMIT}.`,
+    );
+  }
+
+  return {
+    page,
+    limit,
+    skip: (page - 1) * limit,
+  };
+}
+
+function normalizeObjectIds(values = []) {
+  return values.map(
+    (value) => new mongoose.Types.ObjectId(value),
+  );
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+async function getHodDepartment(req) {
+  const userId = getAuthenticatedUserId(req);
+
+  if (!userId) {
+    throw createHttpError(
+      401,
+      'A valid authenticated HOD account is required.',
+    );
+  }
+
+  const hod = await User.findOne({
+    _id: userId,
+    role: USER_ROLES.HOD,
+    status: ACCOUNT_STATUSES.ACTIVE,
+  })
+    .select('_id department')
+    .lean()
+    .exec();
+
+  if (!hod?.department) {
+    throw createHttpError(
+      403,
+      'An active HOD account with a department assignment is required.',
+    );
+  }
+
+  const department = await Department.findOne({
+    _id: hod.department,
+    hod: hod._id,
+    status: 'ACTIVE',
+  })
+    .select('_id name code')
+    .lean()
+    .exec();
+
+  if (!department) {
+    throw createHttpError(
+      403,
+      'You are not authorized to manage this department.',
+    );
+  }
+
+  return {
+    hod,
+    department,
+  };
+}
+
+function normalizeAssessment(assessment, resultCount = 0) {
+  const course = assessment.course || {};
+  const creator = assessment.createdBy || {};
+
+  return {
+    id: String(assessment._id),
+
+    title: assessment.title,
+    description: assessment.description || '',
+
+    type: assessment.type,
+    status: assessment.status,
+
+    department: assessment.department
+      ? String(assessment.department)
+      : null,
+
+    course: course._id
+      ? {
+          id: String(course._id),
+          title: course.title,
+          code: course.code,
+          semester: course.semester || '',
+        }
+      : null,
+
+    batches: (assessment.batches || []).map((batch) => ({
+      id: String(batch._id),
+      name: batch.name,
+      code: batch.code,
+    })),
+
+    sections: (assessment.sections || []).map((section) => ({
+      id: String(section._id),
+      name: section.name,
+      code: section.code,
+    })),
+
+    assessmentDate: assessment.assessmentDate,
+
+    totalMarks: assessment.totalMarks,
+    passingMarks: assessment.passingMarks,
+
+    resultCount,
+
+    createdBy: creator._id
+      ? {
+          id: String(creator._id),
+          name: creator.fullName,
+        }
+      : null,
+
+    publishedAt: assessment.publishedAt,
+    closedAt: assessment.closedAt,
+
+    createdAt: assessment.createdAt,
+    updatedAt: assessment.updatedAt,
+  };
+}
+
+function normalizeAssessmentResult(result) {
+  const student = result.student || {};
+  const percentage =
+    result.status === ASSESSMENT_RESULT_STATUSES.ENTERED &&
+    result.marksObtained !== null
+      ? Number(
+          (
+            (result.marksObtained / result.totalMarks) *
+            100
+          ).toFixed(2),
+        )
+      : null;
+
+  const passed =
+    percentage === null
+      ? null
+      : result.marksObtained >=
+        result.totalMarks *
+          (result.passingMarksRatio ?? 0);
+
+  return {
+    id: String(result._id),
+
+    student: {
+      id: student._id ? String(student._id) : null,
+      institutionalId: student.institutionalId || '',
+      fullName: student.fullName || 'Unknown student',
+    },
+
+    marksObtained: result.marksObtained,
+    totalMarks: result.totalMarks,
+
+    percentage,
+    passed,
+
+    status: result.status,
+    remarks: result.remarks || '',
+
+    evaluatedBy: result.evaluatedBy
+      ? String(result.evaluatedBy)
+      : null,
+
+    evaluatedAt: result.evaluatedAt,
+    publishedAt: result.publishedAt,
+
+    createdAt: result.createdAt,
+    updatedAt: result.updatedAt,
+  };
+}
+
+async function getAssessmentForHod(assessmentId, departmentId) {
+  const assessment = await Assessment.findOne({
+    _id: assessmentId,
+    department: departmentId,
+  })
+    .exec();
+
+  if (!assessment) {
+    throw createHttpError(
+      404,
+      'Assessment was not found in your department.',
+    );
+  }
+
+  return assessment;
+}
+
+async function validateAssessmentTargets({
+  departmentId,
+  courseId,
+  batchIds,
+  sectionIds,
+}) {
+  const course = await Course.findOne({
+    _id: courseId,
+    department: departmentId,
+    status: 'ACTIVE',
+  })
+    .select('_id title code batches sections department')
+    .lean()
+    .exec();
+
+  if (!course) {
+    throw createHttpError(
+      404,
+      'The selected active course was not found in your department.',
+    );
+  }
+
+  const batches = batchIds.length
+    ? await Batch.find({
+        _id: { $in: batchIds },
+        department: departmentId,
+        status: 'ACTIVE',
+      })
+        .select('_id name code department')
+        .lean()
+        .exec()
+    : [];
+
+  if (batches.length !== batchIds.length) {
+    throw createHttpError(
+      400,
+      'One or more selected batches are invalid or inactive.',
+    );
+  }
+
+  const sections = sectionIds.length
+    ? await Section.find({
+        _id: { $in: sectionIds },
+        department: departmentId,
+        status: 'ACTIVE',
+      })
+        .select('_id name code batch department')
+        .lean()
+        .exec()
+    : [];
+
+  if (sections.length !== sectionIds.length) {
+    throw createHttpError(
+      400,
+      'One or more selected sections are invalid or inactive.',
+    );
+  }
+
+  const courseBatchIds = new Set(
+    (course.batches || []).map(String),
+  );
+
+  const courseSectionIds = new Set(
+    (course.sections || []).map(String),
+  );
+
+  for (const batch of batches) {
+    if (!courseBatchIds.has(String(batch._id))) {
+      throw createHttpError(
+        400,
+        `Batch ${batch.name} is not assigned to the selected course.`,
+      );
+    }
+  }
+
+  for (const section of sections) {
+    if (!courseSectionIds.has(String(section._id))) {
+      throw createHttpError(
+        400,
+        `Section ${section.name} is not assigned to the selected course.`,
+      );
+    }
+  }
+
+  const selectedBatchIds = new Set(
+    batches.map((batch) => String(batch._id)),
+  );
+
+  for (const section of sections) {
+    if (
+      batchIds.length > 0 &&
+      !selectedBatchIds.has(String(section.batch))
+    ) {
+      throw createHttpError(
+        400,
+        `Section ${section.name} does not belong to a selected batch.`,
+      );
+    }
+  }
+
+  return {
+    course,
+    batches,
+    sections,
+  };
+}
+
+async function getAssessmentStudentRoster({
+  departmentId,
+  batches,
+  sections,
+}) {
+  const batchIds = batches.map((batch) => batch._id);
+  const sectionIds = sections.map((section) => section._id);
+
+  const assignmentFilter = sectionIds.length
+    ? {
+        assignedSections: {
+          $in: sectionIds,
+        },
+      }
+    : {
+        assignedBatches: {
+          $in: batchIds,
+        },
+      };
+
+  const students = await User.find({
+    department: departmentId,
+    role: USER_ROLES.STUDENT,
+    status: ACCOUNT_STATUSES.ACTIVE,
+    ...assignmentFilter,
+  })
+    .select('_id institutionalId fullName assignedBatches assignedSections')
+    .lean()
+    .exec();
+
+  const batchById = new Map(
+    batches.map((batch) => [String(batch._id), batch]),
+  );
+
+  const sectionById = new Map(
+    sections.map((section) => [String(section._id), section]),
+  );
+
+  return students.map((student) => {
+    const assignedSection = (student.assignedSections || [])
+      .map(String)
+      .find((id) => sectionById.has(id));
+
+    const selectedSection = assignedSection
+      ? sectionById.get(assignedSection)
+      : null;
+
+    const assignedBatch = (student.assignedBatches || [])
+      .map(String)
+      .find((id) => batchById.has(id));
+
+    const selectedBatchId =
+      assignedBatch ||
+      (selectedSection
+        ? String(selectedSection.batch)
+        : null);
+
+    return {
+      student: student._id,
+      batch: selectedBatchId
+        ? batchById.get(selectedBatchId)?._id || null
+        : null,
+      section: selectedSection?._id || null,
+    };
+  });
+}
+
+/**
+ * GET /api/v1/assessments/manage
+ *
+ * Lists assessments belonging to the authenticated HOD's department.
+ */
+export async function listHodAssessmentsController(req, res, next) {
+  try {
+    const { department } = await getHodDepartment(req);
+
+    const query = req.validated?.query || req.query;
+    const { page, limit, skip } = getPagination(query);
+
+    const filter = {
+      department: department._id,
+    };
+
+    if (query.type) {
+      filter.type = query.type;
+    }
+
+    if (query.status) {
+      filter.status = query.status;
+    }
+
+    if (query.courseId) {
+      filter.course = query.courseId;
+    }
+
+    if (query.batchId) {
+      filter.batches = query.batchId;
+    }
+
+    if (query.sectionId) {
+      filter.sections = query.sectionId;
+    }
+
+    if (query.startDate || query.endDate) {
+      filter.assessmentDate = {};
+
+      if (query.startDate) {
+        filter.assessmentDate.$gte = new Date(query.startDate);
+      }
+
+      if (query.endDate) {
+        filter.assessmentDate.$lte = new Date(query.endDate);
+      }
+    }
+
+    if (query.search) {
+      const search = escapeRegex(query.search.trim());
+
+      filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+      ];
+    }
+
+    const [assessments, total] = await Promise.all([
+      Assessment.find(filter)
+        .sort({ assessmentDate: -1, createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate({
+          path: 'course',
+          select: 'title code semester',
+        })
+        .populate({
+          path: 'batches',
+          select: 'name code',
+        })
+        .populate({
+          path: 'sections',
+          select: 'name code',
+        })
+        .populate({
+          path: 'createdBy',
+          select: 'fullName',
+        })
+        .lean()
+        .exec(),
+
+      Assessment.countDocuments(filter),
+    ]);
+
+    const resultCounts = await Promise.all(
+      assessments.map((assessment) =>
+        AssessmentResult.countDocuments({
+          assessment: assessment._id,
+        }),
+      ),
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        department: {
+          id: String(department._id),
+          name: department.name,
+          code: department.code,
+        },
+
+        assessments: assessments.map((assessment, index) =>
+          normalizeAssessment(assessment, resultCounts[index]),
+        ),
+
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * POST /api/v1/assessments/manage
+ *
+ * Creates an assessment and initializes pending result records
+ * for the active students assigned to its selected targets.
+ */
+export async function createHodAssessmentController(req, res, next) {
+  let session;
+
+  try {
+    const { hod, department } = await getHodDepartment(req);
+
+    const body = req.validated?.body || req.body;
+
+    const batchIds = normalizeObjectIds(body.batchIds || []);
+    const sectionIds = normalizeObjectIds(body.sectionIds || []);
+
+    if (batchIds.length === 0 && sectionIds.length === 0) {
+      throw createHttpError(
+        400,
+        'Select at least one batch or section.',
+      );
+    }
+
+    const { course, batches, sections } =
+      await validateAssessmentTargets({
+        departmentId: department._id,
+        courseId: body.courseId,
+        batchIds,
+        sectionIds,
+      });
+
+    const roster = await getAssessmentStudentRoster({
+      departmentId: department._id,
+      batches,
+      sections,
+    });
+
+    session = await mongoose.startSession();
+
+    let createdAssessment;
+
+    await session.withTransaction(async () => {
+      const [assessment] = await Assessment.create(
+        [
+          {
+            title: body.title,
+            description: body.description || '',
+            type: body.type,
+
+            department: department._id,
+            course: course._id,
+
+            batches: batchIds,
+            sections: sectionIds,
+
+            assessmentDate: body.assessmentDate,
+
+            totalMarks: body.totalMarks,
+            passingMarks: body.passingMarks,
+
+            status:
+              body.status || ASSESSMENT_STATUSES.DRAFT,
+
+            createdBy: hod._id,
+          },
+        ],
+        { session },
+      );
+
+      createdAssessment = assessment;
+
+      if (roster.length > 0) {
+        const resultDocuments = roster.map((entry) => ({
+          assessment: assessment._id,
+          student: entry.student,
+
+          department: department._id,
+          course: course._id,
+
+          batch: entry.batch,
+          section: entry.section,
+
+          totalMarks: body.totalMarks,
+
+          marksObtained: null,
+
+          status: ASSESSMENT_RESULT_STATUSES.PENDING,
+
+          remarks: '',
+        }));
+
+        await AssessmentResult.insertMany(
+          resultDocuments,
+          {
+            session,
+            ordered: true,
+          },
+        );
+      }
+    });
+
+    const populatedAssessment = await Assessment.findById(
+      createdAssessment._id,
+    )
+      .populate('course', 'title code semester')
+      .populate('batches', 'name code')
+      .populate('sections', 'name code')
+      .populate('createdBy', 'fullName')
+      .lean()
+      .exec();
+
+    return res.status(201).json({
+      success: true,
+      message: 'Assessment created successfully.',
+      data: {
+        assessment: normalizeAssessment(
+          populatedAssessment,
+          roster.length,
+        ),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  } finally {
+    if (session) {
+      await session.endSession();
+    }
+  }
+}
+
+/**
+ * PATCH /api/v1/assessments/manage/:assessmentId
+ *
+ * Updates a draft assessment.
+ */
+export async function updateHodAssessmentController(req, res, next) {
+  try {
+    const { department } = await getHodDepartment(req);
+
+    const { assessmentId } = req.validated?.params || req.params;
+    const body = req.validated?.body || req.body;
+
+    const assessment = await getAssessmentForHod(
+      assessmentId,
+      department._id,
+    );
+
+    if (assessment.status !== ASSESSMENT_STATUSES.DRAFT) {
+      throw createHttpError(
+        409,
+        'Only draft assessments can be edited.',
+      );
+    }
+
+    const scopeFields = [
+      'courseId',
+      'batchIds',
+      'sectionIds',
+      'totalMarks',
+    ];
+
+    const changesScope = scopeFields.some(
+      (field) => Object.hasOwn(body, field),
+    );
+
+    if (changesScope) {
+      const existingResults = await AssessmentResult.exists({
+        assessment: assessment._id,
+      });
+
+      if (existingResults) {
+        throw createHttpError(
+          409,
+          'Course, target groups, and maximum marks cannot be changed after student result records have been initialized.',
+        );
+      }
+    }
+
+    if (
+      body.passingMarks !== undefined &&
+      body.passingMarks > (body.totalMarks ?? assessment.totalMarks)
+    ) {
+      throw createHttpError(
+        400,
+        'Passing marks cannot exceed total marks.',
+      );
+    }
+
+    if (
+      body.totalMarks !== undefined &&
+      body.passingMarks === undefined &&
+      assessment.passingMarks > body.totalMarks
+    ) {
+      throw createHttpError(
+        400,
+        'New total marks cannot be lower than the existing passing marks.',
+      );
+    }
+
+    const updates = {};
+
+    if (body.title !== undefined) updates.title = body.title;
+    if (body.description !== undefined) updates.description = body.description;
+    if (body.type !== undefined) updates.type = body.type;
+    if (body.assessmentDate !== undefined) updates.assessmentDate = body.assessmentDate;
+    if (body.totalMarks !== undefined) updates.totalMarks = body.totalMarks;
+    if (body.passingMarks !== undefined) updates.passingMarks = body.passingMarks;
+
+    if (body.status !== undefined) {
+      if (
+        body.status === ASSESSMENT_STATUSES.PUBLISHED
+      ) {
+        const pendingCount = await AssessmentResult.countDocuments({
+          assessment: assessment._id,
+          status: ASSESSMENT_RESULT_STATUSES.PENDING,
+        });
+
+        const totalResultCount = await AssessmentResult.countDocuments({
+          assessment: assessment._id,
+        });
+
+        if (totalResultCount === 0) {
+          throw createHttpError(
+            409,
+            'An assessment without student result records cannot be published.',
+          );
+        }
+
+        if (pendingCount > 0) {
+          throw createHttpError(
+            409,
+            `${pendingCount} student result records are still pending.`,
+          );
+        }
+
+        updates.publishedAt = new Date();
+      }
+
+      updates.status = body.status;
+
+      if (body.status === ASSESSMENT_STATUSES.CLOSED) {
+        updates.closedAt = new Date();
+      }
+    }
+
+    const updatedAssessment = await Assessment.findOneAndUpdate(
+      {
+        _id: assessment._id,
+        department: department._id,
+        status: ASSESSMENT_STATUSES.DRAFT,
+      },
+      {
+        $set: updates,
+      },
+      {
+        new: true,
+        runValidators: true,
+      },
+    )
+      .populate('course', 'title code semester')
+      .populate('batches', 'name code')
+      .populate('sections', 'name code')
+      .populate('createdBy', 'fullName')
+      .lean()
+      .exec();
+
+    if (!updatedAssessment) {
+      throw createHttpError(
+        409,
+        'The assessment changed while this request was being processed.',
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Assessment updated successfully.',
+      data: {
+        assessment: normalizeAssessment(updatedAssessment),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * GET /api/v1/assessments/manage/:assessmentId/results
+ *
+ * Lists student-wise marks for an assessment.
+ */
+export async function listHodAssessmentResultsController(req, res, next) {
+  try {
+    const { department } = await getHodDepartment(req);
+
+    const { assessmentId } = req.validated?.params || req.params;
+    const query = req.validated?.query || req.query;
+
+    const { page, limit, skip } = getPagination(query);
+
+    const assessment = await getAssessmentForHod(
+      assessmentId,
+      department._id,
+    );
+
+    const filter = {
+      assessment: assessment._id,
+      department: department._id,
+    };
+
+    if (query.status) {
+      filter.status = query.status;
+    }
+
+    if (query.search) {
+      const search = escapeRegex(query.search.trim());
+
+      const matchingStudents = await User.find({
+        department: department._id,
+        role: USER_ROLES.STUDENT,
+        $or: [
+          { fullName: { $regex: search, $options: 'i' } },
+          { institutionalId: { $regex: search, $options: 'i' } },
+        ],
+      })
+        .select('_id')
+        .lean()
+        .exec();
+
+      filter.student = {
+        $in: matchingStudents.map((student) => student._id),
+      };
+    }
+
+    const [results, total, statusCounts] = await Promise.all([
+      AssessmentResult.find(filter)
+        .sort({ createdAt: 1, _id: 1 })
+        .skip(skip)
+        .limit(limit)
+        .populate({
+          path: 'student',
+          select: 'institutionalId fullName department role',
+        })
+        .lean()
+        .exec(),
+
+      AssessmentResult.countDocuments(filter),
+
+      AssessmentResult.aggregate([
+        {
+          $match: {
+            assessment: assessment._id,
+            department: department._id,
+          },
+        },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    const counts = Object.fromEntries(
+      statusCounts.map((item) => [item._id, item.count]),
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        assessment: {
+          id: String(assessment._id),
+          title: assessment.title,
+          type: assessment.type,
+          status: assessment.status,
+          totalMarks: assessment.totalMarks,
+          passingMarks: assessment.passingMarks,
+        },
+
+        summary: {
+          total: Object.values(counts).reduce(
+            (sum, value) => sum + value,
+            0,
+          ),
+          pending: counts.PENDING || 0,
+          entered: counts.ENTERED || 0,
+          absent: counts.ABSENT || 0,
+          exempt: counts.EXEMPT || 0,
+        },
+
+        results: results.map(normalizeAssessmentResult),
+
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * PATCH /api/v1/assessments/manage/:assessmentId/results
+ *
+ * Saves student-wise marks in bulk for a draft assessment.
+ */
+export async function updateHodAssessmentResultsController(req, res, next) {
+  try {
+    const { hod, department } = await getHodDepartment(req);
+
+    const { assessmentId } = req.validated?.params || req.params;
+    const body = req.validated?.body || req.body;
+
+    const assessment = await getAssessmentForHod(
+      assessmentId,
+      department._id,
+    );
+
+    if (assessment.status !== ASSESSMENT_STATUSES.DRAFT) {
+      throw createHttpError(
+        409,
+        'Marks can only be changed while the assessment is in draft status.',
+      );
+    }
+
+    const studentIds = body.results.map((result) => result.studentId);
+
+    if (new Set(studentIds).size !== studentIds.length) {
+      throw createHttpError(
+        400,
+        'A student can appear only once in a bulk marks request.',
+      );
+    }
+
+    const resultRecords = await AssessmentResult.find({
+      assessment: assessment._id,
+      department: department._id,
+      student: {
+        $in: normalizeObjectIds(studentIds),
+      },
+    })
+      .select('_id student totalMarks')
+      .lean()
+      .exec();
+
+    if (resultRecords.length !== studentIds.length) {
+      throw createHttpError(
+        400,
+        'One or more students do not belong to this assessment roster.',
+      );
+    }
+
+    const recordByStudent = new Map(
+      resultRecords.map((record) => [
+        String(record.student),
+        record,
+      ]),
+    );
+
+    const operations = body.results.map((entry) => {
+      const record = recordByStudent.get(entry.studentId);
+
+      if (!record) {
+        throw createHttpError(
+          400,
+          'A requested student result record was not found.',
+        );
+      }
+
+      const status = entry.status;
+      const marks = entry.marksObtained;
+
+      if (status === ASSESSMENT_RESULT_STATUSES.ENTERED) {
+        if (typeof marks !== 'number') {
+          throw createHttpError(
+            400,
+            'Marks are required for every entered result.',
+          );
+        }
+
+        if (marks > record.totalMarks) {
+          throw createHttpError(
+            400,
+            'Obtained marks cannot exceed the assessment maximum.',
+          );
+        }
+      } else if (marks !== undefined && marks !== null) {
+        throw createHttpError(
+          400,
+          'Pending, absent, and exempt results cannot contain obtained marks.',
+        );
+      }
+
+      const update = {
+        status,
+        marksObtained:
+          status === ASSESSMENT_RESULT_STATUSES.ENTERED
+            ? marks
+            : null,
+
+        evaluatedBy:
+          status === ASSESSMENT_RESULT_STATUSES.ENTERED
+            ? hod._id
+            : null,
+
+        evaluatedAt:
+          status === ASSESSMENT_RESULT_STATUSES.ENTERED
+            ? new Date()
+            : null,
+      };
+
+      if (entry.remarks !== undefined) {
+        update.remarks = entry.remarks;
+      }
+
+      return {
+        updateOne: {
+          filter: {
+            _id: record._id,
+            assessment: assessment._id,
+            department: department._id,
+          },
+          update: {
+            $set: update,
+          },
+        },
+      };
+    });
+
+    await AssessmentResult.bulkWrite(
+      operations,
+      {
+        ordered: true,
+      },
+    );
+
+    const [updatedResults, statusCounts] = await Promise.all([
+      AssessmentResult.find({
+        assessment: assessment._id,
+        department: department._id,
+        student: {
+          $in: normalizeObjectIds(studentIds),
+        },
+      })
+        .populate({
+          path: 'student',
+          select: 'institutionalId fullName',
+        })
+        .lean()
+        .exec(),
+
+      AssessmentResult.aggregate([
+        {
+          $match: {
+            assessment: assessment._id,
+            department: department._id,
+          },
+        },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+    ]);
+
+    const counts = Object.fromEntries(
+      statusCounts.map((item) => [item._id, item.count]),
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Student marks updated successfully.',
+      data: {
+        results: updatedResults.map(normalizeAssessmentResult),
+
+        summary: {
+          total: Object.values(counts).reduce(
+            (sum, value) => sum + value,
+            0,
+          ),
+          pending: counts.PENDING || 0,
+          entered: counts.ENTERED || 0,
+          absent: counts.ABSENT || 0,
+          exempt: counts.EXEMPT || 0,
+        },
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
