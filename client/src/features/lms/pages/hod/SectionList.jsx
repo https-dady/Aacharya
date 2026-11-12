@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import api from '../../../auth/services/api/axios.js';
+import sectionManagementService from '../../services/sectionManagementService.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
@@ -11,12 +11,7 @@ import SearchInput from '../../components/SearchInput.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
 const PAGE_SIZE = 100;
-
-function getResponseData(response) {
-  const body = response?.data;
-
-  return body?.data ?? body;
-}
+const BATCH_CONCURRENCY = 5;
 
 function getErrorMessage(error) {
   const status = error?.response?.status;
@@ -37,15 +32,11 @@ function getErrorMessage(error) {
   );
 }
 
-function getBatchId(batch) {
-  return batch?.id || batch?._id || '';
-}
-
 function normalizeSection(section, batch) {
   return {
     ...section,
     id: section.id || section._id,
-    batchId: getBatchId(batch),
+    batchId: section.batch?.id || batch.id,
     batchName: section.batch?.name || batch.name || 'Not available',
     batchCode: section.batch?.code || batch.code || 'Not available',
     academicYear:
@@ -58,40 +49,17 @@ function normalizeSection(section, batch) {
 async function fetchAllBatches(signal) {
   const batches = [];
   let page = 1;
-  let hasNextPage = true;
 
-  while (hasNextPage) {
-    const response = await api.get(
-      '/v1/provisioning/batches',
-      {
-        params: {
-          page,
-          limit: PAGE_SIZE,
-        },
-        signal,
-      },
-    );
+  while (true) {
+    const result = await sectionManagementService.listBatches({
+      page,
+      limit: PAGE_SIZE,
+      signal,
+    });
 
-    const data = getResponseData(response);
+    batches.push(...result.batches);
 
-    if (!Array.isArray(data?.batches)) {
-      throw new Error(
-        'The server returned an unexpected batch list response.',
-      );
-    }
-
-    batches.push(...data.batches);
-
-    hasNextPage = Boolean(
-      data.pagination?.hasNextPage,
-    );
-
-    if (!data.pagination && data.batches.length === PAGE_SIZE) {
-      page += 1;
-      continue;
-    }
-
-    if (!hasNextPage) {
+    if (!result.pagination.hasNextPage) {
       break;
     }
 
@@ -102,52 +70,24 @@ async function fetchAllBatches(signal) {
 }
 
 async function fetchSectionsForBatch(batch, signal) {
-  const batchId = getBatchId(batch);
-
-  if (!batchId) {
-    return [];
-  }
-
   const sections = [];
   let page = 1;
-  let hasNextPage = true;
 
-  while (hasNextPage) {
-    const response = await api.get(
-      `/v1/provisioning/batches/${encodeURIComponent(batchId)}/sections`,
-      {
-        params: {
-          page,
-          limit: PAGE_SIZE,
-        },
-        signal,
-      },
-    );
-
-    const data = getResponseData(response);
-
-    if (!Array.isArray(data?.sections)) {
-      throw new Error(
-        `The server returned an unexpected sections response for batch ${batch.name}.`,
-      );
-    }
+  while (true) {
+    const result = await sectionManagementService.listSections({
+      batchId: batch.id,
+      page,
+      limit: PAGE_SIZE,
+      signal,
+    });
 
     sections.push(
-      ...data.sections.map((section) =>
+      ...result.sections.map((section) =>
         normalizeSection(section, batch),
       ),
     );
 
-    hasNextPage = Boolean(
-      data.pagination?.hasNextPage,
-    );
-
-    if (!data.pagination && data.sections.length === PAGE_SIZE) {
-      page += 1;
-      continue;
-    }
-
-    if (!hasNextPage) {
+    if (!result.pagination.hasNextPage) {
       break;
     }
 
@@ -155,6 +95,70 @@ async function fetchSectionsForBatch(batch, signal) {
   }
 
   return sections;
+}
+
+async function fetchSectionsWithLimitedConcurrency(
+  batches,
+  signal,
+) {
+  const sections = [];
+  const failures = [];
+
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < batches.length) {
+      if (signal?.aborted) {
+        return;
+      }
+
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+
+      const batch = batches[currentIndex];
+
+      try {
+        const batchSections = await fetchSectionsForBatch(
+          batch,
+          signal,
+        );
+
+        if (!signal?.aborted) {
+          sections.push(...batchSections);
+        }
+      } catch (error) {
+        if (
+          signal?.aborted
+          || error?.code === 'ERR_CANCELED'
+        ) {
+          return;
+        }
+
+        failures.push({
+          batchId: batch.id,
+          batchName: batch.name,
+          error,
+        });
+      }
+    }
+  }
+
+  const workerCount = Math.min(
+    BATCH_CONCURRENCY,
+    batches.length,
+  );
+
+  await Promise.all(
+    Array.from(
+      { length: workerCount },
+      () => worker(),
+    ),
+  );
+
+  return {
+    sections,
+    failures,
+  };
 }
 
 export default function SectionList() {
@@ -177,33 +181,16 @@ export default function SectionList() {
         return;
       }
 
-      const results = await Promise.allSettled(
-        batches.map((batch) =>
-          fetchSectionsForBatch(batch, signal),
-        ),
+      const result = await fetchSectionsWithLimitedConcurrency(
+        batches,
+        signal,
       );
 
       if (signal?.aborted) {
         return;
       }
 
-      const loadedSections = [];
-      let failedBatches = 0;
-
-      results.forEach((result) => {
-        if (result.status === 'fulfilled') {
-          loadedSections.push(...result.value);
-        } else {
-          if (
-            result.reason?.code === 'ERR_CANCELED'
-            || signal?.aborted
-          ) {
-            return;
-          }
-
-          failedBatches += 1;
-        }
-      });
+      const loadedSections = result.sections;
 
       loadedSections.sort((first, second) => {
         const batchComparison = first.batchName.localeCompare(
@@ -214,11 +201,13 @@ export default function SectionList() {
           return batchComparison;
         }
 
-        return first.code?.localeCompare(second.code || '') || 0;
+        return (
+          first.code?.localeCompare(second.code || '') || 0
+        );
       });
 
       setSections(loadedSections);
-      setPartialFailureCount(failedBatches);
+      setPartialFailureCount(result.failures.length);
     } catch (loadError) {
       if (
         signal?.aborted
@@ -236,15 +225,21 @@ export default function SectionList() {
     }
   }, []);
 
-  useEffect(() => {
+  const refreshSections = useCallback(() => {
     const controller = new AbortController();
 
     loadSections(controller.signal);
 
+    return controller;
+  }, [loadSections]);
+
+  useEffect(() => {
+    const controller = refreshSections();
+
     return () => {
       controller.abort();
     };
-  }, [loadSections]);
+  }, [refreshSections]);
 
   const filteredSections = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -287,9 +282,8 @@ export default function SectionList() {
             <ActionButton
               type="button"
               variant="secondary"
-              onClick={() => loadSections()}
+              onClick={refreshSections}
               disabled={isLoading}
-              loading={isLoading}
             >
               Refresh
             </ActionButton>
@@ -312,7 +306,7 @@ export default function SectionList() {
       <SectionCard
         eyebrow="SECTION DIRECTORY"
         title="All Sections"
-        description="Sections are loaded from the backend for the batches belonging to your department."
+        description="Sections are loaded from the backend for batches belonging to your department."
       >
         <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div className="w-full sm:max-w-md">
@@ -345,7 +339,7 @@ export default function SectionList() {
             action={
               <ActionButton
                 type="button"
-                onClick={() => loadSections()}
+                onClick={refreshSections}
               >
                 Try Again
               </ActionButton>
@@ -361,7 +355,7 @@ export default function SectionList() {
             description={
               searchTerm.trim()
                 ? 'Try another section name, code, batch, or academic year.'
-                : 'No section records were found for the available batches. You can create a section from the creation form.'
+                : 'No section records were found for your department batches.'
             }
             action={
               searchTerm.trim() ? (
@@ -390,8 +384,8 @@ export default function SectionList() {
               >
                 <p className="text-sm leading-6 text-[#E5DF98]">
                   Sections loaded, but {partialFailureCount} batch
-                  {partialFailureCount === 1 ? '' : 'es'} could not be
-                  retrieved. Refresh the page to retry.
+                  {partialFailureCount === 1 ? '' : 'es'} could not
+                  be retrieved. Refresh to retry.
                 </p>
               </div>
             )}
@@ -464,14 +458,13 @@ export default function SectionList() {
                           </p>
 
                           <p className="mt-1 text-sm text-[#D0D0D8]">
-                            {new Date(section.createdAt).toLocaleDateString(
-                              'en-IN',
-                              {
-                                day: '2-digit',
-                                month: 'short',
-                                year: 'numeric',
-                              },
-                            )}
+                            {new Date(
+                              section.createdAt,
+                            ).toLocaleDateString('en-IN', {
+                              day: '2-digit',
+                              month: 'short',
+                              year: 'numeric',
+                            })}
                           </p>
                         </div>
                       )}
@@ -514,9 +507,8 @@ export default function SectionList() {
       </SectionCard>
 
       <p className="mt-5 text-xs leading-5 text-[#777986]">
-        Section records are retrieved through the authenticated,
-        department-scoped batch and section endpoints. This page does not
-        invent section records or bypass backend access controls.
+        Section records are retrieved through authenticated,
+        department-scoped backend endpoints.
       </p>
     </div>
   );
