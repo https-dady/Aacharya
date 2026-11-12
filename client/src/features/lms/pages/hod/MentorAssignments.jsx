@@ -258,13 +258,17 @@ export default function MentorAssignments() {
     [page, submittedSearch],
   );
 
-  useEffect(() => {
-    const controller = new AbortController();
+ useEffect(() => {
+  const controller = new AbortController();
 
-    loadMentors(controller.signal);
+  Promise.resolve().then(() => {
+    if (!controller.signal.aborted) {
+      loadMentors(controller.signal);
+    }
+  });
 
-    return () => controller.abort();
-  }, [loadMentors, reloadKey]);
+  return () => controller.abort();
+}, [loadMentors, reloadKey]);
 
   const handleSearchChange = useCallback((event) => {
     setSearch(event.target.value);
