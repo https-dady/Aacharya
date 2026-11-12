@@ -4,9 +4,10 @@ import {
   useMemo,
   useState,
 } from 'react';
+
 import { Link } from 'react-router-dom';
 
-import api from '../../../auth/services/api/axios.js';
+import mentorManagementService from '../../services/mentorManagementService.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import DataTable from '../../components/DataTable.jsx';
@@ -28,10 +29,10 @@ const INITIAL_PAGINATION = {
 
 function getErrorMessage(error) {
   return (
-    error?.response?.data?.error?.message
-    || error?.response?.data?.message
-    || error?.message
-    || 'Unable to load mentor assignments. Please try again.'
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unable to load mentor assignments. Please try again.'
   );
 }
 
@@ -40,10 +41,12 @@ function formatAssignedItems(items, emptyLabel) {
     return emptyLabel;
   }
 
-  return items
-    .map((item) => item?.name || item?.code)
-    .filter(Boolean)
-    .join(', ') || emptyLabel;
+  return (
+    items
+      .map((item) => item?.name || item?.code)
+      .filter(Boolean)
+      .join(', ') || emptyLabel
+  );
 }
 
 function getStatusStyles(status) {
@@ -57,8 +60,42 @@ function getStatusStyles(status) {
   };
 
   return (
-    styles[status]
-    || 'border-[#454650] bg-[#292A32] text-[#A5A6B0]'
+    styles[status] ||
+    'border-[#454650] bg-[#292A32] text-[#A5A6B0]'
+  );
+}
+
+function normalizeMentorForTable(mentor) {
+  return {
+    ...mentor,
+    facultyName: mentor.fullName || '',
+    batch: formatAssignedItems(
+      mentor.assignedBatches,
+      'No batch assigned',
+    ),
+    section: formatAssignedItems(
+      mentor.assignedSections,
+      'No section assigned',
+    ),
+  };
+}
+
+function SummaryCard({ label, value, description }) {
+  return (
+    <div className="rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
+      <p className="text-sm text-[#A5A6B0]">{label}</p>
+
+      <p
+        className="mt-3 text-2xl font-semibold text-[#EAEAE6]"
+        aria-live="polite"
+      >
+        {value}
+      </p>
+
+      <p className="mt-1 text-xs leading-5 text-[#777986]">
+        {description}
+      </p>
+    </div>
   );
 }
 
@@ -97,7 +134,7 @@ const ASSIGNMENT_COLUMNS = [
     accessor: 'batch',
     render: (value) => (
       <span className="block min-w-[140px] max-w-[260px] whitespace-normal leading-5 text-[#C7C7D0]">
-        {value || 'No batch assigned'}
+        {value}
       </span>
     ),
   },
@@ -107,7 +144,7 @@ const ASSIGNMENT_COLUMNS = [
     accessor: 'section',
     render: (value) => (
       <span className="block min-w-[140px] max-w-[260px] whitespace-normal leading-5 text-[#C7C7D0]">
-        {value || 'No section assigned'}
+        {value}
       </span>
     ),
   },
@@ -137,13 +174,15 @@ const ASSIGNMENT_COLUMNS = [
           faculty: {
             id: mentor.id,
             institutionalId: mentor.institutionalId,
-            fullName: mentor.facultyName,
+            fullName: mentor.fullName,
             email: mentor.email,
             role: mentor.role,
             status: mentor.status,
+            assignedBatches: mentor.assignedBatches,
+            assignedSections: mentor.assignedSections,
           },
         }}
-        aria-label={`Manage assignments for ${mentor.facultyName || 'mentor'}`}
+        aria-label={`Manage assignments for ${mentor.fullName || 'mentor'}`}
       >
         <ActionButton
           variant="outline"
@@ -167,114 +206,73 @@ export default function MentorAssignments() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
 
+  const [reloadKey, setReloadKey] = useState(0);
+
   const [showClearPanel, setShowClearPanel] = useState(false);
   const [clearConfirmation, setClearConfirmation] = useState('');
   const [isClearing, setIsClearing] = useState(false);
   const [clearError, setClearError] = useState('');
   const [clearNotice, setClearNotice] = useState('');
 
-  const loadMentors = useCallback(async (signal) => {
-    setIsLoading(true);
-    setError('');
+  const loadMentors = useCallback(
+    async (signal) => {
+      setIsLoading(true);
+      setError('');
 
-    try {
-      const response = await api.get('/v1/provisioning/mentors', {
-        params: {
-          page,
-          limit: PAGE_SIZE,
-          ...(submittedSearch
-            ? { search: submittedSearch }
-            : {}),
-        },
-        ...(signal ? { signal } : {}),
-      });
+      try {
+        const result = await mentorManagementService.listMentors(
+          {
+            page,
+            limit: PAGE_SIZE,
+            search: submittedSearch,
+          },
+          { signal },
+        );
 
-      if (signal?.aborted) {
-        return;
+        if (signal?.aborted) {
+          return;
+        }
+
+        setMentors(
+          result.items.map(normalizeMentorForTable),
+        );
+
+        setPagination(result.pagination);
+      } catch (requestError) {
+        if (
+          signal?.aborted ||
+          requestError?.code === 'ERR_CANCELED'
+        ) {
+          return;
+        }
+
+        setMentors([]);
+        setPagination(INITIAL_PAGINATION);
+        setError(getErrorMessage(requestError));
+      } finally {
+        if (!signal?.aborted) {
+          setIsLoading(false);
+        }
       }
-
-      const body = response?.data;
-      const data = body?.data ?? body;
-
-      const records = Array.isArray(data?.mentors)
-        ? data.mentors
-        : [];
-
-      const serverPagination = data?.pagination ?? {};
-
-      const normalizedMentors = records.map((mentor) => ({
-        id: mentor.id,
-        institutionalId: mentor.institutionalId || '',
-        facultyName: mentor.fullName || '',
-        email: mentor.email || '',
-        role: mentor.role || 'MENTOR',
-        status: mentor.status || 'UNKNOWN',
-
-        assignedBatches: Array.isArray(mentor.assignedBatches)
-          ? mentor.assignedBatches
-          : [],
-
-        assignedSections: Array.isArray(mentor.assignedSections)
-          ? mentor.assignedSections
-          : [],
-
-        batch: formatAssignedItems(
-          mentor.assignedBatches,
-          'No batch assigned',
-        ),
-
-        section: formatAssignedItems(
-          mentor.assignedSections,
-          'No section assigned',
-        ),
-      }));
-
-      setMentors(normalizedMentors);
-
-      setPagination({
-        page: Number(serverPagination.page) || page,
-        limit: Number(serverPagination.limit) || PAGE_SIZE,
-        total: Number(serverPagination.total) || 0,
-        totalPages: Number(serverPagination.totalPages) || 0,
-        hasNextPage: Boolean(serverPagination.hasNextPage),
-        hasPreviousPage: Boolean(
-          serverPagination.hasPreviousPage,
-        ),
-      });
-    } catch (requestError) {
-      if (signal?.aborted) {
-        return;
-      }
-
-      setMentors([]);
-      setPagination(INITIAL_PAGINATION);
-      setError(getErrorMessage(requestError));
-    } finally {
-      if (!signal?.aborted) {
-        setIsLoading(false);
-      }
-    }
-  }, [page, submittedSearch]);
+    },
+    [page, submittedSearch],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
 
     loadMentors(controller.signal);
 
-    return () => {
-      controller.abort();
-    };
-  }, [loadMentors]);
+    return () => controller.abort();
+  }, [loadMentors, reloadKey]);
 
   const handleSearchChange = useCallback((event) => {
     setSearch(event.target.value);
   }, []);
 
   const handleSearch = useCallback((value) => {
-    const nextSearch = String(value ?? '').trim();
-
     setPage(1);
-    setSubmittedSearch(nextSearch);
+    setSubmittedSearch(String(value ?? '').trim());
   }, []);
 
   const handleClearSearch = useCallback(() => {
@@ -284,8 +282,8 @@ export default function MentorAssignments() {
   }, []);
 
   const handleRetry = useCallback(() => {
-    loadMentors();
-  }, [loadMentors]);
+    setReloadKey((current) => current + 1);
+  }, []);
 
   const handleClearDepartmentAssignments = useCallback(
     async (event) => {
@@ -304,15 +302,8 @@ export default function MentorAssignments() {
       setIsClearing(true);
 
       try {
-        const response = await api.post(
-          '/v1/provisioning/mentors/assignments/clear-department',
-          {
-            confirmation: CLEAR_CONFIRMATION,
-          },
-        );
-
-        const body = response?.data;
-        const data = body?.data ?? body;
+        const data =
+          await mentorManagementService.clearDepartmentAssignments();
 
         const sectionCount =
           Number(data?.unassignedSectionCount) || 0;
@@ -328,14 +319,14 @@ export default function MentorAssignments() {
         setShowClearPanel(false);
         setPage(1);
 
-        await loadMentors();
+        setReloadKey((current) => current + 1);
       } catch (requestError) {
         setClearError(getErrorMessage(requestError));
       } finally {
         setIsClearing(false);
       }
     },
-    [clearConfirmation, loadMentors],
+    [clearConfirmation],
   );
 
   const pageBatchCount = useMemo(() => {
@@ -366,9 +357,10 @@ export default function MentorAssignments() {
     return sectionIds.size;
   }, [mentors]);
 
-  const pageRangeStart = pagination.total === 0
-    ? 0
-    : ((pagination.page - 1) * pagination.limit) + 1;
+  const pageRangeStart =
+    pagination.total === 0
+      ? 0
+      : (pagination.page - 1) * pagination.limit + 1;
 
   const pageRangeEnd = Math.min(
     pagination.page * pagination.limit,
@@ -408,23 +400,7 @@ export default function MentorAssignments() {
             </ActionButton>
 
             <Link to="/hod/faculty/grant-mentor">
-              <ActionButton
-                leadingIcon={
-                  <svg
-                    aria-hidden="true"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    className="h-4 w-4"
-                  >
-                    <path
-                      d="M12 5v14M5 12h14"
-                      strokeLinecap="round"
-                    />
-                  </svg>
-                }
-              >
+              <ActionButton>
                 Grant Mentor Role
               </ActionButton>
             </Link>
@@ -433,45 +409,31 @@ export default function MentorAssignments() {
       />
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
-          <p className="text-sm text-[#A5A6B0]">
-            Total Mentors
-          </p>
-
-          <p
-            className="mt-3 text-2xl font-semibold text-[#EAEAE6]"
-            aria-live="polite"
-          >
-            {isLoading && pagination.total === 0
+        <SummaryCard
+          label="Total Mentors"
+          value={
+            isLoading && pagination.total === 0
               ? '—'
-              : pagination.total}
-          </p>
+              : pagination.total
+          }
+          description="Total mentor records matching the current search."
+        />
 
-          <p className="mt-1 text-xs leading-5 text-[#777986]">
-            Total mentor records matching the current search.
-          </p>
-        </div>
-
-        <div className="rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
-          <p className="text-sm text-[#A5A6B0]">
-            Current Page Coverage
-          </p>
-
-          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
-            {isLoading && mentors.length === 0
+        <SummaryCard
+          label="Current Page Coverage"
+          value={
+            isLoading && mentors.length === 0
               ? '—'
-              : `${pageBatchCount} batches · ${pageSectionCount} sections`}
-          </p>
-
-          <p className="mt-1 text-xs leading-5 text-[#777986]">
-            Distinct assigned batches and sections on this page only.
-          </p>
-        </div>
+              : `${pageBatchCount} batches · ${pageSectionCount} sections`
+          }
+          description="Distinct assigned batches and sections on this page only."
+        />
       </div>
 
       {clearNotice && (
         <div
           role="status"
+          aria-live="polite"
           className="mb-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm leading-6 text-emerald-200"
         >
           {clearNotice}
@@ -494,10 +456,9 @@ export default function MentorAssignments() {
 
             <p className="mt-2 text-sm leading-6 text-[#C7C7D0]">
               This unassigns all currently assigned sections and
-              clears saved batch/section allocations for mentors in
-              this department. It does not delete, disable, or change
-              the Mentor role of any account. This action cannot be
-              undone automatically.
+              clears saved batch and section allocations for mentors
+              in this department. It does not delete, disable, or
+              change the Mentor role of any account.
             </p>
 
             <label
@@ -517,21 +478,16 @@ export default function MentorAssignments() {
               type="text"
               autoComplete="off"
               value={clearConfirmation}
-              onChange={(event) => {
-                setClearConfirmation(event.target.value);
-              }}
+              onChange={(event) =>
+                setClearConfirmation(event.target.value)
+              }
               disabled={isClearing}
               className="mt-2 min-h-11 w-full rounded-xl border border-[#454650] bg-[#14161C] px-3.5 py-2.5 font-mono text-sm text-[#EAEAE6] outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-400/20 disabled:opacity-50"
-              aria-describedby="clear-department-mentor-help"
             />
 
-            <p
-              id="clear-department-mentor-help"
-              className="mt-2 text-xs leading-5 text-[#858590]"
-            >
-              Only the authenticated HOD&apos;s department is
-              affected. The server independently validates this
-              request.
+            <p className="mt-2 text-xs leading-5 text-[#858590]">
+              Only the authenticated HOD&apos;s department is affected.
+              The server independently validates this request.
             </p>
 
             {clearError && (
@@ -560,13 +516,14 @@ export default function MentorAssignments() {
               <ActionButton
                 variant="danger"
                 type="submit"
-                loading={isClearing}
                 disabled={
-                  isClearing
-                  || clearConfirmation !== CLEAR_CONFIRMATION
+                  isClearing ||
+                  clearConfirmation !== CLEAR_CONFIRMATION
                 }
               >
-                Confirm Clear All Assignments
+                {isClearing
+                  ? 'Clearing...'
+                  : 'Confirm Clear All Assignments'}
               </ActionButton>
             </div>
           </div>
@@ -705,12 +662,12 @@ export default function MentorAssignments() {
                 <ActionButton
                   variant="secondary"
                   size="sm"
-                  onClick={() => {
-                    setPage((currentPage) => currentPage - 1);
-                  }}
+                  onClick={() =>
+                    setPage((current) => Math.max(1, current - 1))
+                  }
                   disabled={
-                    isLoading
-                    || !pagination.hasPreviousPage
+                    isLoading ||
+                    !pagination.hasPreviousPage
                   }
                 >
                   Previous
@@ -719,12 +676,12 @@ export default function MentorAssignments() {
                 <ActionButton
                   variant="secondary"
                   size="sm"
-                  onClick={() => {
-                    setPage((currentPage) => currentPage + 1);
-                  }}
+                  onClick={() =>
+                    setPage((current) => current + 1)
+                  }
                   disabled={
-                    isLoading
-                    || !pagination.hasNextPage
+                    isLoading ||
+                    !pagination.hasNextPage
                   }
                 >
                   Next
@@ -749,9 +706,9 @@ export default function MentorAssignments() {
         <div className="mt-4">
           <Link
             to="/hod/faculty/grant-mentor"
-            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-3.5 py-2 text-sm font-semibold text-[#EAEAE6] transition-colors hover:border-[#CDB5F7]/50 hover:bg-[#CDB5F7]/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+            className="inline-flex min-h-10 items-center rounded-xl border border-[#CDB5F7]/30 px-4 py-2 text-sm font-semibold text-[#CDB5F7] transition-colors hover:bg-[#CDB5F7]/10"
           >
-            Open mentor designation form
+            Open Mentor Assignment Form
           </Link>
         </div>
       </div>
