@@ -1,27 +1,71 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 
 import api from "../../../auth/services/api/axios.js";
 
 import ActionButton from "../../components/ActionButton.jsx";
+import EmptyState from "../../components/EmptyState.jsx";
 import PageHeader from "../../components/PageHeader.jsx";
+import SearchInput from "../../components/SearchInput.jsx";
 import SectionCard from "../../components/SectionCard.jsx";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 20;
 
-const RESULT_STATUSES = {
-  PENDING: "Pending",
-  ENTERED: "Entered",
-  ABSENT: "Absent",
-  EXEMPT: "Exempt",
-};
+const RESULT_STATUSES = [
+  { value: "", label: "All statuses" },
+  { value: "PENDING", label: "Pending" },
+  { value: "ENTERED", label: "Entered" },
+  { value: "ABSENT", label: "Absent" },
+  { value: "EXEMPT", label: "Exempt" },
+];
 
-const STATUS_STYLES = {
-  PENDING: "border-[#E5DF98]/30 bg-[#E5DF98]/10 text-[#E5DF98]",
-  ENTERED: "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
-  ABSENT: "border-red-400/30 bg-red-400/10 text-red-300",
-  EXEMPT: "border-[#A7A7B0]/30 bg-[#A7A7B0]/10 text-[#A7A7B0]",
-};
+function getAssessmentId(assessment) {
+  return assessment?.id || assessment?._id || "";
+}
+
+function getErrorMessage(error) {
+  return (
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    "Unable to retrieve assessment details."
+  );
+}
+
+function getStatusStyles(status) {
+  const styles = {
+    DRAFT: "border-[#E5DF98]/30 bg-[#E5DF98]/10 text-[#E5DF98]",
+    PUBLISHED:
+      "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
+    CLOSED: "border-red-400/30 bg-red-400/10 text-red-300",
+    PENDING: "border-[#E5DF98]/30 bg-[#E5DF98]/10 text-[#E5DF98]",
+    ENTERED:
+      "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
+    ABSENT: "border-red-400/30 bg-red-400/10 text-red-300",
+    EXEMPT: "border-[#CDB5F7]/30 bg-[#CDB5F7]/10 text-[#CDB5F7]",
+  };
+
+  return (
+    styles[status] ||
+    "border-[#454650] bg-[#292A32] text-[#A7A7B0]"
+  );
+}
+
+function formatDate(value) {
+  if (!value) return "Not available";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Not available";
+  }
+
+  return date.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
 
 function DetailItem({ label, value }) {
   return (
@@ -37,43 +81,29 @@ function DetailItem({ label, value }) {
   );
 }
 
-function getAssessmentId(assessment) {
-  return assessment?.id || assessment?._id || "";
-}
+function SummaryCard({ label, value }) {
+  return (
+    <div className="rounded-xl border border-[#343640] bg-[#1D1F27] p-4">
+      <p className="text-sm text-[#A7A7B0]">{label}</p>
 
-function formatDate(value) {
-  if (!value) return "—";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return "—";
-
-  return date.toLocaleDateString("en-IN", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function formatPercentage(value) {
-  if (value === null || value === undefined) return "—";
-
-  return `${value}%`;
-}
-
-function getResponseData(response) {
-  return response?.data?.data || {};
+      <p className="mt-2 text-2xl font-semibold text-[#EAEAE6]">
+        {value}
+      </p>
+    </div>
+  );
 }
 
 export default function ResultDetails() {
   const location = useLocation();
-  const navigate = useNavigate();
 
-  const assessment = location.state?.result;
+  const routeAssessment = location.state?.result;
 
-  const assessmentId = getAssessmentId(assessment);
+  const assessmentId = getAssessmentId(routeAssessment);
+
+  const [assessment, setAssessment] = useState(routeAssessment || null);
 
   const [results, setResults] = useState([]);
+
   const [summary, setSummary] = useState({
     total: 0,
     pending: 0,
@@ -82,14 +112,6 @@ export default function ResultDetails() {
     exempt: 0,
   });
 
-  const [assessmentDetails, setAssessmentDetails] = useState(
-    assessment || null,
-  );
-
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
-  const [page, setPage] = useState(1);
-
   const [pagination, setPagination] = useState({
     page: 1,
     limit: PAGE_SIZE,
@@ -97,8 +119,25 @@ export default function ResultDetails() {
     totalPages: 1,
   });
 
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+
   const [loading, setLoading] = useState(Boolean(assessmentId));
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setPage(1);
+    }, 350);
+
+    return () => window.clearTimeout(timer);
+  }, [search]);
 
   const loadResults = useCallback(
     async (signal) => {
@@ -114,7 +153,7 @@ export default function ResultDetails() {
             params: {
               page,
               limit: PAGE_SIZE,
-              search: search.trim() || undefined,
+              search: debouncedSearch || undefined,
               status: statusFilter || undefined,
             },
             signal,
@@ -123,49 +162,52 @@ export default function ResultDetails() {
 
         if (signal?.aborted) return;
 
-        const data = getResponseData(response);
-
-        setResults(Array.isArray(data.results) ? data.results : []);
-
-        setSummary({
-          total: Number(data.summary?.total) || 0,
-          pending: Number(data.summary?.pending) || 0,
-          entered: Number(data.summary?.entered) || 0,
-          absent: Number(data.summary?.absent) || 0,
-          exempt: Number(data.summary?.exempt) || 0,
-        });
-
-        setPagination({
-          page: Number(data.pagination?.page) || 1,
-          limit: Number(data.pagination?.limit) || PAGE_SIZE,
-          total: Number(data.pagination?.total) || 0,
-          totalPages: Math.max(
-            1,
-            Number(data.pagination?.totalPages) || 1,
-          ),
-        });
+        const data = response?.data?.data || {};
 
         if (data.assessment) {
-          setAssessmentDetails((current) => ({
+          setAssessment((current) => ({
             ...current,
             ...data.assessment,
           }));
         }
-      } catch (requestError) {
-        if (signal?.aborted) return;
 
-        setError(
-          requestError?.response?.data?.message ||
-            requestError?.message ||
-            "Unable to load student results.",
+        setResults(
+          Array.isArray(data.results) ? data.results : [],
         );
+
+        setSummary({
+          total: Number(data.summary?.total || 0),
+          pending: Number(data.summary?.pending || 0),
+          entered: Number(data.summary?.entered || 0),
+          absent: Number(data.summary?.absent || 0),
+          exempt: Number(data.summary?.exempt || 0),
+        });
+
+        setPagination({
+          page: Number(data.pagination?.page || 1),
+          limit: Number(data.pagination?.limit || PAGE_SIZE),
+          total: Number(data.pagination?.total || 0),
+          totalPages: Math.max(
+            1,
+            Number(data.pagination?.totalPages || 1),
+          ),
+        });
+      } catch (requestError) {
+        if (!signal?.aborted) {
+          setError(getErrorMessage(requestError));
+        }
       } finally {
         if (!signal?.aborted) {
           setLoading(false);
         }
       }
     },
-    [assessmentId, page, search, statusFilter],
+    [
+      assessmentId,
+      page,
+      debouncedSearch,
+      statusFilter,
+    ],
   );
 
   useEffect(() => {
@@ -180,29 +222,61 @@ export default function ResultDetails() {
     return () => controller.abort();
   }, [loadResults]);
 
-  const handleSearchChange = (event) => {
-    setSearch(event.target.value);
-    setPage(1);
-  };
+  const publishReady = useMemo(
+    () =>
+      summary.total > 0 &&
+      summary.pending === 0,
+    [summary.total, summary.pending],
+  );
 
-  const handleStatusChange = (event) => {
-    setStatusFilter(event.target.value);
-    setPage(1);
-  };
+  const handleStatusUpdate = async (nextStatus) => {
+    if (!assessmentId || updatingStatus) return;
 
-  const handleRefresh = () => {
-    const controller = new AbortController();
-    loadResults(controller.signal);
-  };
+    const actionLabel =
+      nextStatus === "PUBLISHED" ? "publish" : "close";
 
-  const handleEditResults = () => {
-    navigate("/hod/results/edit", {
-      state: {
-        result: assessmentDetails,
-        results,
-        summary,
-      },
-    });
+    const confirmed = window.confirm(
+      `Are you sure you want to ${actionLabel} this assessment?`,
+    );
+
+    if (!confirmed) return;
+
+    setUpdatingStatus(true);
+    setError("");
+    setNotice("");
+
+    try {
+      const response = await api.patch(
+        `/v1/assessments/manage/${assessmentId}`,
+        {
+          status: nextStatus,
+        },
+      );
+
+      const updatedAssessment =
+        response?.data?.data?.assessment;
+
+      if (updatedAssessment) {
+        setAssessment((current) => ({
+          ...current,
+          ...updatedAssessment,
+        }));
+      }
+
+      setNotice(
+        nextStatus === "PUBLISHED"
+          ? "Assessment published successfully."
+          : "Assessment closed successfully.",
+      );
+
+      const controller = new AbortController();
+
+      await loadResults(controller.signal);
+    } catch (requestError) {
+      setError(getErrorMessage(requestError));
+    } finally {
+      setUpdatingStatus(false);
+    }
   };
 
   if (!assessmentId) {
@@ -210,8 +284,8 @@ export default function ResultDetails() {
       <div className="space-y-6">
         <PageHeader
           eyebrow="Academic Oversight"
-          title="Result Details"
-          description="Review assessment information and student-wise performance."
+          title="Assessment Details"
+          description="Review assessment information and student results."
           breadcrumbs={[
             { label: "HOD Dashboard", to: "/hod/dashboard" },
             { label: "Results", to: "/hod/results" },
@@ -220,155 +294,187 @@ export default function ResultDetails() {
         />
 
         <SectionCard>
-          <div className="px-5 py-10 text-center">
-            <h2 className="text-lg font-semibold text-[#EAEAE6]">
-              No assessment selected
-            </h2>
-
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#A7A7B0]">
-              Open this page from an assessment record to view its
-              student-wise results.
-            </p>
-
-            <div className="mt-6">
+          <EmptyState
+            title="No assessment selected"
+            description="Open assessment details from the Results overview."
+            action={
               <Link to="/hod/results">
                 <ActionButton variant="secondary">
                   Back to Results
                 </ActionButton>
               </Link>
-            </div>
-          </div>
+            }
+          />
         </SectionCard>
       </div>
     );
   }
-
-  const currentAssessment = assessmentDetails || {};
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Academic Oversight"
         title="Assessment Details"
-        description="Review assessment information, student result records and marks-entry progress."
+        description="Review assessment configuration, manage its lifecycle and inspect student results."
         breadcrumbs={[
           { label: "HOD Dashboard", to: "/hod/dashboard" },
           { label: "Results", to: "/hod/results" },
           { label: "Details" },
         ]}
         actions={
-          <div className="flex flex-wrap items-center gap-3">
-            <ActionButton
-              variant="secondary"
-              onClick={handleRefresh}
-              disabled={loading}
-            >
-              Refresh
-            </ActionButton>
-
-            {currentAssessment.status === "DRAFT" && (
-              <ActionButton
-                onClick={handleEditResults}
-                disabled={loading}
-              >
-                Enter / Edit Marks
+          <div className="flex flex-wrap gap-3">
+            <Link to="/hod/results">
+              <ActionButton variant="secondary">
+                Back to Results
               </ActionButton>
+            </Link>
+
+            {assessment?.status === "DRAFT" && (
+              <Link
+                to="/hod/results/edit"
+                state={{ result: assessment }}
+              >
+                <ActionButton variant="secondary">
+                  Enter Marks
+                </ActionButton>
+              </Link>
             )}
           </div>
         }
       />
 
+      {error && (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-400/20 bg-red-400/5 p-4"
+        >
+          <p className="text-sm font-semibold text-red-300">
+            Request failed
+          </p>
+
+          <p className="mt-2 text-sm text-[#A7A7B0]">
+            {error}
+          </p>
+        </div>
+      )}
+
+      {notice && (
+        <div
+          role="status"
+          className="rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm text-emerald-300"
+        >
+          {notice}
+        </div>
+      )}
+
       <SectionCard
-        title={currentAssessment.title || "Assessment"}
-        description={currentAssessment.description || "Assessment information"}
+        title={assessment?.title || "Assessment"}
+        description="Assessment configuration and lifecycle information."
+        action={
+          <span
+            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getStatusStyles(assessment?.status)}`}
+          >
+            {assessment?.status || "UNKNOWN"}
+          </span>
+        }
       >
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <DetailItem
             label="Assessment Type"
-            value={currentAssessment.type}
-          />
-
-          <DetailItem
-            label="Status"
-            value={currentAssessment.status}
+            value={assessment?.type}
           />
 
           <DetailItem
             label="Course"
             value={
-              currentAssessment.course?.title ||
-                currentAssessment.course?.name ||
-                "—"
+              assessment?.course?.title ||
+              assessment?.course ||
+              "Not available"
             }
           />
 
           <DetailItem
             label="Course Code"
-            value={currentAssessment.course?.code}
-          />
-
-          <DetailItem
-            label="Semester"
-            value={currentAssessment.course?.semester}
-          />
-
-          <DetailItem
-            label="Assessment Date"
-            value={formatDate(currentAssessment.assessmentDate)}
+            value={assessment?.course?.code}
           />
 
           <DetailItem
             label="Maximum Marks"
-            value={currentAssessment.totalMarks}
+            value={assessment?.totalMarks}
           />
 
           <DetailItem
             label="Passing Marks"
-            value={currentAssessment.passingMarks}
+            value={assessment?.passingMarks}
+          />
+
+          <DetailItem
+            label="Assessment Date"
+            value={formatDate(assessment?.assessmentDate)}
+          />
+
+          <DetailItem
+            label="Published At"
+            value={formatDate(assessment?.publishedAt)}
+          />
+
+          <DetailItem
+            label="Closed At"
+            value={formatDate(assessment?.closedAt)}
           />
 
           <DetailItem
             label="Created By"
-            value={currentAssessment.createdBy?.name}
+            value={assessment?.createdBy?.name}
           />
         </div>
 
-        {Array.isArray(currentAssessment.batches) &&
-          currentAssessment.batches.length > 0 && (
+        {assessment?.description && (
+          <div className="mt-5 rounded-xl border border-[#343640] bg-[#1D1F27] p-4">
+            <p className="text-xs font-medium uppercase tracking-wide text-[#A7A7B0]">
+              Description
+            </p>
+
+            <p className="mt-2 text-sm leading-6 text-[#EAEAE6]">
+              {assessment.description}
+            </p>
+          </div>
+        )}
+
+        {Array.isArray(assessment?.batches) &&
+          assessment.batches.length > 0 && (
             <div className="mt-5">
-              <p className="mb-2 text-sm font-semibold text-[#EAEAE6]">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[#A7A7B0]">
                 Assigned Batches
               </p>
 
               <div className="flex flex-wrap gap-2">
-                {currentAssessment.batches.map((batch) => (
+                {assessment.batches.map((batch) => (
                   <span
-                    key={batch.id}
-                    className="rounded-lg border border-[#343640] bg-[#26272B] px-3 py-2 text-xs text-[#A7A7B0]"
+                    key={batch.id || batch._id || batch.name}
+                    className="rounded-lg border border-[#CDB5F7]/20 bg-[#CDB5F7]/10 px-3 py-2 text-xs text-[#CDB5F7]"
                   >
-                    {batch.name}
-                    {batch.code ? ` (${batch.code})` : ""}
+                    {batch.name || batch.code || "Batch"}
                   </span>
                 ))}
               </div>
             </div>
           )}
 
-        {Array.isArray(currentAssessment.sections) &&
-          currentAssessment.sections.length > 0 && (
+        {Array.isArray(assessment?.sections) &&
+          assessment.sections.length > 0 && (
             <div className="mt-5">
-              <p className="mb-2 text-sm font-semibold text-[#EAEAE6]">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-[#A7A7B0]">
                 Assigned Sections
               </p>
 
               <div className="flex flex-wrap gap-2">
-                {currentAssessment.sections.map((section) => (
+                {assessment.sections.map((section) => (
                   <span
-                    key={section.id}
-                    className="rounded-lg border border-[#343640] bg-[#26272B] px-3 py-2 text-xs text-[#A7A7B0]"
+                    key={section.id || section._id || section.name}
+                    className="rounded-lg border border-[#343640] bg-[#26272B] px-3 py-2 text-xs text-[#EAEAE6]"
                   >
-                    {section.name}
-                    {section.code ? ` (${section.code})` : ""}
+                    {section.name || section.code || "Section"}
                   </span>
                 ))}
               </div>
@@ -376,56 +482,137 @@ export default function ResultDetails() {
           )}
       </SectionCard>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <DetailItem label="Total Students" value={summary.total} />
-        <DetailItem label="Marks Entered" value={summary.entered} />
-        <DetailItem label="Pending" value={summary.pending} />
-        <DetailItem label="Absent" value={summary.absent} />
-        <DetailItem label="Exempt" value={summary.exempt} />
-      </div>
+      <SectionCard
+        title="Assessment Lifecycle"
+        description="Publish completed assessment results or close an already published assessment."
+      >
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <SummaryCard
+            label="Total Students"
+            value={summary.total}
+          />
+
+          <SummaryCard
+            label="Pending"
+            value={summary.pending}
+          />
+
+          <SummaryCard
+            label="Entered"
+            value={summary.entered}
+          />
+
+          <SummaryCard
+            label="Absent / Exempt"
+            value={`${summary.absent} / ${summary.exempt}`}
+          />
+        </div>
+
+        <div className="mt-5 rounded-xl border border-[#343640] bg-[#1D1F27] p-4">
+          {assessment?.status === "DRAFT" && (
+            <>
+              <p className="text-sm font-semibold text-[#EAEAE6]">
+                Draft assessment
+              </p>
+
+              <p className="mt-2 text-sm leading-6 text-[#A7A7B0]">
+                All student results must be marked as Entered, Absent
+                or Exempt before publishing. Pending results must be zero.
+              </p>
+
+              <div className="mt-4">
+                <ActionButton
+                  type="button"
+                  disabled={!publishReady || updatingStatus || loading}
+                  loading={updatingStatus}
+                  onClick={() => handleStatusUpdate("PUBLISHED")}
+                >
+                  Publish Assessment
+                </ActionButton>
+              </div>
+
+              {!publishReady && (
+                <p className="mt-3 text-xs text-[#E5DF98]">
+                  Publishing is unavailable until at least one student
+                  is assigned and all pending results are completed.
+                </p>
+              )}
+            </>
+          )}
+
+          {assessment?.status === "PUBLISHED" && (
+            <>
+              <p className="text-sm font-semibold text-emerald-300">
+                Assessment published
+              </p>
+
+              <p className="mt-2 text-sm leading-6 text-[#A7A7B0]">
+                Results have been published. You can now close this
+                assessment. Closed assessments cannot be reopened.
+              </p>
+
+              <div className="mt-4">
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  disabled={updatingStatus}
+                  loading={updatingStatus}
+                  onClick={() => handleStatusUpdate("CLOSED")}
+                >
+                  Close Assessment
+                </ActionButton>
+              </div>
+            </>
+          )}
+
+          {assessment?.status === "CLOSED" && (
+            <>
+              <p className="text-sm font-semibold text-red-300">
+                Assessment closed
+              </p>
+
+              <p className="mt-2 text-sm leading-6 text-[#A7A7B0]">
+                This assessment is closed. Its lifecycle is complete
+                and it cannot be reopened.
+              </p>
+            </>
+          )}
+        </div>
+      </SectionCard>
 
       <SectionCard
-        title="Student-wise Results"
-        description="Student marks and result status for this assessment."
+        title="Student Results"
+        description="Review student-wise marks and result statuses."
       >
-        <div className="mb-5 grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-          <div>
-            <label
-              htmlFor="student-result-search"
-              className="mb-2 block text-sm font-medium text-[#EAEAE6]"
-            >
-              Search Student
-            </label>
-
-            <input
-              id="student-result-search"
-              type="search"
-              value={search}
-              onChange={handleSearchChange}
-              placeholder="Search by student name or ID"
-              className="w-full rounded-xl border border-[#343640] bg-[#1D1F27] px-4 py-3 text-sm text-[#EAEAE6] outline-none placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
-            />
-          </div>
+        <div className="mb-5 grid gap-4 md:grid-cols-2">
+          <SearchInput
+            name="resultStudentSearch"
+            label="Search students"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search student name or institutional ID..."
+          />
 
           <div>
             <label
-              htmlFor="student-result-status"
+              htmlFor="result-status-filter"
               className="mb-2 block text-sm font-medium text-[#EAEAE6]"
             >
               Result Status
             </label>
 
             <select
-              id="student-result-status"
+              id="result-status-filter"
               value={statusFilter}
-              onChange={handleStatusChange}
-              className="w-full rounded-xl border border-[#343640] bg-[#1D1F27] px-3 py-3 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+              onChange={(event) => {
+                setStatusFilter(event.target.value);
+                setPage(1);
+              }}
+              className="w-full rounded-xl border border-[#343640] bg-[#1D1F27] px-4 py-3 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7]"
             >
-              <option value="">All Statuses</option>
-
-              {Object.entries(RESULT_STATUSES).map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
+              {RESULT_STATUSES.map((status) => (
+                <option key={status.value} value={status.value}>
+                  {status.label}
                 </option>
               ))}
             </select>
@@ -433,126 +620,102 @@ export default function ResultDetails() {
         </div>
 
         {loading ? (
-          <div className="flex min-h-40 items-center justify-center">
+          <div className="rounded-xl border border-[#343640] bg-[#1D1F27] px-5 py-12 text-center">
             <p className="text-sm text-[#A7A7B0]">
               Loading student results...
             </p>
           </div>
-        ) : error ? (
-          <div className="rounded-xl border border-red-400/20 bg-red-400/5 p-5">
-            <p className="text-sm font-semibold text-red-300">
-              Unable to load results
-            </p>
-
-            <p className="mt-2 text-sm text-[#A7A7B0]">
-              {error}
-            </p>
-
-            <div className="mt-4">
-              <ActionButton
-                variant="secondary"
-                onClick={handleRefresh}
-              >
-                Try Again
-              </ActionButton>
-            </div>
-          </div>
         ) : results.length === 0 ? (
-          <div className="rounded-xl border border-[#343640] bg-[#1D1F27] px-5 py-10 text-center">
-            <p className="text-sm font-semibold text-[#EAEAE6]">
-              No student records found
-            </p>
-
-            <p className="mt-2 text-sm text-[#A7A7B0]">
-              No results match the selected search or status filter.
-            </p>
-          </div>
+          <EmptyState
+            title="No student results found"
+            description="No records match the selected search and status filters."
+          />
         ) : (
           <>
             <div className="overflow-x-auto rounded-xl border border-[#343640]">
-              <table className="w-full min-w-[850px] text-left text-sm">
+              <table className="w-full min-w-[900px] text-left text-sm">
                 <thead className="bg-[#26272B] text-xs uppercase tracking-wide text-[#A7A7B0]">
                   <tr>
                     <th className="px-4 py-3">Student</th>
                     <th className="px-4 py-3">Institutional ID</th>
                     <th className="px-4 py-3">Marks</th>
                     <th className="px-4 py-3">Percentage</th>
-                    <th className="px-4 py-3">Performance</th>
+                    <th className="px-4 py-3">Outcome</th>
                     <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Remarks</th>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-[#343640]">
-                  {results.map((record) => {
-                    const status = record.status || "PENDING";
+                  {results.map((record) => (
+                    <tr
+                      key={record.id}
+                      className="hover:bg-[#26272B]/50"
+                    >
+                      <td className="px-4 py-4 font-medium text-[#EAEAE6]">
+                        {record.student?.fullName || "Unknown Student"}
+                      </td>
 
-                    return (
-                      <tr
-                        key={record.id}
-                        className="text-[#EAEAE6] transition-colors hover:bg-[#26272B]/70"
-                      >
-                        <td className="px-4 py-4">
-                          <p className="font-semibold">
-                            {record.student?.fullName || "Unknown Student"}
-                          </p>
-                        </td>
+                      <td className="px-4 py-4 text-[#A7A7B0]">
+                        {record.student?.institutionalId || "—"}
+                      </td>
 
-                        <td className="px-4 py-4 text-[#A7A7B0]">
-                          {record.student?.institutionalId || "—"}
-                        </td>
+                      <td className="px-4 py-4 text-[#EAEAE6]">
+                        {record.marksObtained ?? "—"} /{" "}
+                        {record.totalMarks ?? assessment?.totalMarks ?? "—"}
+                      </td>
 
-                        <td className="px-4 py-4 text-[#A7A7B0]">
-                          {record.marksObtained === null ||
-                          record.marksObtained === undefined
-                            ? "—"
-                            : `${record.marksObtained} / ${record.totalMarks}`}
-                        </td>
+                      <td className="px-4 py-4 text-[#EAEAE6]">
+                        {record.percentage === null ||
+                        record.percentage === undefined
+                          ? "—"
+                          : `${Number(record.percentage).toFixed(1)}%`}
+                      </td>
 
-                        <td className="px-4 py-4 text-[#A7A7B0]">
-                          {formatPercentage(record.percentage)}
-                        </td>
-
-                        <td className="px-4 py-4">
-                          {record.passed === null ||
-                          record.passed === undefined ? (
-                            <span className="text-[#858590]">—</span>
-                          ) : record.passed ? (
-                            <span className="font-medium text-emerald-300">
-                              Passed
-                            </span>
-                          ) : (
-                            <span className="font-medium text-red-300">
-                              Failed
-                            </span>
-                          )}
-                        </td>
-
-                        <td className="px-4 py-4">
+                      <td className="px-4 py-4">
+                        {record.passed === null ||
+                        record.passed === undefined ? (
+                          <span className="text-[#A7A7B0]">—</span>
+                        ) : (
                           <span
-                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
-                              STATUS_STYLES[status] ||
-                              "border-[#343640] bg-[#26272B] text-[#A7A7B0]"
-                            }`}
+                            className={
+                              record.passed
+                                ? "text-emerald-300"
+                                : "text-red-300"
+                            }
                           >
-                            {RESULT_STATUSES[status] || status}
+                            {record.passed ? "Passed" : "Failed"}
                           </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                        )}
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <span
+                          className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusStyles(record.status)}`}
+                        >
+                          {record.status}
+                        </span>
+                      </td>
+
+                      <td className="max-w-[220px] px-4 py-4 text-[#A7A7B0]">
+                        {record.remarks || "—"}
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
 
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-4 border-t border-[#343640] pt-4">
               <p className="text-sm text-[#A7A7B0]">
-                Page {pagination.page} of {pagination.totalPages}
+                Showing {results.length} of {pagination.total} students
                 {" · "}
-                {pagination.total} student records
+                Page {pagination.page} of {pagination.totalPages}
               </p>
 
-              <div className="flex items-center gap-2">
+              <div className="flex gap-2">
                 <ActionButton
+                  type="button"
                   variant="secondary"
                   disabled={page <= 1 || loading}
                   onClick={() => setPage((current) => current - 1)}
@@ -561,6 +724,7 @@ export default function ResultDetails() {
                 </ActionButton>
 
                 <ActionButton
+                  type="button"
                   variant="secondary"
                   disabled={
                     page >= pagination.totalPages || loading
@@ -574,14 +738,6 @@ export default function ResultDetails() {
           </>
         )}
       </SectionCard>
-
-      <div className="flex justify-end">
-        <Link to="/hod/results">
-          <ActionButton variant="secondary">
-            Back to Results
-          </ActionButton>
-        </Link>
-      </div>
     </div>
   );
 }
