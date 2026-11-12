@@ -1,34 +1,30 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 
-import ActionButton from '../../components/ActionButton.jsx';
-import EmptyState from '../../components/EmptyState.jsx';
-import PageHeader from '../../components/PageHeader.jsx';
-import SearchInput from '../../components/SearchInput.jsx';
-import SectionCard from '../../components/SectionCard.jsx';
+import ActionButton from "../../components/ActionButton.jsx";
+import EmptyState from "../../components/EmptyState.jsx";
+import PageHeader from "../../components/PageHeader.jsx";
+import SearchInput from "../../components/SearchInput.jsx";
+import SectionCard from "../../components/SectionCard.jsx";
 
-import quizManagementService from '../../services/quizManagementService.js';
+import quizManagementService from "../../services/quizManagementService.js";
 
 const PAGE_SIZE = 20;
 
 const STATUS_OPTIONS = [
-  { value: '', label: 'All Statuses' },
-  { value: 'DRAFT', label: 'Draft' },
-  { value: 'PUBLISHED', label: 'Published' },
-  { value: 'CLOSED', label: 'Closed' },
+  { value: "", label: "All Statuses" },
+  { value: "DRAFT", label: "Draft" },
+  { value: "PUBLISHED", label: "Published" },
+  { value: "CLOSED", label: "Closed" },
 ];
 
 function SummaryCard({ label, value, description }) {
   return (
     <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
-      <p className="text-sm text-[#A5A6B0]">
-        {label}
-      </p>
-
+      <p className="text-sm text-[#A5A6B0]">{label}</p>
       <p className="mt-3 text-2xl font-semibold tracking-tight text-[#EAEAE6]">
         {value}
       </p>
-
       <p className="mt-2 text-xs leading-5 text-[#9697A2]">
         {description}
       </p>
@@ -37,234 +33,192 @@ function SummaryCard({ label, value, description }) {
 }
 
 function getCourseName(quiz) {
-  if (quiz.course && typeof quiz.course === 'object') {
-    return quiz.course.title || quiz.course.name || '—';
+  if (quiz.course && typeof quiz.course === "object") {
+    return quiz.course.title || quiz.course.name || "—";
   }
 
-  return quiz.courseName || '—';
+  return quiz.courseName || quiz.course || "—";
 }
 
 function getCourseCode(quiz) {
-  if (quiz.course && typeof quiz.course === 'object') {
-    return quiz.course.code || '';
+  if (quiz.course && typeof quiz.course === "object") {
+    return quiz.course.code || quiz.course.courseCode || "";
   }
 
-  return quiz.courseCode || '';
+  return quiz.courseCode || "";
 }
 
-function getSemester(quiz) {
-  if (quiz.course && typeof quiz.course === 'object') {
-    return quiz.course.semester || quiz.semester || '—';
+function getFacultyName(quiz) {
+  if (quiz.faculty && typeof quiz.faculty === "object") {
+    return (
+      quiz.faculty.name ||
+      quiz.faculty.fullName ||
+      quiz.faculty.email ||
+      "—"
+    );
   }
 
-  return quiz.semester || '—';
+  return quiz.facultyName || quiz.faculty || "—";
 }
 
 function getSchedule(quiz) {
   if (!quiz.startAt) {
-    return 'Not scheduled';
+    return "Not scheduled";
   }
 
   const start = new Date(quiz.startAt);
 
   if (Number.isNaN(start.getTime())) {
-    return 'Invalid schedule';
+    return "Invalid schedule";
   }
 
-  return new Intl.DateTimeFormat('en-IN', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short",
   }).format(start);
 }
 
 function getStatusLabel(status) {
-  const normalized = String(status || 'DRAFT').toUpperCase();
+  const normalized = String(status || "DRAFT").toUpperCase();
 
-  if (normalized === 'PUBLISHED') return 'Published';
-  if (normalized === 'CLOSED') return 'Closed';
+  if (normalized === "PUBLISHED") return "Published";
+  if (normalized === "CLOSED") return "Closed";
 
-  return 'Draft';
+  return "Draft";
 }
 
 function getStatusStyles(status) {
-  switch (String(status || 'DRAFT').toUpperCase()) {
-    case 'PUBLISHED':
-      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  switch (String(status || "DRAFT").toUpperCase()) {
+    case "PUBLISHED":
+      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
 
-    case 'CLOSED':
-      return 'border-[#CDB5F7]/30 bg-[#CDB5F7]/10 text-[#D8CBFF]';
+    case "CLOSED":
+      return "border-[#CDB5F7]/30 bg-[#CDB5F7]/10 text-[#D8CBFF]";
 
     default:
-      return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
+      return "border-amber-500/30 bg-amber-500/10 text-amber-200";
   }
 }
 
 function getScheduleCategory(quiz, now) {
-  if (String(quiz.status).toUpperCase() === 'CLOSED') {
-    return 'completed';
+  if (String(quiz.status || "").toUpperCase() === "CLOSED") {
+    return "completed";
   }
 
   const endAt = quiz.endAt ? new Date(quiz.endAt) : null;
 
   if (endAt && !Number.isNaN(endAt.getTime()) && endAt < now) {
-    return 'completed';
+    return "completed";
   }
 
   const startAt = quiz.startAt ? new Date(quiz.startAt) : null;
 
   if (
-    startAt
-    && !Number.isNaN(startAt.getTime())
-    && startAt > now
+    startAt &&
+    !Number.isNaN(startAt.getTime()) &&
+    startAt > now
   ) {
-    return 'upcoming';
+    return "upcoming";
   }
 
-  return 'other';
+  return "other";
 }
 
 function getErrorMessage(error) {
   return (
-    error?.response?.data?.error?.message
-    || error?.response?.data?.message
-    || error?.message
-    || 'Unable to complete the quiz request. Please try again.'
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    "Unable to load quizzes. Please try again."
   );
 }
 
-function getQuestionCount(quiz) {
-  if (Number.isFinite(Number(quiz.questionCount))) {
-    return Number(quiz.questionCount);
-  }
-
-  return Array.isArray(quiz.questions)
-    ? quiz.questions.length
-    : 0;
-}
-
-function getTotalMarks(quiz) {
-  if (Number.isFinite(Number(quiz.totalMarks))) {
-    return Number(quiz.totalMarks);
-  }
-
-  if (!Array.isArray(quiz.questions)) {
-    return 0;
-  }
-
-  return quiz.questions.reduce(
-    (total, question) => total + Number(question.marks || 0),
-    0,
+function normalizePagination(pagination, currentPage, itemCount) {
+  const total = Number(pagination?.total ?? itemCount);
+  const pages = Number(
+    pagination?.pages ?? Math.max(1, Math.ceil(total / PAGE_SIZE)),
   );
-}
 
-function Pagination({ pagination, onPageChange, loading }) {
-  if (!pagination || pagination.pages <= 1) {
-    return null;
-  }
-
-  const currentPage = pagination.page;
-  const totalPages = pagination.pages;
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#343640] pt-5">
-      <p className="text-sm text-[#9697A2]">
-        Page <span className="font-semibold text-[#EAEAE6]">{currentPage}</span>
-        {' '}of{' '}
-        <span className="font-semibold text-[#EAEAE6]">{totalPages}</span>
-        {' '}· {pagination.total} quizzes
-      </p>
-
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          disabled={loading || !pagination.hasPreviousPage}
-          onClick={() => onPageChange(currentPage - 1)}
-          className="rounded-lg border border-[#454650] px-4 py-2 text-sm text-[#D0D0D8] transition hover:bg-[#343640] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Previous
-        </button>
-
-        <button
-          type="button"
-          disabled={loading || !pagination.hasNextPage}
-          onClick={() => onPageChange(currentPage + 1)}
-          className="rounded-lg border border-[#454650] px-4 py-2 text-sm text-[#D0D0D8] transition hover:bg-[#343640] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Next
-        </button>
-      </div>
-    </div>
-  );
+  return {
+    page: Number(pagination?.page ?? currentPage),
+    pages: Math.max(1, pages),
+    total,
+    hasPreviousPage:
+      pagination?.hasPreviousPage ??
+      Number(pagination?.page ?? currentPage) > 1,
+    hasNextPage:
+      pagination?.hasNextPage ??
+      Number(pagination?.page ?? currentPage) < pages,
+  };
 }
 
 export default function QuizOverview() {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [semesterFilter, setSemesterFilter] = useState('');
-
-  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [semesterFilter, setSemesterFilter] = useState("");
 
   const [quizzes, setQuizzes] = useState([]);
-  const [pagination, setPagination] = useState(null);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    pages: 1,
+    total: 0,
+    hasPreviousPage: false,
+    hasNextPage: false,
+  });
 
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [deletingId, setDeletingId] = useState('');
-
-  const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
-
+  const [deletingId, setDeletingId] = useState("");
+  const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const requestVersion = useRef(0);
-
   const loadQuizzes = useCallback(async () => {
-    const currentRequest = ++requestVersion.current;
-
     setLoading(true);
-    setError('');
+    setError("");
 
     try {
       const result = await quizManagementService.listQuizzes({
         page,
         limit: PAGE_SIZE,
-        search: search.trim() || undefined,
-        status: statusFilter || undefined,
-        semester: semesterFilter.trim() || undefined,
+        search: search.trim(),
+        status: statusFilter,
+        semester: semesterFilter,
       });
 
-      if (currentRequest !== requestVersion.current) {
-        return;
-      }
+      const items = Array.isArray(result?.items)
+        ? result.items
+        : [];
 
-      setQuizzes(result.items);
-      setPagination(result.pagination);
+      setQuizzes(items);
+      setPagination(
+        normalizePagination(result?.pagination, page, items.length),
+      );
     } catch (requestError) {
-      if (currentRequest !== requestVersion.current) {
-        return;
-      }
-
       setQuizzes([]);
-      setPagination(null);
+      setPagination({
+        page: 1,
+        pages: 1,
+        total: 0,
+        hasPreviousPage: false,
+        hasNextPage: false,
+      });
       setError(getErrorMessage(requestError));
     } finally {
-      if (currentRequest === requestVersion.current) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }, [page, search, statusFilter, semesterFilter]);
 
   useEffect(() => {
-    let active = true;
+    let isActive = true;
 
     Promise.resolve().then(() => {
-      if (active) {
+      if (isActive) {
         loadQuizzes();
       }
     });
 
     return () => {
-      active = false;
-      requestVersion.current += 1;
+      isActive = false;
     };
   }, [loadQuizzes, refreshKey]);
 
@@ -272,21 +226,38 @@ export default function QuizOverview() {
     const now = new Date();
 
     return {
-      total: pagination?.total ?? quizzes.length,
-
+      total: pagination.total,
       upcoming: quizzes.filter(
-        (quiz) => getScheduleCategory(quiz, now) === 'upcoming',
+        (quiz) => getScheduleCategory(quiz, now) === "upcoming",
       ).length,
-
       published: quizzes.filter(
-        (quiz) => String(quiz.status).toUpperCase() === 'PUBLISHED',
+        (quiz) =>
+          String(quiz.status || "").toUpperCase() === "PUBLISHED",
       ).length,
-
       completed: quizzes.filter(
-        (quiz) => getScheduleCategory(quiz, now) === 'completed',
+        (quiz) => getScheduleCategory(quiz, now) === "completed",
       ).length,
     };
-  }, [quizzes, pagination]);
+  }, [quizzes, pagination.total]);
+
+  const semesterOptions = useMemo(() => {
+    const semesters = new Set();
+
+    quizzes.forEach((quiz) => {
+      const semester =
+        quiz.semester ??
+        quiz.course?.semester ??
+        quiz.courseSemester;
+
+      if (semester !== undefined && semester !== null && semester !== "") {
+        semesters.add(String(semester));
+      }
+    });
+
+    return [...semesters].sort((first, second) =>
+      first.localeCompare(second, undefined, { numeric: true }),
+    );
+  }, [quizzes]);
 
   function handleSearchChange(event) {
     setSearch(event.target.value);
@@ -303,44 +274,51 @@ export default function QuizOverview() {
     setPage(1);
   }
 
-  function handleRefresh() {
-    setRefreshKey((current) => current + 1);
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("");
+    setSemesterFilter("");
+    setPage(1);
   }
 
   async function handleDelete(quiz) {
     const quizId = quiz.id;
 
     if (!quizId) {
-      setError('Quiz ID is unavailable. This record cannot be deleted.');
+      setError("This quiz does not have a valid identifier.");
       return;
     }
 
     const confirmed = window.confirm(
-      `Are you sure you want to delete "${quiz.title || 'this quiz'}"? This action cannot be undone. Quizzes with student attempts cannot be deleted.`,
+      `Are you sure you want to delete "${quiz.title || "this quiz"}"? The server may reject deletion if student attempts already exist.`,
     );
 
-    if (!confirmed) return;
+    if (!confirmed) {
+      return;
+    }
 
-    setError('');
-    setNotice('');
     setDeletingId(quizId);
+    setError("");
 
     try {
       await quizManagementService.deleteQuiz(quizId);
 
-      setNotice('Quiz deleted successfully.');
-
       if (quizzes.length === 1 && page > 1) {
         setPage((current) => current - 1);
       } else {
-        handleRefresh();
+        setRefreshKey((current) => current + 1);
       }
     } catch (requestError) {
       setError(getErrorMessage(requestError));
     } finally {
-      setDeletingId('');
+      setDeletingId("");
     }
   }
+
+  const hasActiveFilters =
+    search.trim() !== "" ||
+    statusFilter !== "" ||
+    semesterFilter !== "";
 
   return (
     <div className="mx-auto w-full max-w-[1400px] space-y-6">
@@ -349,73 +327,79 @@ export default function QuizOverview() {
         title="Quiz Overview"
         description="Review quizzes across courses, monitor scheduling, and oversee academic assessments."
         breadcrumbs={[
-          { label: 'HOD Dashboard', to: '/hod/dashboard' },
-          { label: 'Quizzes' },
+          { label: "HOD Dashboard", to: "/hod/dashboard" },
+          { label: "Quizzes" },
         ]}
-        actions={(
-          <Link to="/hod/courses">
-            <ActionButton variant="secondary">
-              View Courses
-            </ActionButton>
-          </Link>
-        )}
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Link to="/hod/quizzes/new">
+              <ActionButton>
+                Create Quiz
+              </ActionButton>
+            </Link>
+
+            <Link to="/hod/courses">
+              <ActionButton variant="secondary">
+                View Courses
+              </ActionButton>
+            </Link>
+          </div>
+        }
       />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
           label="Total Quizzes"
-          value={loading ? '—' : summary.total}
-          description="Total records matching current filters"
+          value={loading ? "—" : summary.total}
+          description="Quizzes across academic courses"
         />
 
         <SummaryCard
           label="Upcoming"
-          value={loading ? '—' : summary.upcoming}
-          description="Upcoming quizzes on this page"
+          value={loading ? "—" : summary.upcoming}
+          description="Quizzes scheduled for a future date"
         />
 
         <SummaryCard
           label="Published"
-          value={loading ? '—' : summary.published}
-          description="Published quizzes on this page"
+          value={loading ? "—" : summary.published}
+          description="Quizzes marked as published"
         />
 
         <SummaryCard
           label="Completed"
-          value={loading ? '—' : summary.completed}
-          description="Completed quizzes on this page"
+          value={loading ? "—" : summary.completed}
+          description="Quizzes whose scheduled window has ended"
         />
       </div>
 
       <SectionCard
         eyebrow="ASSESSMENT MANAGEMENT"
         title="Quiz Catalogue"
-        description="Search, filter and manage quizzes available to your department."
+        description="Search, filter, review, update, and manage quizzes within your department."
       >
-        <div className="mb-5 grid gap-4 lg:grid-cols-[minmax(240px,1fr)_180px_160px_auto] lg:items-end">
-          <div>
-            <SearchInput
-              name="quizSearch"
-              label="Search by quiz title"
-              value={search}
-              onChange={handleSearchChange}
-              placeholder="Enter quiz title..."
-            />
-          </div>
+        <div className="mb-5 grid grid-cols-1 gap-4 lg:grid-cols-[minmax(240px,1fr)_190px_170px_auto] lg:items-end">
+          <SearchInput
+            name="quizSearch"
+            label="Search quizzes"
+            value={search}
+            onChange={handleSearchChange}
+            placeholder="Search by title, course, faculty..."
+          />
 
           <div>
             <label
-              htmlFor="quiz-status-filter"
+              htmlFor="quizStatusFilter"
               className="mb-2 block text-sm font-medium text-[#D0D0D8]"
             >
               Status
             </label>
 
             <select
-              id="quiz-status-filter"
+              id="quizStatusFilter"
               value={statusFilter}
               onChange={handleStatusChange}
-              className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7]"
+              className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
             >
               {STATUS_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
@@ -427,61 +411,71 @@ export default function QuizOverview() {
 
           <div>
             <label
-              htmlFor="quiz-semester-filter"
+              htmlFor="quizSemesterFilter"
               className="mb-2 block text-sm font-medium text-[#D0D0D8]"
             >
               Semester
             </label>
 
-            <input
-              id="quiz-semester-filter"
+            <select
+              id="quizSemesterFilter"
               value={semesterFilter}
               onChange={handleSemesterChange}
-              placeholder="e.g. 3"
-              maxLength={30}
-              className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none placeholder:text-[#777986] focus:border-[#CDB5F7]"
-            />
+              className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+            >
+              <option value="">All Semesters</option>
+
+              {semesterOptions.map((semester) => (
+                <option key={semester} value={semester}>
+                  Semester {semester}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <button
-            type="button"
-            onClick={handleRefresh}
-            disabled={loading}
-            className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[#454650] bg-[#26272B] px-4 py-2 text-sm font-medium text-[#EAEAE6] transition hover:bg-[#343640] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loading ? 'Loading...' : 'Refresh'}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <ActionButton
+              type="button"
+              variant="secondary"
+              onClick={() => setRefreshKey((current) => current + 1)}
+              loading={loading}
+            >
+              Refresh
+            </ActionButton>
+
+            {hasActiveFilters && (
+              <ActionButton
+                type="button"
+                variant="ghost"
+                onClick={clearFilters}
+              >
+                Clear
+              </ActionButton>
+            )}
+          </div>
         </div>
-
-        {notice && (
-          <div
-            role="status"
-            className="mb-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200"
-          >
-            {notice}
-          </div>
-        )}
 
         {error && (
           <div
             role="alert"
-            className="mb-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-5"
+            className="mb-5 rounded-xl border border-red-500/30 bg-red-500/10 p-5"
           >
-            <p className="text-sm font-medium text-rose-300">
-              Quiz operation could not be completed
+            <p className="text-sm font-medium text-red-300">
+              Quiz management request failed
             </p>
 
-            <p className="mt-2 text-sm leading-6 text-rose-200/80">
+            <p className="mt-2 text-sm leading-6 text-red-200/80">
               {error}
             </p>
 
-            <button
+            <ActionButton
               type="button"
-              onClick={handleRefresh}
-              className="mt-4 rounded-lg border border-rose-400/30 px-4 py-2 text-sm font-medium text-rose-200 transition hover:bg-rose-500/10"
+              variant="secondary"
+              className="mt-4"
+              onClick={() => setRefreshKey((current) => current + 1)}
             >
-              Reload Quizzes
-            </button>
+              Try Again
+            </ActionButton>
           </div>
         )}
 
@@ -497,21 +491,34 @@ export default function QuizOverview() {
         ) : quizzes.length === 0 ? (
           <EmptyState
             title={
-              search || statusFilter || semesterFilter
-                ? 'No matching quizzes'
-                : 'No quiz records available'
+              hasActiveFilters
+                ? "No matching quizzes"
+                : "No quiz records available"
             }
             description={
-              search || statusFilter || semesterFilter
-                ? 'Try changing or clearing the current filters.'
-                : 'No quizzes are currently available for your department.'
+              hasActiveFilters
+                ? "Try changing your search term or filters."
+                : "Create a quiz to begin managing assessments for your department."
+            }
+            action={
+              hasActiveFilters ? (
+                <ActionButton variant="secondary" onClick={clearFilters}>
+                  Clear Filters
+                </ActionButton>
+              ) : (
+                <Link to="/hod/quizzes/new">
+                  <ActionButton>
+                    Create Quiz
+                  </ActionButton>
+                </Link>
+              )
             }
           />
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-xl border border-[#343640]">
               <table className="w-full min-w-[1050px] text-left">
-                <thead>
+                <thead className="bg-[#202129]">
                   <tr className="border-b border-[#343640] text-xs uppercase tracking-wider text-[#9697A2]">
                     <th scope="col" className="px-4 py-3 font-medium">
                       Quiz
@@ -522,15 +529,11 @@ export default function QuizOverview() {
                     </th>
 
                     <th scope="col" className="px-4 py-3 font-medium">
-                      Semester
+                      Faculty
                     </th>
 
                     <th scope="col" className="px-4 py-3 font-medium">
                       Schedule
-                    </th>
-
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      Assessment
                     </th>
 
                     <th scope="col" className="px-4 py-3 font-medium">
@@ -543,68 +546,60 @@ export default function QuizOverview() {
                   </tr>
                 </thead>
 
-                <tbody>
-                  {quizzes.map((quiz) => (
+                <tbody className="divide-y divide-[#343640]">
+                  {quizzes.map((quiz, index) => (
                     <tr
-                      key={quiz.id}
-                      className="border-b border-[#343640] transition-colors last:border-0 hover:bg-[#252630]/50"
+                      key={quiz.id || `quiz-${index}`}
+                      className="bg-[#191A21] transition-colors hover:bg-[#202129]"
                     >
                       <td className="px-4 py-4">
                         <p className="font-medium text-[#EAEAE6]">
-                          {quiz.title || 'Untitled quiz'}
+                          {quiz.title || "Untitled quiz"}
                         </p>
+
+                        <p className="mt-1 max-w-xs truncate text-xs text-[#9697A2]">
+                          {quiz.description || "No description provided"}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-4 text-sm text-[#C7C7D0]">
+                        <p>{getCourseName(quiz)}</p>
 
                         <p className="mt-1 text-xs text-[#9697A2]">
-                          {getCourseCode(quiz) || 'Course code unavailable'}
+                          {getCourseCode(quiz) || "Course code unavailable"}
                         </p>
                       </td>
 
                       <td className="px-4 py-4 text-sm text-[#C7C7D0]">
-                        {getCourseName(quiz)}
+                        {getFacultyName(quiz)}
                       </td>
 
                       <td className="px-4 py-4 text-sm text-[#C7C7D0]">
-                        {getSemester(quiz)}
-                      </td>
-
-                      <td className="px-4 py-4 text-sm text-[#C7C7D0]">
-                        <p>{getSchedule(quiz)}</p>
-
-                        <p className="mt-1 text-xs text-[#858590]">
-                          {quiz.durationMinutes || 0} minutes
-                        </p>
-                      </td>
-
-                      <td className="px-4 py-4 text-sm text-[#C7C7D0]">
-                        <p>{getTotalMarks(quiz)} marks</p>
-
-                        <p className="mt-1 text-xs text-[#858590]">
-                          {getQuestionCount(quiz)} questions
-                        </p>
+                        {getSchedule(quiz)}
                       </td>
 
                       <td className="px-4 py-4">
                         <span
-                          className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${getStatusStyles(quiz.status)}`}
+                          className={`inline-flex rounded-full border px-3 py-1 text-xs ${getStatusStyles(quiz.status)}`}
                         >
                           {getStatusLabel(quiz.status)}
                         </span>
                       </td>
 
                       <td className="px-4 py-4">
-                        <div className="flex items-center justify-end gap-3">
+                        <div className="flex justify-end gap-3">
                           <Link
                             to="/hod/quizzes/details"
                             state={{ quiz }}
-                            className="text-sm font-medium text-[#CDB5F7] transition hover:text-[#E0D0FF]"
+                            className="rounded text-sm font-medium text-[#CDB5F7] transition hover:text-[#E0D0FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
                           >
-                            View
+                            Details
                           </Link>
 
                           <Link
                             to="/hod/quizzes/edit"
                             state={{ quiz }}
-                            className="text-sm font-medium text-[#D0D0D8] transition hover:text-white"
+                            className="rounded text-sm font-medium text-[#CDB5F7] transition hover:text-[#E0D0FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
                           >
                             Edit
                           </Link>
@@ -613,9 +608,9 @@ export default function QuizOverview() {
                             type="button"
                             onClick={() => handleDelete(quiz)}
                             disabled={Boolean(deletingId)}
-                            className="text-sm font-medium text-rose-300 transition hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-40"
+                            className="rounded text-sm font-medium text-red-300 transition hover:text-red-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            {deletingId === quiz.id ? 'Deleting...' : 'Delete'}
+                            {deletingId === quiz.id ? "Deleting..." : "Delete"}
                           </button>
                         </div>
                       </td>
@@ -625,11 +620,39 @@ export default function QuizOverview() {
               </table>
             </div>
 
-            <Pagination
-              pagination={pagination}
-              onPageChange={setPage}
-              loading={loading}
-            />
+            <div className="mt-5 flex flex-col gap-3 border-t border-[#343640] pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-[#9697A2]">
+                Showing {quizzes.length} of {pagination.total} quiz records
+                <span className="mx-2">·</span>
+                Page {pagination.page} of {pagination.pages}
+              </p>
+
+              <div className="flex items-center gap-2">
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!pagination.hasPreviousPage || loading}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  Previous
+                </ActionButton>
+
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={!pagination.hasNextPage || loading}
+                  onClick={() =>
+                    setPage((current) =>
+                      Math.min(pagination.pages, current + 1),
+                    )
+                  }
+                >
+                  Next
+                </ActionButton>
+              </div>
+            </div>
           </>
         )}
       </SectionCard>
