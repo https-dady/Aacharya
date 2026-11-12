@@ -33,6 +33,7 @@ import studentQuizResultRoutes from './routes/student-quiz-result.routes.js';
 import studentAttendanceRoutes from './routes/student-attendance.routes.js';
 import hodAttendanceRoutes from './routes/hod-attendance.routes.js';
 import timetableRoutes from './routes/timetable.routes.js';
+import assessmentRoutes from './routes/assessment.routes.js';
 
 import {
   studentUploadErrorMiddleware,
@@ -178,6 +179,9 @@ app.use('/api/v1/attendance', hodAttendanceRoutes);
 
 // HOD timetable management.
 app.use('/api/v1/timetable', timetableRoutes);
+
+// HOD assessment and results management.
+app.use('/api/v1/assessments', assessmentRoutes);
 
 // Error handling.
 app.use(studentUploadErrorMiddleware);
