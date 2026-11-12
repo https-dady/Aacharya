@@ -216,8 +216,18 @@ export default function HodProfile() {
   }, [setUser]);
 
   useEffect(() => {
-    loadProfile();
-  }, [loadProfile]);
+  let isActive = true;
+
+  Promise.resolve().then(() => {
+    if (isActive) {
+      loadProfile();
+    }
+  });
+
+  return () => {
+    isActive = false;
+  };
+}, [loadProfile]);
 
   const fullName = getDisplayName(profile || user);
   const initials = getInitials(fullName);
