@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import api from '../../../auth/services/api/axios.js';
+import batchManagementService from '../../services/batchManagementService.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import FormField from '../../components/FormField.jsx';
@@ -62,9 +62,9 @@ function getErrorMessage(error) {
 
   if (status === 409) {
     return (
-      error?.response?.data?.message
-      || error?.response?.data?.error?.message
-      || 'A batch with this code already exists for this academic year.'
+      error?.response?.data?.message ||
+      error?.response?.data?.error?.message ||
+      'A batch with this code already exists for this academic year.'
     );
   }
 
@@ -78,17 +78,18 @@ function getErrorMessage(error) {
 
   if (status === 422 || status === 400) {
     return (
-      error?.response?.data?.message
-      || error?.response?.data?.error?.message
-      || 'Please check the entered information and try again.'
+      error?.response?.data?.message ||
+      error?.response?.data?.error?.message ||
+      error.message ||
+      'Please check the entered information and try again.'
     );
   }
 
   return (
-    error?.response?.data?.message
-    || error?.response?.data?.error?.message
-    || error?.message
-    || 'Unable to create the batch. Please try again.'
+    error?.response?.data?.message ||
+    error?.response?.data?.error?.message ||
+    error?.message ||
+    'Unable to create the batch. Please try again.'
   );
 }
 
@@ -98,7 +99,6 @@ export default function CreateBatch() {
   const [form, setForm] = useState(INITIAL_FORM);
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState('');
-  const [noticeType, setNoticeType] = useState('error');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   function handleChange(event) {
@@ -136,34 +136,20 @@ export default function CreateBatch() {
     setIsSubmitting(true);
 
     try {
-      const response = await api.post(
-        '/v1/provisioning/batches',
-        {
-          name: form.name.trim(),
-          code: form.code.trim().toUpperCase(),
-          academicYear: form.academicYear.trim(),
-        },
-      );
-
-      const responseBody = response?.data;
-      const data = responseBody?.data ?? responseBody;
-      const batch = data?.batch;
-
-      if (!batch || !(batch.id || batch._id)) {
-        throw new Error(
-          'The server did not return the created batch record.',
-        );
-      }
+      const result = await batchManagementService.createBatch({
+        name: form.name.trim(),
+        code: form.code.trim().toUpperCase(),
+        academicYear: form.academicYear.trim(),
+      });
 
       navigate('/hod/batches/details', {
         state: {
-          batch,
+          batch: result.batch,
         },
         replace: true,
       });
     } catch (error) {
       setNotice(getErrorMessage(error));
-      setNoticeType('error');
     } finally {
       setIsSubmitting(false);
     }
@@ -177,7 +163,6 @@ export default function CreateBatch() {
     setForm(INITIAL_FORM);
     setErrors({});
     setNotice('');
-    setNoticeType('error');
   }
 
   return (
@@ -269,12 +254,8 @@ export default function CreateBatch() {
         {notice && (
           <div
             role="alert"
-            className={[
-              'mt-5 rounded-xl border p-4 text-sm leading-6',
-              noticeType === 'error'
-                ? 'border-rose-500/30 bg-rose-500/10 text-rose-200'
-                : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200',
-            ].join(' ')}
+            aria-live="assertive"
+            className="mt-5 rounded-xl border border-rose-500/30 bg-rose-500/10 p-4 text-sm leading-6 text-rose-200"
           >
             {notice}
           </div>
