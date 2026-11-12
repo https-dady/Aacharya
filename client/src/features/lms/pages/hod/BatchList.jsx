@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
-import api from '../../../auth/services/api/axios.js';
+import batchManagementService from '../../services/batchManagementService.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import DataTable from '../../components/DataTable.jsx';
@@ -11,32 +11,22 @@ import SectionCard from '../../components/SectionCard.jsx';
 
 const PAGE_SIZE = 20;
 
+const INITIAL_PAGINATION = {
+  page: 1,
+  limit: PAGE_SIZE,
+  total: 0,
+  totalPages: 0,
+  hasNextPage: false,
+  hasPreviousPage: false,
+};
+
 function getErrorMessage(error) {
   return (
-    error?.response?.data?.error?.message
-    || error?.response?.data?.message
-    || error?.message
-    || 'Unable to load batches. Please try again.'
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unable to load batches. Please try again.'
   );
-}
-
-function getResponseData(response) {
-  const body = response?.data;
-
-  return body?.data ?? body;
-}
-
-function getPagination(data, requestedPage) {
-  const pagination = data?.pagination ?? {};
-
-  return {
-    page: Number(pagination.page ?? requestedPage),
-    limit: Number(pagination.limit ?? PAGE_SIZE),
-    total: Number(pagination.total ?? 0),
-    totalPages: Number(pagination.totalPages ?? 0),
-    hasNextPage: Boolean(pagination.hasNextPage),
-    hasPreviousPage: Boolean(pagination.hasPreviousPage),
-  };
 }
 
 const BATCH_COLUMNS = [
@@ -45,7 +35,7 @@ const BATCH_COLUMNS = [
     header: 'Batch',
     accessor: 'name',
     render: (value, batch) => (
-      <div>
+      <div className="min-w-[150px]">
         <p className="font-medium text-[#EAEAE6]">
           {value || 'Unnamed batch'}
         </p>
@@ -60,13 +50,10 @@ const BATCH_COLUMNS = [
     key: 'academicYear',
     header: 'Academic Year',
     accessor: 'academicYear',
-  },
-  {
-    key: 'sectionCount',
-    header: 'Sections',
-    accessor: 'sectionCount',
     render: (value) => (
-      typeof value === 'number' ? value : '—'
+      <span className="whitespace-nowrap text-[#C7C7D0]">
+        {value || '—'}
+      </span>
     ),
   },
   {
@@ -84,10 +71,10 @@ const BATCH_COLUMNS = [
       return (
         <span
           className={[
-            'inline-flex rounded-full border px-2.5 py-1',
+            'inline-flex whitespace-nowrap rounded-full border px-2.5 py-1',
             'text-xs font-medium',
-            styles[value]
-              || 'border-[#454650] bg-[#292A32] text-[#A5A6B0]',
+            styles[value] ||
+              'border-[#454650] bg-[#292A32] text-[#A5A6B0]',
           ].join(' ')}
         >
           {value || 'Unknown'}
@@ -114,186 +101,73 @@ const BATCH_COLUMNS = [
 
 export default function BatchList() {
   const [search, setSearch] = useState('');
+  const [submittedSearch, setSubmittedSearch] = useState('');
   const [status, setStatus] = useState('ALL');
   const [page, setPage] = useState(1);
 
   const [batches, setBatches] = useState([]);
-  const [pagination, setPagination] = useState({
-    page: 1,
-    limit: PAGE_SIZE,
-    total: 0,
-    totalPages: 0,
-    hasNextPage: false,
-    hasPreviousPage: false,
-  });
+  const [pagination, setPagination] = useState(INITIAL_PAGINATION);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
+  const [reloadKey, setReloadKey] = useState(0);
 
-  const loadBatches = useCallback(async (signal) => {
-    setIsLoading(true);
-    setError('');
+  const loadBatches = useCallback(
+    async (signal) => {
+      setIsLoading(true);
+      setError('');
 
-    const params = {
-      page,
-      limit: PAGE_SIZE,
-    };
-
-    if (search.trim()) {
-      params.search = search.trim();
-    }
-
-    if (status !== 'ALL') {
-      params.status = status;
-    }
-
-    try {
-      const response = await api.get(
-        '/v1/provisioning/batches',
-        {
-          params,
-          signal,
-        },
-      );
-
-      const data = getResponseData(response);
-
-      if (!Array.isArray(data?.batches)) {
-        throw new Error(
-          'Unexpected response received from the batches API.',
+      try {
+        const result = await batchManagementService.listBatches(
+          {
+            page,
+            limit: PAGE_SIZE,
+            search: submittedSearch,
+            status,
+          },
+          { signal },
         );
+
+        if (signal.aborted) {
+          return;
+        }
+
+        setBatches(result.batches);
+        setPagination(result.pagination);
+      } catch (requestError) {
+        if (
+          signal.aborted ||
+          requestError?.code === 'ERR_CANCELED'
+        ) {
+          return;
+        }
+
+        setBatches([]);
+        setPagination(INITIAL_PAGINATION);
+        setError(getErrorMessage(requestError));
+      } finally {
+        if (!signal.aborted) {
+          setIsLoading(false);
+        }
       }
-
-      const loadedBatches = data.batches.map((batch) => ({
-        ...batch,
-        sectionCount: null,
-      }));
-
-      setBatches(loadedBatches);
-      setPagination(getPagination(data, page));
-
-      /*
-       * Section counts are not included in the batch-list response.
-       * Fetch the actual count from the existing sections endpoint.
-       * A section-count request failure must not break the batch list.
-       */
-      const sectionCounts = await Promise.all(
-        loadedBatches.map(async (batch) => {
-          const batchId = batch.id || batch._id;
-
-          if (!batchId) {
-            return null;
-          }
-
-          try {
-            const sectionResponse = await api.get(
-              `/v1/provisioning/batches/${encodeURIComponent(batchId)}/sections`,
-              {
-                params: {
-                  page: 1,
-                  limit: 1,
-                },
-                signal,
-              },
-            );
-
-            const sectionData = getResponseData(
-              sectionResponse,
-            );
-
-            const total = sectionData?.pagination?.total;
-
-            if (
-              total === undefined
-              || total === null
-              || !Number.isFinite(Number(total))
-            ) {
-              return null;
-            }
-
-            return {
-              batchId,
-              count: Number(total),
-            };
-          } catch (sectionError) {
-            if (
-              signal?.aborted
-              || sectionError?.code === 'ERR_CANCELED'
-            ) {
-              return null;
-            }
-
-            return null;
-          }
-        }),
-      );
-
-      if (signal?.aborted) {
-        return;
-      }
-
-      const countMap = new Map(
-        sectionCounts
-          .filter(Boolean)
-          .map(({ batchId, count }) => [batchId, count]),
-      );
-
-      setBatches((currentBatches) =>
-        currentBatches.map((batch) => {
-          const batchId = batch.id || batch._id;
-
-          if (!countMap.has(batchId)) {
-            return batch;
-          }
-
-          return {
-            ...batch,
-            sectionCount: countMap.get(batchId),
-          };
-        }),
-      );
-    } catch (requestError) {
-      if (
-        signal?.aborted
-        || requestError?.code === 'ERR_CANCELED'
-      ) {
-        return;
-      }
-
-      setBatches([]);
-      setPagination({
-        page,
-        limit: PAGE_SIZE,
-        total: 0,
-        totalPages: 0,
-        hasNextPage: false,
-        hasPreviousPage: false,
-      });
-
-      setError(getErrorMessage(requestError));
-    } finally {
-      if (!signal?.aborted) {
-        setIsLoading(false);
-      }
-    }
-  }, [page, search, status]);
+    },
+    [page, submittedSearch, status],
+  );
 
   useEffect(() => {
     const controller = new AbortController();
 
-    const timeoutId = setTimeout(
-      () => loadBatches(controller.signal),
-      search.trim() ? 300 : 0,
-    );
+    loadBatches(controller.signal);
 
-    return () => {
-      clearTimeout(timeoutId);
-      controller.abort();
-    };
-  }, [loadBatches, search]);
+    return () => controller.abort();
+  }, [loadBatches, reloadKey]);
 
   function handleSearchChange(event) {
     setSearch(event.target.value);
+  }
+
+  function handleSearch(value) {
+    setSubmittedSearch(String(value ?? '').trim());
     setPage(1);
   }
 
@@ -304,27 +178,18 @@ export default function BatchList() {
 
   function clearFilters() {
     setSearch('');
+    setSubmittedSearch('');
     setStatus('ALL');
     setPage(1);
   }
 
+  function handleRetry() {
+    setReloadKey((current) => current + 1);
+  }
+
   const hasActiveFilters = (
-    Boolean(search.trim())
-    || status !== 'ALL'
-  );
-
-  const knownSectionCounts = batches
-    .map((batch) => batch.sectionCount)
-    .filter((count) => typeof count === 'number');
-
-  const allSectionCountsAvailable = (
-    batches.length > 0
-    && knownSectionCounts.length === batches.length
-  );
-
-  const sectionCountOnPage = knownSectionCounts.reduce(
-    (total, count) => total + count,
-    0,
+    Boolean(submittedSearch) ||
+    status !== 'ALL'
   );
 
   const startRecord = pagination.total === 0
@@ -382,32 +247,31 @@ export default function BatchList() {
             Academic Batches
           </p>
 
-          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
+          <p
+            className="mt-3 text-2xl font-semibold text-[#EAEAE6]"
+            aria-live="polite"
+          >
             {isLoading && pagination.total === 0
               ? '…'
               : pagination.total}
           </p>
 
           <p className="mt-1 text-xs leading-5 text-[#777986]">
-            Total batches in your department.
+            Total batches matching the current filters.
           </p>
         </div>
 
         <div className="rounded-2xl border border-[#383943] bg-[#1D1F27] p-5">
           <p className="text-sm text-[#A5A6B0]">
-            Academic Sections
+            Current Academic Year
           </p>
 
-          <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
-            {allSectionCountsAvailable
-              ? sectionCountOnPage
-              : '—'}
+          <p className="mt-3 text-xl font-semibold text-[#EAEAE6]">
+            {batches[0]?.academicYear || '—'}
           </p>
 
           <p className="mt-1 text-xs leading-5 text-[#777986]">
-            {allSectionCountsAvailable
-              ? 'Sections across the batches on this page.'
-              : 'Section totals appear when the section data is available.'}
+            Academic year of the most recent batch on this page.
           </p>
         </div>
       </div>
@@ -424,7 +288,9 @@ export default function BatchList() {
               label="Search batches"
               value={search}
               onChange={handleSearchChange}
+              onSearch={handleSearch}
               placeholder="Search batch, code, or academic year..."
+              disabled={isLoading}
             />
 
             <div className="flex flex-col gap-2">
@@ -440,6 +306,7 @@ export default function BatchList() {
                 name="batch-status-filter"
                 value={status}
                 onChange={handleStatusChange}
+                disabled={isLoading}
                 className={[
                   'min-h-11 w-full rounded-xl border',
                   'border-[#383943] bg-[#191A21]',
@@ -447,6 +314,7 @@ export default function BatchList() {
                   'outline-none transition-colors',
                   'focus:border-[#CDB5F7]',
                   'focus:ring-2 focus:ring-[#CDB5F7]/20',
+                  'disabled:cursor-not-allowed disabled:opacity-50',
                 ].join(' ')}
               >
                 <option value="ALL">All statuses</option>
@@ -469,7 +337,8 @@ export default function BatchList() {
                 type="button"
                 variant="secondary"
                 size="sm"
-                onClick={() => loadBatches()}
+                onClick={handleRetry}
+                disabled={isLoading}
               >
                 Retry
               </ActionButton>
@@ -477,7 +346,10 @@ export default function BatchList() {
           )}
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#343640] pt-4">
-            <p className="text-sm text-[#A5A6B0]">
+            <p
+              className="text-sm text-[#A5A6B0]"
+              aria-live="polite"
+            >
               {isLoading
                 ? 'Loading batches…'
                 : pagination.total === 0
@@ -485,26 +357,34 @@ export default function BatchList() {
                   : `Showing ${startRecord}–${endRecord} of ${pagination.total} batches`}
             </p>
 
-            {hasActiveFilters && (
+            <div className="flex flex-wrap items-center gap-2">
+              {hasActiveFilters && (
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={clearFilters}
+                >
+                  Clear filters
+                </ActionButton>
+              )}
+
               <ActionButton
                 type="button"
                 variant="secondary"
                 size="sm"
-                onClick={clearFilters}
+                onClick={handleRetry}
+                disabled={isLoading}
               >
-                Clear filters
+                Refresh
               </ActionButton>
-            )}
+            </div>
           </div>
 
           <DataTable
             columns={BATCH_COLUMNS}
             data={batches}
-            rowKey={(batch) => (
-              batch.id
-              || batch._id
-              || `${batch.code}-${batch.academicYear}`
-            )}
+            rowKey={(batch) => batch.id}
             loading={isLoading}
             ariaLabel="Department academic batches"
             emptyTitle={
@@ -526,7 +406,7 @@ export default function BatchList() {
                 <ActionButton
                   type="button"
                   variant="secondary"
-                  onClick={() => loadBatches()}
+                  onClick={handleRetry}
                 >
                   Retry loading
                 </ActionButton>
@@ -560,8 +440,8 @@ export default function BatchList() {
                   variant="secondary"
                   size="sm"
                   disabled={
-                    isLoading
-                    || !pagination.hasPreviousPage
+                    isLoading ||
+                    !pagination.hasPreviousPage
                   }
                   onClick={() => {
                     setPage((currentPage) =>
@@ -577,8 +457,8 @@ export default function BatchList() {
                   variant="secondary"
                   size="sm"
                   disabled={
-                    isLoading
-                    || !pagination.hasNextPage
+                    isLoading ||
+                    !pagination.hasNextPage
                   }
                   onClick={() => {
                     setPage((currentPage) => currentPage + 1);
@@ -599,7 +479,7 @@ export default function BatchList() {
 
         <p className="mt-1 text-sm leading-6 text-[#A5A6B0]">
           Batch and section management remain restricted to the
-          authenticated HOD's department. Faculty and mentor
+          authenticated HOD&apos;s department. Faculty and mentor
           allocations follow the existing role and assignment rules.
         </p>
       </div>
