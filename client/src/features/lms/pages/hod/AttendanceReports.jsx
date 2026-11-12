@@ -1,8 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import ActionButton from '../../components/ActionButton.jsx';
@@ -11,25 +7,9 @@ import FormField from '../../components/FormField.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
-import attendanceManagementService from '../../services/attendanceManagementService.js';
+import hodAttendanceService from '../../services/hodAttendanceService.js';
 
-const DEFAULT_PAGE_SIZE = 20;
-const DEFAULT_THRESHOLD = 75;
-
-const INITIAL_FILTERS = {
-  startDate: '',
-  endDate: '',
-  section: '',
-};
-
-function getErrorMessage(error) {
-  return (
-    error?.response?.data?.error?.message ||
-    error?.response?.data?.message ||
-    error?.message ||
-    'Unable to load attendance reports. Please try again.'
-  );
-}
+const PAGE_SIZE = 20;
 
 function formatPercentage(value) {
   const percentage = Number(value);
@@ -47,7 +27,7 @@ function formatDate(value) {
   const date = new Date(`${value}T00:00:00`);
 
   if (Number.isNaN(date.getTime())) {
-    return '—';
+    return value;
   }
 
   return new Intl.DateTimeFormat('en-IN', {
@@ -57,95 +37,65 @@ function formatDate(value) {
   }).format(date);
 }
 
-function AttendanceStatus({ status }) {
-  const normalizedStatus = String(status || '').toUpperCase();
+function getStatusStyles(status) {
+  switch (String(status || '').toUpperCase()) {
+    case 'PRESENT':
+      return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
 
-  const styles = {
-    PRESENT:
-      'border-emerald-500/30 bg-emerald-500/10 text-emerald-300',
-    ABSENT:
-      'border-red-500/30 bg-red-500/10 text-red-300',
-    LATE:
-      'border-amber-500/30 bg-amber-500/10 text-amber-200',
-  };
+    case 'LATE':
+      return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
 
-  return (
-    <span
-      className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${
-        styles[normalizedStatus] ||
-        'border-[#454650] bg-[#26272B] text-[#C7C7D0]'
-      }`}
-    >
-      {normalizedStatus || 'Unknown'}
-    </span>
-  );
+    case 'ABSENT':
+      return 'border-red-500/30 bg-red-500/10 text-red-300';
+
+    default:
+      return 'border-[#454650] bg-[#26272B] text-[#C7C7D0]';
+  }
 }
 
-function SummaryCard({
-  label,
-  value,
-  description,
-  variant = 'default',
-}) {
-  const valueStyles = {
-    default: 'text-[#EAEAE6]',
-    danger: 'text-red-300',
-  };
-
+function getErrorMessage(error) {
   return (
-    <div className="rounded-xl border border-[#343640] bg-[#191A21] p-5">
-      <p className="text-sm text-[#9697A2]">
-        {label}
-      </p>
-
-      <p
-        className={`mt-3 text-2xl font-semibold ${
-          valueStyles[variant]
-        }`}
-      >
-        {value}
-      </p>
-
-      <p className="mt-2 text-xs leading-5 text-[#777986]">
-        {description}
-      </p>
-    </div>
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unable to load attendance reports.'
   );
 }
 
 export default function AttendanceReports() {
-  const [filters, setFilters] = useState(INITIAL_FILTERS);
+  const [filters, setFilters] = useState({
+    startDate: '',
+    endDate: '',
+    section: '',
+  });
+
   const [appliedFilters, setAppliedFilters] = useState(null);
 
-  const [records, setRecords] = useState([]);
-
-  const [summary, setSummary] = useState({
-    totalRecords: 0,
-    averageAttendance: 0,
-    belowThreshold: 0,
-    attendanceThreshold: DEFAULT_THRESHOLD,
+  const [report, setReport] = useState({
+    department: null,
+    summary: {
+      totalRecords: 0,
+      averageAttendance: 0,
+      belowThreshold: 0,
+      attendanceThreshold: 75,
+    },
+    records: [],
+    pagination: {
+      page: 1,
+      limit: PAGE_SIZE,
+      total: 0,
+      totalPages: 0,
+    },
   });
 
-  const [pagination, setPagination] = useState({
-    page: 1,
-    limit: DEFAULT_PAGE_SIZE,
-    total: 0,
-    totalPages: 0,
-  });
-
+  const [page, setPage] = useState(1);
   const [errors, setErrors] = useState({});
-  const [error, setError] = useState('');
-
   const [loading, setLoading] = useState(false);
-  const [hasGeneratedReport, setHasGeneratedReport] =
-    useState(false);
-
+  const [error, setError] = useState('');
+  const [hasGeneratedReport, setHasGeneratedReport] = useState(false);
   const [refreshVersion, setRefreshVersion] = useState(0);
 
-  const threshold =
-    Number(summary.attendanceThreshold) || DEFAULT_THRESHOLD;
-
-  const loadReports = useCallback(async (signal) => {
+  const loadReport = useCallback(async () => {
     if (!appliedFilters) {
       return;
     }
@@ -154,65 +104,52 @@ export default function AttendanceReports() {
     setError('');
 
     try {
-      const result =
-        await attendanceManagementService.getAttendanceReports(
-          {
-            ...appliedFilters,
-            page: pagination.page,
-            limit: pagination.limit,
-          },
-          { signal },
-        );
+      const result = await hodAttendanceService.getAttendanceReports({
+        ...appliedFilters,
+        page,
+        limit: PAGE_SIZE,
+      });
 
-      if (signal.aborted) {
-        return;
-      }
-
-      setRecords(result.records);
-      setSummary(result.summary);
-      setPagination(result.pagination);
-
+      setReport(result);
       setHasGeneratedReport(true);
     } catch (requestError) {
-      if (
-        signal.aborted ||
-        requestError?.code === 'ERR_CANCELED'
-      ) {
-        return;
-      }
-
-      setRecords([]);
       setError(getErrorMessage(requestError));
+      setReport({
+        department: null,
+        summary: {
+          totalRecords: 0,
+          averageAttendance: 0,
+          belowThreshold: 0,
+          attendanceThreshold: 75,
+        },
+        records: [],
+        pagination: {
+          page,
+          limit: PAGE_SIZE,
+          total: 0,
+          totalPages: 0,
+        },
+      });
     } finally {
-      if (!signal.aborted) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
-  }, [
-    appliedFilters,
-    pagination.page,
-    pagination.limit,
-  ]);
+  }, [appliedFilters, page]);
 
   useEffect(() => {
-    if (!appliedFilters) {
-      return undefined;
-    }
-
-    const controller = new AbortController();
+    let isActive = true;
 
     Promise.resolve().then(() => {
-      if (!controller.signal.aborted) {
-        loadReports(controller.signal);
+      if (isActive && appliedFilters) {
+        loadReport();
       }
     });
 
     return () => {
-      controller.abort();
+      isActive = false;
     };
-  }, [loadReports, refreshVersion, appliedFilters]);
+  }, [loadReport, appliedFilters, refreshVersion]);
 
-  const handleChange = useCallback((event) => {
+  function handleChange(event) {
     const { name, value } = event.target;
 
     setFilters((current) => ({
@@ -224,9 +161,9 @@ export default function AttendanceReports() {
       ...current,
       [name]: '',
     }));
-  }, []);
+  }
 
-  const handleSubmit = useCallback((event) => {
+  function handleSubmit(event) {
     event.preventDefault();
 
     const nextErrors = {};
@@ -240,100 +177,84 @@ export default function AttendanceReports() {
         'End date must be on or after the start date.';
     }
 
-    if (
-      filters.section.trim().length > 100
-    ) {
-      nextErrors.section =
-        'Section name cannot exceed 100 characters.';
-    }
-
     setErrors(nextErrors);
 
     if (Object.keys(nextErrors).length > 0) {
       return;
     }
 
-    setPagination((current) => ({
-      ...current,
-      page: 1,
-    }));
-
-    setRecords([]);
+    setPage(1);
     setError('');
-
     setAppliedFilters({
-      startDate: filters.startDate || undefined,
-      endDate: filters.endDate || undefined,
-      section: filters.section.trim() || undefined,
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      section: filters.section.trim(),
     });
+  }
 
-    setHasGeneratedReport(true);
-  }, [filters]);
-
-  const handleReset = useCallback(() => {
-    setFilters({ ...INITIAL_FILTERS });
-    setAppliedFilters(null);
+  function handleReset() {
+    setFilters({
+      startDate: '',
+      endDate: '',
+      section: '',
+    });
 
     setErrors({});
-    setError('');
-
-    setRecords([]);
-
-    setSummary({
-      totalRecords: 0,
-      averageAttendance: 0,
-      belowThreshold: 0,
-      attendanceThreshold: DEFAULT_THRESHOLD,
-    });
-
-    setPagination({
-      page: 1,
-      limit: DEFAULT_PAGE_SIZE,
-      total: 0,
-      totalPages: 0,
-    });
-
+    setAppliedFilters(null);
     setHasGeneratedReport(false);
-  }, []);
+    setError('');
+    setPage(1);
 
-  const handleRefresh = useCallback(() => {
+    setReport({
+      department: null,
+      summary: {
+        totalRecords: 0,
+        averageAttendance: 0,
+        belowThreshold: 0,
+        attendanceThreshold: 75,
+      },
+      records: [],
+      pagination: {
+        page: 1,
+        limit: PAGE_SIZE,
+        total: 0,
+        totalPages: 0,
+      },
+    });
+  }
+
+  function handleRefresh() {
     setRefreshVersion((current) => current + 1);
-  }, []);
+  }
 
-  const handlePageChange = useCallback((nextPage) => {
-    setPagination((current) => ({
-      ...current,
-      page: nextPage,
-    }));
-  }, []);
+  function handlePreviousPage() {
+    setPage((current) => Math.max(1, current - 1));
+  }
 
-  const showingStart = pagination.total === 0
-    ? 0
-    : ((pagination.page - 1) * pagination.limit) + 1;
+  function handleNextPage() {
+    setPage((current) =>
+      Math.min(
+        Math.max(1, report.pagination.totalPages),
+        current + 1,
+      ),
+    );
+  }
 
-  const showingEnd = Math.min(
-    pagination.page * pagination.limit,
-    pagination.total,
-  );
+  const summary = report.summary;
+  const records = report.records;
+  const pagination = report.pagination;
+  const threshold = summary.attendanceThreshold || 75;
 
   return (
-    <div className="mx-auto w-full max-w-[1200px] space-y-6">
+    <div className="mx-auto w-full max-w-[1400px] space-y-6">
       <PageHeader
         eyebrow="ACADEMIC OVERSIGHT"
         title="Attendance Reports"
-        description="Review department attendance records over a selected period and identify sections requiring attention."
+        description="Generate department-scoped attendance reports using date ranges and section filters."
         breadcrumbs={[
-          {
-            label: 'HOD Dashboard',
-            to: '/hod/dashboard',
-          },
-          {
-            label: 'Attendance',
-            to: '/hod/attendance',
-          },
-          {
-            label: 'Attendance Reports',
-          },
+          { label: 'HOD Dashboard', to: '/hod/dashboard' },
+          { label: 'Attendance', to: '/hod/attendance' },
+          { label: 'Attendance Reports' },
         ]}
         actions={
           <Link to="/hod/attendance">
@@ -344,11 +265,30 @@ export default function AttendanceReports() {
         }
       />
 
-      {/* Report Filters */}
+      {report.department && (
+        <div className="rounded-xl border border-[#343640] bg-[#191A21] px-5 py-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-[#9697A2]">
+            Active Department
+          </p>
+
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <h2 className="text-lg font-semibold text-[#EAEAE6]">
+              {report.department.name || 'Department'}
+            </h2>
+
+            {report.department.code && (
+              <span className="rounded-md border border-[#CDB5F7]/20 bg-[#CDB5F7]/10 px-2 py-1 text-xs font-medium text-[#CDB5F7]">
+                {report.department.code}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
+
       <SectionCard
         eyebrow="REPORT CONFIGURATION"
         title="Filter Attendance Records"
-        description="Choose a date range and optionally specify a section."
+        description="Select a date range and optionally enter a section name or section code."
       >
         <form onSubmit={handleSubmit} noValidate>
           <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
@@ -359,7 +299,6 @@ export default function AttendanceReports() {
               value={filters.startDate}
               onChange={handleChange}
               error={errors.startDate}
-              max={filters.endDate || undefined}
             />
 
             <FormField
@@ -369,7 +308,6 @@ export default function AttendanceReports() {
               value={filters.endDate}
               onChange={handleChange}
               error={errors.endDate}
-              min={filters.startDate || undefined}
             />
 
             <FormField
@@ -379,7 +317,6 @@ export default function AttendanceReports() {
               onChange={handleChange}
               placeholder="e.g. Section A"
               helperText="Leave blank to include all sections."
-              error={errors.section}
             />
           </div>
 
@@ -388,144 +325,127 @@ export default function AttendanceReports() {
               type="button"
               variant="secondary"
               onClick={handleReset}
-              disabled={loading}
             >
               Reset Filters
             </ActionButton>
 
-            <ActionButton
-              type="submit"
-              loading={loading}
-            >
+            <ActionButton type="submit" loading={loading}>
               Generate Report
             </ActionButton>
           </div>
         </form>
       </SectionCard>
 
-      {/* Error State */}
       {error && (
         <div
           role="alert"
           className="rounded-xl border border-red-500/30 bg-red-500/10 p-5"
         >
-          <p className="text-sm font-semibold text-red-300">
-            Unable to generate attendance report
+          <p className="text-sm font-medium text-red-300">
+            Attendance report request failed
           </p>
 
           <p className="mt-2 text-sm leading-6 text-red-200/80">
             {error}
           </p>
 
-          <ActionButton
-            variant="secondary"
-            className="mt-4"
-            onClick={handleRefresh}
-          >
-            Try Again
-          </ActionButton>
+          {appliedFilters && (
+            <ActionButton
+              type="button"
+              variant="secondary"
+              className="mt-4"
+              onClick={handleRefresh}
+            >
+              Try Again
+            </ActionButton>
+          )}
         </div>
       )}
 
-      {/* Report Summary */}
       <SectionCard
         eyebrow="REPORT SUMMARY"
         title="Attendance Statistics"
         description={
           hasGeneratedReport
-            ? 'Summary returned by the department attendance report service.'
-            : 'Generate a report to view attendance statistics.'
+            ? 'Statistics returned by the department attendance report API.'
+            : 'Apply filters to retrieve attendance report statistics.'
         }
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <SummaryCard
-            label="Attendance Records"
-            value={
-              hasGeneratedReport
+          <div className="rounded-xl border border-[#343640] bg-[#191A21] p-5">
+            <p className="text-sm text-[#9697A2]">
+              Attendance Records
+            </p>
+
+            <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
+              {hasGeneratedReport && !loading
                 ? summary.totalRecords
-                : '—'
-            }
-            description="Records matching the selected filters"
-          />
+                : '—'}
+            </p>
+          </div>
 
-          <SummaryCard
-            label="Average Attendance"
-            value={
-              hasGeneratedReport
+          <div className="rounded-xl border border-[#343640] bg-[#191A21] p-5">
+            <p className="text-sm text-[#9697A2]">
+              Average Attendance
+            </p>
+
+            <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
+              {hasGeneratedReport && !loading
                 ? formatPercentage(summary.averageAttendance)
-                : '—'
-            }
-            description="Department attendance average"
-          />
+                : '—'}
+            </p>
+          </div>
 
-          <SummaryCard
-            label={`Below ${threshold}%`}
-            value={
-              hasGeneratedReport
+          <div className="rounded-xl border border-red-500/20 bg-[#191A21] p-5">
+            <p className="text-sm text-[#9697A2]">
+              Students Below {threshold}%
+            </p>
+
+            <p className="mt-3 text-2xl font-semibold text-red-300">
+              {hasGeneratedReport && !loading
                 ? summary.belowThreshold
-                : '—'
-            }
-            description="Students below attendance threshold"
-            variant="danger"
-          />
+                : '—'}
+            </p>
+          </div>
         </div>
       </SectionCard>
 
-      {/* Report Records */}
       <SectionCard
         eyebrow="REPORT DETAILS"
         title="Attendance Records"
-        description="Detailed attendance entries matching the selected report filters."
-        action={
-          hasGeneratedReport && (
-            <ActionButton
-              size="sm"
-              variant="secondary"
-              onClick={handleRefresh}
-              disabled={loading}
-            >
-              Refresh Report
-            </ActionButton>
-          )
-        }
+        description="Detailed attendance entries returned by the backend."
       >
         {loading ? (
           <div
             role="status"
-            aria-live="polite"
             className="rounded-xl border border-[#343640] bg-[#191A21] px-5 py-12 text-center"
           >
             <p className="text-sm text-[#C7C7D0]">
               Generating attendance report...
             </p>
           </div>
-        ) : error ? (
-          <EmptyState
-            title="Report unavailable"
-            description="The report could not be loaded. Use the retry action above to try again."
-          />
         ) : !hasGeneratedReport ? (
           <EmptyState
             title="No report generated yet"
-            description="Choose your filters and generate a report to retrieve actual department attendance records."
+            description="Choose your report filters and select Generate Report to retrieve department attendance records."
           />
         ) : records.length === 0 ? (
           <EmptyState
-            title="No attendance records available"
-            description="No actual attendance records were found for the selected filters."
+            title="No attendance records found"
+            description="No records match the selected date range and section filter."
             action={
               <ActionButton
                 variant="secondary"
                 onClick={handleReset}
               >
-                Reset Report
+                Reset Filters
               </ActionButton>
             }
           />
         ) : (
           <>
             <div className="overflow-x-auto rounded-xl border border-[#343640]">
-              <table className="w-full min-w-[1000px] text-left text-sm">
+              <table className="w-full min-w-[1150px] text-left text-sm">
                 <thead className="bg-[#202129] text-xs uppercase tracking-wider text-[#9697A2]">
                   <tr>
                     <th scope="col" className="px-4 py-3 font-medium">
@@ -541,11 +461,15 @@ export default function AttendanceReports() {
                     </th>
 
                     <th scope="col" className="px-4 py-3 font-medium">
-                      Batch / Section
+                      Section
                     </th>
 
                     <th scope="col" className="px-4 py-3 font-medium">
                       Course
+                    </th>
+
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Faculty
                     </th>
 
                     <th scope="col" className="px-4 py-3 font-medium">
@@ -555,128 +479,125 @@ export default function AttendanceReports() {
                     <th scope="col" className="px-4 py-3 font-medium">
                       Status
                     </th>
-
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      Marked By
-                    </th>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-[#343640]">
-                  {records.map((record) => (
-                    <tr
-                      key={record.id}
-                      className="bg-[#191A21] transition-colors hover:bg-[#202129]"
-                    >
-                      <td className="whitespace-nowrap px-4 py-4 text-[#C7C7D0]">
-                        {formatDate(record.date)}
-                      </td>
+                  {records.map((record) => {
+                    const isBelowThreshold =
+                      Number(record.attendancePercentage) < threshold;
 
-                      <td className="px-4 py-4">
-                        <p className="font-medium text-[#EAEAE6]">
-                          {record.studentName || 'Unknown student'}
-                        </p>
-                      </td>
+                    return (
+                      <tr
+                        key={record.id}
+                        className="bg-[#191A21] transition-colors hover:bg-[#202129]"
+                      >
+                        <td className="whitespace-nowrap px-4 py-4 text-[#D0D0D8]">
+                          {formatDate(record.date)}
+                        </td>
 
-                      <td className="px-4 py-4 text-[#C7C7D0]">
-                        {record.studentId || '—'}
-                      </td>
+                        <td className="px-4 py-4 font-medium text-[#EAEAE6]">
+                          {record.studentName || '—'}
+                        </td>
 
-                      <td className="px-4 py-4">
-                        <p className="text-[#EAEAE6]">
-                          {record.batchName || '—'}
-                        </p>
+                        <td className="px-4 py-4 text-[#D0D0D8]">
+                          {record.studentId || '—'}
+                        </td>
 
-                        <p className="mt-1 text-xs text-[#9697A2]">
+                        <td className="px-4 py-4 text-[#D0D0D8]">
                           {record.sectionName || '—'}
-                        </p>
-                      </td>
+                        </td>
 
-                      <td className="px-4 py-4">
-                        <p className="text-[#EAEAE6]">
-                          {record.courseName || '—'}
-                        </p>
+                        <td className="px-4 py-4">
+                          <p className="text-[#D0D0D8]">
+                            {record.courseName || '—'}
+                          </p>
 
-                        <p className="mt-1 text-xs text-[#9697A2]">
-                          {record.courseCode || ''}
-                        </p>
-                      </td>
+                          {record.courseCode && (
+                            <p className="mt-1 text-xs text-[#9697A2]">
+                              {record.courseCode}
+                            </p>
+                          )}
+                        </td>
 
-                      <td className="px-4 py-4 text-[#C7C7D0]">
-                        {formatPercentage(record.attendancePercentage)}
-                      </td>
+                        <td className="px-4 py-4 text-[#D0D0D8]">
+                          {record.facultyName || '—'}
+                        </td>
 
-                      <td className="px-4 py-4">
-                        <AttendanceStatus status={record.status} />
-                      </td>
+                        <td className="px-4 py-4">
+                          <span
+                            className={
+                              isBelowThreshold
+                                ? 'font-semibold text-red-300'
+                                : 'font-semibold text-emerald-300'
+                            }
+                          >
+                            {formatPercentage(
+                              record.attendancePercentage,
+                            )}
+                          </span>
+                        </td>
 
-                      <td className="px-4 py-4 text-[#C7C7D0]">
-                        {record.facultyName || '—'}
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="px-4 py-4">
+                          <span
+                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${getStatusStyles(record.status)}`}
+                          >
+                            {record.status || 'Unknown'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
-            {/* Pagination */}
-            <div className="mt-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-5 flex flex-col gap-3 border-t border-[#343640] pt-4 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-[#9697A2]">
-                Showing{' '}
-                <span className="font-medium text-[#EAEAE6]">
-                  {showingStart}–{showingEnd}
-                </span>{' '}
-                of{' '}
-                <span className="font-medium text-[#EAEAE6]">
-                  {pagination.total}
-                </span>{' '}
-                records
+                Showing {records.length} of {pagination.total} records
+                <span className="mx-2">·</span>
+                Page {pagination.page} of{' '}
+                {Math.max(1, pagination.totalPages)}
               </p>
 
               <div className="flex items-center gap-2">
-                <button
+                <ActionButton
                   type="button"
-                  onClick={() => handlePageChange(pagination.page - 1)}
-                  disabled={
-                    loading ||
-                    pagination.page <= 1
-                  }
-                  className="rounded-lg border border-[#454650] px-3 py-2 text-sm text-[#EAEAE6] transition hover:bg-[#343640] disabled:cursor-not-allowed disabled:opacity-40"
+                  size="sm"
+                  variant="secondary"
+                  disabled={page <= 1 || loading}
+                  onClick={handlePreviousPage}
                 >
                   Previous
-                </button>
+                </ActionButton>
 
-                <span className="px-2 text-sm text-[#C7C7D0]">
-                  Page {pagination.page} of{' '}
-                  {Math.max(pagination.totalPages, 1)}
-                </span>
-
-                <button
+                <ActionButton
                   type="button"
-                  onClick={() => handlePageChange(pagination.page + 1)}
+                  size="sm"
+                  variant="secondary"
                   disabled={
-                    loading ||
-                    pagination.page >= pagination.totalPages
+                    page >= pagination.totalPages || loading
                   }
-                  className="rounded-lg border border-[#454650] px-3 py-2 text-sm text-[#EAEAE6] transition hover:bg-[#343640] disabled:cursor-not-allowed disabled:opacity-40"
+                  onClick={handleNextPage}
                 >
                   Next
-                </button>
+                </ActionButton>
               </div>
             </div>
           </>
         )}
       </SectionCard>
 
-      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
-        <p className="text-sm font-semibold text-amber-200">
-          Attendance Threshold: {threshold}%
+      <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+        <p className="text-sm font-medium text-[#D0D0D8]">
+          Report information
         </p>
 
-        <p className="mt-2 text-sm leading-6 text-[#A5A6B0]">
-          Students below the department attendance threshold are
-          identified by the backend report summary. The report displays
-          actual attendance entries and does not generate sample records.
+        <p className="mt-2 text-sm leading-6 text-[#9697A2]">
+          Reports are retrieved from the authenticated HOD's department.
+          Attendance status is the recorded session status, while the
+          attendance percentage is the student's overall percentage
+          calculated by the backend for the selected attendance query.
         </p>
       </div>
     </div>
