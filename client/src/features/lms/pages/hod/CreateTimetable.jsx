@@ -7,6 +7,9 @@ import ActionButton from '../../components/ActionButton.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
+import batchManagementService from '../../services/batchManagementService.js';
+import facultyManagementService from '../../services/facultyManagementService.js';
+import sectionManagementService from '../../services/sectionManagementService.js';
 import timetableService from '../../services/timetableService.js';
 
 const WEEKDAYS = [
@@ -29,8 +32,23 @@ const INITIAL_FORM = {
   room: '',
 };
 
+const PAGE_SIZE = 100;
+
+const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
+const OBJECT_ID_PATTERN = /^[a-f\d]{24}$/i;
+
 function getResponseData(response) {
-  return response?.data?.data ?? response?.data ?? {};
+  const payload = response?.data;
+
+  if (!payload || payload.success !== true) {
+    throw new Error(
+      payload?.error?.message ||
+        payload?.message ||
+        'The server returned an unsuccessful response.',
+    );
+  }
+
+  return payload.data ?? {};
 }
 
 function getRecordId(record) {
@@ -42,7 +60,7 @@ function getRecordId(record) {
     return record;
   }
 
-  return String(record._id ?? record.id ?? '');
+  return String(record.id ?? record._id ?? '');
 }
 
 function getRecordName(record) {
@@ -73,9 +91,18 @@ function getCourseName(course) {
 
 function getErrorMessage(error, fallback) {
   return (
+    error?.response?.data?.error?.message ||
     error?.response?.data?.message ||
     error?.message ||
     fallback
+  );
+}
+
+function isCancelledRequest(error, signal) {
+  return (
+    signal?.aborted ||
+    error?.code === 'ERR_CANCELED' ||
+    error?.name === 'CanceledError'
   );
 }
 
@@ -90,6 +117,16 @@ function getActiveRecords(records) {
   );
 }
 
+function getAssignedIds(records) {
+  if (!Array.isArray(records)) {
+    return [];
+  }
+
+  return records
+    .map(getRecordId)
+    .filter(Boolean);
+}
+
 function SelectField({
   id,
   label,
@@ -99,7 +136,6 @@ function SelectField({
   placeholder,
   error,
   disabled = false,
-  required = true,
   getOptionLabel = getRecordName,
 }) {
   const errorId = `${id}-error`;
@@ -111,10 +147,7 @@ function SelectField({
         className="mb-2 block text-sm font-medium text-[#D0D0D8]"
       >
         {label}
-
-        {required && (
-          <span className="ml-1 text-red-400">*</span>
-        )}
+        <span className="ml-1 text-red-400">*</span>
       </label>
 
       <select
@@ -122,8 +155,8 @@ function SelectField({
         name={id}
         value={value}
         onChange={onChange}
+        required
         disabled={disabled}
-        required={required}
         aria-invalid={Boolean(error)}
         aria-describedby={error ? errorId : undefined}
         className="w-full rounded-xl border border-[#383943] bg-[#191A21] px-4 py-3 text-sm text-[#EAEAE6] outline-none transition focus:border-[#B9A4FF] focus:ring-2 focus:ring-[#B9A4FF]/20 disabled:cursor-not-allowed disabled:opacity-50"
@@ -217,54 +250,67 @@ export default function CreateTimetable() {
   const [sectionError, setSectionError] = useState('');
   const [formError, setFormError] = useState('');
 
-  const loadDirectory = useCallback(async () => {
+  const [directoryReloadKey, setDirectoryReloadKey] = useState(0);
+  const [sectionReloadKey, setSectionReloadKey] = useState(0);
+
+  const loadDirectory = useCallback(async (signal) => {
     setLoadingDirectory(true);
     setDirectoryError('');
 
     try {
-      const [courseResponse, facultyResponse, batchResponse] =
-        await Promise.all([
-          api.get('/v1/courses/department', {
-            params: {
-              page: 1,
-              limit: 100,
-              status: 'ACTIVE',
-            },
-          }),
+      const [
+        courseResponse,
+        facultyResult,
+        batchResult,
+      ] = await Promise.all([
+        api.get('/v1/courses/department', {
+          params: {
+            page: 1,
+            limit: PAGE_SIZE,
+            status: 'ACTIVE',
+          },
+          signal,
+        }),
 
-          api.get('/v1/provisioning/faculty', {
-            params: {
-              page: 1,
-              limit: 100,
-              status: 'ACTIVE',
-            },
-          }),
+        facultyManagementService.listFaculty(
+          {
+            page: 1,
+            limit: PAGE_SIZE,
+            status: 'ACTIVE',
+          },
+          { signal },
+        ),
 
-          api.get('/v1/provisioning/batches', {
-            params: {
-              page: 1,
-              limit: 100,
-              status: 'ACTIVE',
-            },
-          }),
-        ]);
+        batchManagementService.listBatches(
+          {
+            page: 1,
+            limit: PAGE_SIZE,
+            status: 'ACTIVE',
+          },
+          { signal },
+        ),
+      ]);
+
+      if (signal?.aborted) {
+        return;
+      }
 
       const courseData = getResponseData(courseResponse);
-      const facultyData = getResponseData(facultyResponse);
-      const batchData = getResponseData(batchResponse);
 
-      setCourses(
-        getActiveRecords(courseData.courses),
-      );
+      if (!Array.isArray(courseData.courses)) {
+        throw new Error(
+          'The server returned an invalid department course list.',
+        );
+      }
 
-      setFaculty(
-        getActiveRecords(facultyData.faculty),
-      );
-
-      setBatches(
-        getActiveRecords(batchData.batches),
-      );
+      setCourses(getActiveRecords(courseData.courses));
+      setFaculty(getActiveRecords(facultyResult.faculty));
+      setBatches(getActiveRecords(batchResult.batches));
     } catch (error) {
+      if (isCancelledRequest(error, signal)) {
+        return;
+      }
+
       setDirectoryError(
         getErrorMessage(
           error,
@@ -272,52 +318,61 @@ export default function CreateTimetable() {
         ),
       );
     } finally {
-      setLoadingDirectory(false);
+      if (!signal?.aborted) {
+        setLoadingDirectory(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    loadDirectory();
-  }, [loadDirectory]);
+    const controller = new AbortController();
+
+    Promise.resolve().then(() => {
+      if (!controller.signal.aborted) {
+        loadDirectory(controller.signal);
+      }
+    });
+
+    return () => {
+      controller.abort();
+    };
+  }, [loadDirectory, directoryReloadKey]);
 
   useEffect(() => {
     if (!form.batchId) {
-      setSections([]);
-      setSectionError('');
-      setLoadingSections(false);
       return undefined;
     }
 
     const controller = new AbortController();
 
-    async function loadSections() {
+    Promise.resolve().then(async () => {
+      if (controller.signal.aborted) {
+        return;
+      }
+
       setLoadingSections(true);
       setSectionError('');
-      setSections([]);
 
       try {
-        const response = await api.get(
-          `/v1/provisioning/batches/${form.batchId}/sections`,
-          {
-            params: {
-              page: 1,
-              limit: 100,
-              status: 'ACTIVE',
-            },
-            signal: controller.signal,
-          },
-        );
+        const result = await sectionManagementService.listSections({
+          batchId: form.batchId,
+          page: 1,
+          limit: PAGE_SIZE,
+          status: 'ACTIVE',
+          signal: controller.signal,
+        });
 
-        const data = getResponseData(response);
-
-        setSections(getActiveRecords(data.sections));
-      } catch (error) {
-        if (
-          error?.code === 'ERR_CANCELED' ||
-          controller.signal.aborted
-        ) {
+        if (controller.signal.aborted) {
           return;
         }
+
+        setSections(getActiveRecords(result.sections));
+      } catch (error) {
+        if (isCancelledRequest(error, controller.signal)) {
+          return;
+        }
+
+        setSections([]);
 
         setSectionError(
           getErrorMessage(
@@ -330,36 +385,94 @@ export default function CreateTimetable() {
           setLoadingSections(false);
         }
       }
-    }
-
-    loadSections();
+    });
 
     return () => {
       controller.abort();
     };
-  }, [form.batchId]);
+  }, [form.batchId, sectionReloadKey]);
+
+  const selectedCourse = courses.find(
+    (course) => getRecordId(course) === form.courseId,
+  );
+
+  const assignedBatchIds = getAssignedIds(
+    selectedCourse?.batches,
+  );
+
+  const assignedSectionIds = getAssignedIds(
+    selectedCourse?.sections,
+  );
+
+  const availableBatches =
+    assignedBatchIds.length > 0
+      ? batches.filter((batch) =>
+          assignedBatchIds.includes(getRecordId(batch)),
+        )
+      : batches;
+
+  const availableSections =
+    assignedSectionIds.length > 0
+      ? sections.filter((section) =>
+          assignedSectionIds.includes(getRecordId(section)),
+        )
+      : sections;
 
   function handleChange(event) {
     const { name, value } = event.target;
 
-    setForm((current) => {
-      const next = {
-        ...current,
-        [name]: value,
-      };
+    let nextForm = {
+      ...form,
+      [name]: value,
+    };
 
-      if (name === 'batchId') {
-        next.sectionId = '';
+    if (name === 'courseId') {
+      const nextCourse = courses.find(
+        (course) => getRecordId(course) === value,
+      );
+
+      const nextBatchIds = getAssignedIds(nextCourse?.batches);
+      const nextSectionIds = getAssignedIds(nextCourse?.sections);
+
+      if (
+        nextBatchIds.length > 0 &&
+        !nextBatchIds.includes(form.batchId)
+      ) {
+        nextForm.batchId = '';
+        nextForm.sectionId = '';
+      } else if (
+        nextSectionIds.length > 0 &&
+        !nextSectionIds.includes(form.sectionId)
+      ) {
+        nextForm.sectionId = '';
       }
+    }
 
-      return next;
-    });
+    if (name === 'batchId') {
+      nextForm.sectionId = '';
+    }
+
+    setForm(nextForm);
 
     setErrors((current) => ({
       ...current,
       [name]: '',
-      ...(name === 'batchId' ? { sectionId: '' } : {}),
+      ...(name === 'courseId'
+        ? {
+            batchId: '',
+            sectionId: '',
+          }
+        : {}),
+      ...(name === 'batchId'
+        ? { sectionId: '' }
+        : {}),
     }));
+
+    if (nextForm.batchId !== form.batchId) {
+      setSections([]);
+      setSectionError('');
+      setLoadingSections(false);
+    }
 
     setFormError('');
   }
@@ -367,37 +480,100 @@ export default function CreateTimetable() {
   function validateForm() {
     const nextErrors = {};
 
-    if (!form.day) {
-      nextErrors.day = 'Please select a weekday.';
+    if (!WEEKDAYS.includes(form.day)) {
+      nextErrors.day = 'Please select a valid weekday.';
     }
 
-    if (!form.courseId) {
-      nextErrors.courseId = 'Please select a course.';
+    const selectedCourseRecord = courses.find(
+      (course) => getRecordId(course) === form.courseId,
+    );
+
+    const selectedFacultyRecord = faculty.find(
+      (member) => getRecordId(member) === form.facultyId,
+    );
+
+    const selectedBatchRecord = batches.find(
+      (batch) => getRecordId(batch) === form.batchId,
+    );
+
+    const selectedSectionRecord = sections.find(
+      (section) => getRecordId(section) === form.sectionId,
+    );
+
+    if (
+      !OBJECT_ID_PATTERN.test(form.courseId) ||
+      !selectedCourseRecord
+    ) {
+      nextErrors.courseId = 'Please select a valid active course.';
     }
 
-    if (!form.facultyId) {
-      nextErrors.facultyId = 'Please select faculty.';
+    if (
+      !OBJECT_ID_PATTERN.test(form.facultyId) ||
+      !selectedFacultyRecord
+    ) {
+      nextErrors.facultyId = 'Please select valid active faculty.';
     }
 
-    if (!form.batchId) {
-      nextErrors.batchId = 'Please select a batch.';
+    if (
+      !OBJECT_ID_PATTERN.test(form.batchId) ||
+      !selectedBatchRecord
+    ) {
+      nextErrors.batchId = 'Please select a valid active batch.';
     }
 
-    if (!form.sectionId) {
-      nextErrors.sectionId = 'Please select a section.';
+    if (
+      !OBJECT_ID_PATTERN.test(form.sectionId) ||
+      !selectedSectionRecord
+    ) {
+      nextErrors.sectionId = 'Please select a valid active section.';
+    }
+
+    if (
+      selectedCourseRecord &&
+      assignedBatchIds.length > 0 &&
+      !assignedBatchIds.includes(form.batchId)
+    ) {
+      nextErrors.batchId =
+        'The selected batch is not assigned to this course.';
+    }
+
+    if (
+      selectedCourseRecord &&
+      assignedSectionIds.length > 0 &&
+      !assignedSectionIds.includes(form.sectionId)
+    ) {
+      nextErrors.sectionId =
+        'The selected section is not assigned to this course.';
+    }
+
+    const sectionBatchId =
+      selectedSectionRecord?.batchId ||
+      getRecordId(selectedSectionRecord?.batch);
+
+    if (
+      selectedSectionRecord &&
+      sectionBatchId &&
+      sectionBatchId !== form.batchId
+    ) {
+      nextErrors.sectionId =
+        'The selected section does not belong to the selected batch.';
     }
 
     if (!form.startTime) {
       nextErrors.startTime = 'Start time is required.';
+    } else if (!TIME_PATTERN.test(form.startTime)) {
+      nextErrors.startTime = 'Enter a valid start time.';
     }
 
     if (!form.endTime) {
       nextErrors.endTime = 'End time is required.';
+    } else if (!TIME_PATTERN.test(form.endTime)) {
+      nextErrors.endTime = 'Enter a valid end time.';
     }
 
     if (
-      form.startTime &&
-      form.endTime &&
+      TIME_PATTERN.test(form.startTime) &&
+      TIME_PATTERN.test(form.endTime) &&
       form.startTime >= form.endTime
     ) {
       nextErrors.endTime =
@@ -409,13 +585,28 @@ export default function CreateTimetable() {
     if (!room) {
       nextErrors.room = 'Room information is required.';
     } else if (room.length > 100) {
-      nextErrors.room =
-        'Room cannot exceed 100 characters.';
+      nextErrors.room = 'Room cannot exceed 100 characters.';
     }
 
     setErrors(nextErrors);
 
     return Object.keys(nextErrors).length === 0;
+  }
+
+  function handleReloadDirectory() {
+    if (loadingDirectory) {
+      return;
+    }
+
+    setDirectoryReloadKey((current) => current + 1);
+  }
+
+  function handleReloadSections() {
+    if (loadingSections || !form.batchId) {
+      return;
+    }
+
+    setSectionReloadKey((current) => current + 1);
   }
 
   async function handleSubmit(event) {
@@ -433,14 +624,14 @@ export default function CreateTimetable() {
 
     if (directoryError) {
       setFormError(
-        'Directory information could not be loaded. Refresh it before saving.',
+        'Directory information could not be loaded. Reload it before saving.',
       );
       return;
     }
 
     if (sectionError) {
       setFormError(
-        'Section information could not be loaded. Select the batch again and retry.',
+        'Section information could not be loaded. Reload the selected batch sections before saving.',
       );
       return;
     }
@@ -506,7 +697,7 @@ export default function CreateTimetable() {
 
           <button
             type="button"
-            onClick={loadDirectory}
+            onClick={handleReloadDirectory}
             disabled={loadingDirectory}
             className="mt-2 font-medium underline underline-offset-4 disabled:opacity-50"
           >
@@ -518,7 +709,7 @@ export default function CreateTimetable() {
       <SectionCard
         eyebrow="SCHEDULE CONFIGURATION"
         title="Class Information"
-        description="Choose the actual records assigned to your department. The server will verify department access and scheduling conflicts before saving."
+        description="Choose the actual records assigned to your department. The server independently verifies department access and scheduling conflicts before saving."
       >
         {loadingDirectory ? (
           <div
@@ -592,14 +783,16 @@ export default function CreateTimetable() {
                 label="Batch"
                 value={form.batchId}
                 onChange={handleChange}
-                options={batches}
+                options={availableBatches}
                 placeholder={
-                  batches.length
-                    ? 'Select a batch'
-                    : 'No active batches available'
+                  !batches.length
+                    ? 'No active batches available'
+                    : !availableBatches.length
+                      ? 'No batches assigned to this course'
+                      : 'Select a batch'
                 }
                 error={errors.batchId}
-                disabled={batches.length === 0}
+                disabled={availableBatches.length === 0}
                 getOptionLabel={(batch) => {
                   const name = getRecordName(batch);
 
@@ -615,44 +808,34 @@ export default function CreateTimetable() {
                   label="Section"
                   value={form.sectionId}
                   onChange={handleChange}
-                  options={sections}
+                  options={availableSections}
                   placeholder={
                     !form.batchId
                       ? 'Select a batch first'
                       : loadingSections
                         ? 'Loading sections...'
-                        : sections.length
-                          ? 'Select a section'
-                          : 'No active sections available'
+                        : !sections.length
+                          ? 'No active sections available'
+                          : !availableSections.length
+                            ? 'No sections assigned to this course'
+                            : 'Select a section'
                   }
                   error={errors.sectionId || sectionError}
                   disabled={
                     !form.batchId ||
                     loadingSections ||
-                    sections.length === 0
+                    availableSections.length === 0
                   }
                 />
 
                 {form.batchId && sectionError && (
                   <button
                     type="button"
-                    onClick={() => {
-                      setForm((current) => ({
-                        ...current,
-                        batchId: '',
-                        sectionId: '',
-                      }));
-
-                      setTimeout(() => {
-                        setForm((current) => ({
-                          ...current,
-                          batchId: form.batchId,
-                        }));
-                      }, 0);
-                    }}
-                    className="mt-2 text-xs font-medium text-[#CDB5F7] underline underline-offset-4"
+                    onClick={handleReloadSections}
+                    disabled={loadingSections}
+                    className="mt-2 text-xs font-medium text-[#CDB5F7] underline underline-offset-4 disabled:opacity-50"
                   >
-                    Reload sections by reselecting batch
+                    {loadingSections ? 'Reloading sections...' : 'Retry loading sections'}
                   </button>
                 )}
               </div>
@@ -749,9 +932,10 @@ export default function CreateTimetable() {
         </p>
 
         <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-          End time must be later than start time. The backend is responsible
-          for checking faculty, room, batch, section, course, and department
-          constraints before saving the schedule.
+          End time must be later than start time. The backend validates
+          department ownership, referenced records, faculty availability,
+          classroom conflicts, and overlapping batch and section schedules
+          before accepting the timetable.
         </p>
       </div>
     </div>
