@@ -1,139 +1,302 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
+import api from "../../../auth/services/api/axios.js";
+
 import ActionButton from "../../components/ActionButton.jsx";
-import FormField from "../../components/FormField.jsx";
 import PageHeader from "../../components/PageHeader.jsx";
 import SectionCard from "../../components/SectionCard.jsx";
 
+const PAGE_SIZE = 100;
+
+const RESULT_STATUSES = [
+  { value: "PENDING", label: "Pending" },
+  { value: "ENTERED", label: "Marks Entered" },
+  { value: "ABSENT", label: "Absent" },
+  { value: "EXEMPT", label: "Exempt" },
+];
+
+function getAssessmentId(assessment) {
+  return assessment?.id || assessment?._id || "";
+}
+
+function getResponseData(response) {
+  return response?.data?.data || {};
+}
+
+function normalizeResult(record) {
+  return {
+    id: record.id,
+    studentId: record.student?.id || "",
+    studentName: record.student?.fullName || "Unknown Student",
+    institutionalId: record.student?.institutionalId || "",
+    status: record.status || "PENDING",
+    marksObtained:
+      record.marksObtained === null ||
+      record.marksObtained === undefined
+        ? ""
+        : String(record.marksObtained),
+    remarks: record.remarks || "",
+    originalStatus: record.status || "PENDING",
+    originalMarksObtained:
+      record.marksObtained === null ||
+      record.marksObtained === undefined
+        ? ""
+        : String(record.marksObtained),
+    originalRemarks: record.remarks || "",
+  };
+}
+
+function isResultChanged(record) {
+  return (
+    record.status !== record.originalStatus ||
+    record.marksObtained !== record.originalMarksObtained ||
+    record.remarks !== record.originalRemarks
+  );
+}
+
 export default function ResultEdit() {
   const location = useLocation();
-  const result = location.state?.result;
 
-  const [form, setForm] = useState(() => ({
-    title: result?.title || result?.name || "",
-    course: result?.course || "",
-    courseCode: result?.courseCode || "",
-    batch: result?.batch || "",
-    section: result?.section || "",
-    faculty: result?.faculty || "",
-    totalMarks: result?.totalMarks ?? "",
-    passingMarks: result?.passingMarks ?? "",
-    marksObtained: result?.marksObtained ?? "",
-    grade: result?.grade || "",
-    status: result?.status || "",
-    remarks: result?.remarks || "",
-  }));
+  const assessment = location.state?.result;
+  const assessmentId = getAssessmentId(assessment);
 
-  const [errors, setErrors] = useState({});
+  const [results, setResults] = useState([]);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
+
+  const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(Boolean(assessmentId));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [search, setSearch] = useState("");
 
-  function handleChange(event) {
-    const { name, value } = event.target;
+  const loadResults = useCallback(
+    async (signal) => {
+      if (!assessmentId) return;
 
-    setForm((current) => ({
-      ...current,
-      [name]: value,
-    }));
+      setLoading(true);
+      setError("");
+      setNotice("");
 
-    setErrors((current) => ({
-      ...current,
-      [name]: "",
-    }));
+      try {
+        const response = await api.get(
+          `/v1/assessments/manage/${assessmentId}/results`,
+          {
+            params: {
+              page,
+              limit: PAGE_SIZE,
+              search: search.trim() || undefined,
+            },
+            signal,
+          },
+        );
 
-    setNotice("");
-  }
+        if (signal?.aborted) return;
 
-  function handleSubmit(event) {
-    event.preventDefault();
+        const data = getResponseData(response);
 
-    const nextErrors = {};
+        setResults(
+          Array.isArray(data.results)
+            ? data.results.map(normalizeResult)
+            : [],
+        );
 
-    if (!form.title.trim()) {
-      nextErrors.title = "Assessment title is required.";
-    }
+        setPagination({
+          page: Number(data.pagination?.page) || 1,
+          limit: Number(data.pagination?.limit) || PAGE_SIZE,
+          total: Number(data.pagination?.total) || 0,
+          totalPages: Math.max(
+            1,
+            Number(data.pagination?.totalPages) || 1,
+          ),
+        });
+      } catch (requestError) {
+        if (signal?.aborted) return;
 
-    if (!form.course.trim()) {
-      nextErrors.course = "Course name is required.";
-    }
+        setError(
+          requestError?.response?.data?.message ||
+            requestError?.message ||
+            "Unable to load student records.",
+        );
+      } finally {
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
+      }
+    },
+    [assessmentId, page, search],
+  );
 
-    const numericFields = [
-      ["totalMarks", "Total marks"],
-      ["passingMarks", "Passing marks"],
-      ["marksObtained", "Marks obtained"],
-    ];
+  useEffect(() => {
+    const controller = new AbortController();
 
-    numericFields.forEach(([field, label]) => {
-      if (form[field] === "") return;
-
-      if (
-        !Number.isFinite(Number(form[field])) ||
-        Number(form[field]) < 0
-      ) {
-        nextErrors[field] = `${label} must be zero or a positive number.`;
+    Promise.resolve().then(() => {
+      if (!controller.signal.aborted) {
+        loadResults(controller.signal);
       }
     });
 
-    if (
-      form.totalMarks !== "" &&
-      Number(form.totalMarks) <= 0
-    ) {
-      nextErrors.totalMarks = "Total marks must be greater than zero.";
+    return () => controller.abort();
+  }, [loadResults]);
+
+  const changedResults = useMemo(
+    () => results.filter(isResultChanged),
+    [results],
+  );
+
+  const handleSearchChange = (event) => {
+    setSearch(event.target.value);
+    setPage(1);
+  };
+
+  const handleResultChange = (studentId, field, value) => {
+    setResults((current) =>
+      current.map((record) => {
+        if (record.studentId !== studentId) {
+          return record;
+        }
+
+        const updated = {
+          ...record,
+          [field]: value,
+        };
+
+        if (field === "status" && value !== "ENTERED") {
+          updated.marksObtained = "";
+        }
+
+        return updated;
+      }),
+    );
+
+    setNotice("");
+    setError("");
+  };
+
+  const validateResults = () => {
+    const errors = [];
+    const totalMarks = Number(assessment?.totalMarks);
+
+    for (const record of changedResults) {
+      if (!record.studentId) {
+        errors.push(
+          `${record.studentName}: Student identifier is missing.`,
+        );
+        continue;
+      }
+
+      if (record.status === "ENTERED") {
+        if (record.marksObtained === "") {
+          errors.push(
+            `${record.studentName}: Enter marks before saving.`,
+          );
+          continue;
+        }
+
+        const marks = Number(record.marksObtained);
+
+        if (!Number.isFinite(marks) || marks < 0) {
+          errors.push(
+            `${record.studentName}: Marks must be a valid non-negative number.`,
+          );
+          continue;
+        }
+
+        if (marks > totalMarks) {
+          errors.push(
+            `${record.studentName}: Marks cannot exceed ${totalMarks}.`,
+          );
+        }
+      }
     }
 
-    if (
-      form.totalMarks !== "" &&
-      form.passingMarks !== "" &&
-      Number(form.passingMarks) > Number(form.totalMarks)
-    ) {
-      nextErrors.passingMarks =
-        "Passing marks cannot exceed total marks.";
+    return errors;
+  };
+
+  const handleSave = async (event) => {
+    event.preventDefault();
+
+    if (changedResults.length === 0) {
+      setNotice("There are no changes to save.");
+      return;
     }
 
-    if (
-      form.totalMarks !== "" &&
-      form.marksObtained !== "" &&
-      Number(form.marksObtained) > Number(form.totalMarks)
-    ) {
-      nextErrors.marksObtained =
-        "Marks obtained cannot exceed total marks.";
-    }
+    const validationErrors = validateResults();
 
-    setErrors(nextErrors);
-
-    if (Object.keys(nextErrors).length > 0) {
+    if (validationErrors.length > 0) {
+      setError(validationErrors.slice(0, 5).join(" "));
       setNotice("");
       return;
     }
 
-    setNotice(
-      "Form validated successfully. Changes have not been saved because backend integration is pending.",
-    );
-  }
+    setSaving(true);
+    setError("");
+    setNotice("");
 
-  if (!result) {
+    try {
+      const payload = {
+        results: changedResults.map((record) => ({
+          studentId: record.studentId,
+          status: record.status,
+          marksObtained:
+            record.status === "ENTERED"
+              ? Number(record.marksObtained)
+              : null,
+          remarks: record.remarks,
+        })),
+      };
+
+      await api.patch(
+        `/v1/assessments/manage/${assessmentId}/results`,
+        payload,
+      );
+
+      setNotice(
+        `${changedResults.length} student result(s) saved successfully.`,
+      );
+
+      const controller = new AbortController();
+      await loadResults(controller.signal);
+    } catch (requestError) {
+      setError(
+        requestError?.response?.data?.message ||
+          requestError?.message ||
+          "Unable to save student marks.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!assessmentId) {
     return (
       <div className="space-y-6">
         <PageHeader
           eyebrow="Academic Oversight"
-          title="Edit Result"
-          description="Update assessment result information."
+          title="Marks Entry"
+          description="Enter and manage student-wise assessment marks."
           breadcrumbs={[
             { label: "HOD Dashboard", to: "/hod/dashboard" },
             { label: "Results", to: "/hod/results" },
-            { label: "Edit" },
+            { label: "Marks Entry" },
           ]}
         />
 
         <SectionCard>
-          <div className="px-5 py-8 text-center">
+          <div className="px-5 py-10 text-center">
             <h2 className="text-lg font-semibold text-[#EAEAE6]">
-              No result selected
+              No assessment selected
             </h2>
 
-            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#A7A7B0]">
-              Open this page from a selected result record. No result
-              information was supplied.
+            <p className="mx-auto mt-2 max-w-md text-sm text-[#A7A7B0]">
+              Open marks entry from the details page of a draft
+              assessment.
             </p>
 
             <div className="mt-6">
@@ -149,184 +312,317 @@ export default function ResultEdit() {
     );
   }
 
+  if (assessment.status !== "DRAFT") {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="Academic Oversight"
+          title="Marks Entry"
+          description="Manage student assessment marks."
+          breadcrumbs={[
+            { label: "HOD Dashboard", to: "/hod/dashboard" },
+            { label: "Results", to: "/hod/results" },
+            { label: "Marks Entry" },
+          ]}
+        />
+
+        <SectionCard>
+          <div className="rounded-xl border border-[#E5DF98]/20 bg-[#E5DF98]/5 p-5">
+            <p className="font-semibold text-[#E5DF98]">
+              Marks editing is unavailable
+            </p>
+
+            <p className="mt-2 text-sm leading-6 text-[#A7A7B0]">
+              Marks can only be edited while the assessment is in
+              draft status.
+            </p>
+          </div>
+
+          <div className="mt-5">
+            <Link to="/hod/results">
+              <ActionButton variant="secondary">
+                Back to Results
+              </ActionButton>
+            </Link>
+          </div>
+        </SectionCard>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Academic Oversight"
-        title="Edit Result"
-        description="Review and update the selected assessment result information."
+        title="Student Marks Entry"
+        description="Enter marks, update result statuses and save student results in bulk."
         breadcrumbs={[
           { label: "HOD Dashboard", to: "/hod/dashboard" },
           { label: "Results", to: "/hod/results" },
-          { label: "Edit" },
+          { label: "Marks Entry" },
         ]}
         actions={
-          <Link to="/hod/results">
-            <ActionButton variant="secondary">Cancel</ActionButton>
+          <Link
+            to="/hod/results/details"
+            state={{ result: assessment }}
+          >
+            <ActionButton variant="secondary">
+              Assessment Details
+            </ActionButton>
           </Link>
         }
       />
 
       <SectionCard
-        title="Assessment Information"
-        description="Edit the assessment and result fields supplied by the selected record."
+        title={assessment.title || "Assessment"}
+        description="Assessment marks configuration"
       >
-        <form onSubmit={handleSubmit} className="space-y-6" noValidate>
-          <div className="grid gap-5 md:grid-cols-2">
-            <FormField
-              label="Assessment Title"
-              name="title"
-              value={form.title}
-              onChange={handleChange}
-              placeholder="Enter assessment title"
-              required
-              error={errors.title}
-            />
-
-            <FormField
-              label="Course"
-              name="course"
-              value={form.course}
-              onChange={handleChange}
-              placeholder="Enter course name"
-              required
-              error={errors.course}
-            />
-
-            <FormField
-              label="Course Code"
-              name="courseCode"
-              value={form.courseCode}
-              onChange={handleChange}
-              placeholder="Enter course code"
-            />
-
-            <FormField
-              label="Faculty"
-              name="faculty"
-              value={form.faculty}
-              onChange={handleChange}
-              placeholder="Enter faculty name"
-            />
-
-            <FormField
-              label="Batch"
-              name="batch"
-              value={form.batch}
-              onChange={handleChange}
-              placeholder="Enter batch"
-            />
-
-            <FormField
-              label="Section"
-              name="section"
-              value={form.section}
-              onChange={handleChange}
-              placeholder="Enter section"
-            />
-
-            <FormField
-              label="Total Marks"
-              name="totalMarks"
-              type="number"
-              value={form.totalMarks}
-              onChange={handleChange}
-              placeholder="Enter total marks"
-              error={errors.totalMarks}
-              inputProps={{ min: 1 }}
-            />
-
-            <FormField
-              label="Passing Marks"
-              name="passingMarks"
-              type="number"
-              value={form.passingMarks}
-              onChange={handleChange}
-              placeholder="Enter passing marks"
-              error={errors.passingMarks}
-              inputProps={{ min: 0 }}
-            />
-
-            <FormField
-              label="Marks Obtained"
-              name="marksObtained"
-              type="number"
-              value={form.marksObtained}
-              onChange={handleChange}
-              placeholder="Enter marks obtained"
-              error={errors.marksObtained}
-              inputProps={{ min: 0 }}
-            />
-
-            <FormField
-              label="Grade"
-              name="grade"
-              value={form.grade}
-              onChange={handleChange}
-              placeholder="Enter grade"
-            />
-
-            <FormField
-              label="Result Status"
-              name="status"
-              value={form.status}
-              onChange={handleChange}
-              placeholder="Enter result status"
-            />
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-xl border border-[#343640] bg-[#1D1F27] p-4">
+            <p className="text-xs text-[#A7A7B0]">Assessment Type</p>
+            <p className="mt-2 font-semibold text-[#EAEAE6]">
+              {assessment.type}
+            </p>
           </div>
 
-          <div className="space-y-2">
-            <label
-              htmlFor="result-remarks"
-              className="block text-sm font-semibold text-[#EAEAE6]"
-            >
-              Remarks
-            </label>
-
-            <textarea
-              id="result-remarks"
-              name="remarks"
-              value={form.remarks}
-              onChange={handleChange}
-              rows={4}
-              placeholder="Enter remarks"
-              className="w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-4 py-3 text-sm text-[#EAEAE6] outline-none transition placeholder:text-[#858590] focus-visible:ring-2 focus-visible:ring-[#CDB5F7] focus-visible:ring-offset-2 focus-visible:ring-offset-[#14161C]"
-            />
+          <div className="rounded-xl border border-[#343640] bg-[#1D1F27] p-4">
+            <p className="text-xs text-[#A7A7B0]">Maximum Marks</p>
+            <p className="mt-2 font-semibold text-[#EAEAE6]">
+              {assessment.totalMarks}
+            </p>
           </div>
 
-          {notice && (
-            <div
-              role="status"
-              className="rounded-xl border border-[#E5DF98]/25 bg-[#E5DF98]/5 p-4 text-sm leading-6 text-[#E5DF98]"
-            >
-              {notice}
-            </div>
-          )}
-
-          <div className="flex flex-wrap justify-end gap-3 border-t border-[#343640] pt-5">
-            <Link to="/hod/results">
-              <ActionButton type="button" variant="secondary">
-                Cancel
-              </ActionButton>
-            </Link>
-
-            <ActionButton type="submit">
-              Validate Changes
-            </ActionButton>
+          <div className="rounded-xl border border-[#343640] bg-[#1D1F27] p-4">
+            <p className="text-xs text-[#A7A7B0]">Passing Marks</p>
+            <p className="mt-2 font-semibold text-[#EAEAE6]">
+              {assessment.passingMarks}
+            </p>
           </div>
-        </form>
+        </div>
       </SectionCard>
 
-      <div className="rounded-xl border border-[#E5DF98]/20 bg-[#E5DF98]/5 p-4">
-        <p className="text-sm font-semibold text-[#E5DF98]">
-          Saving is not connected yet
-        </p>
+      <SectionCard
+        title="Student Records"
+        description="Update marks and result status for students assigned to this assessment."
+        action={
+          <span className="rounded-full border border-[#CDB5F7]/20 bg-[#CDB5F7]/10 px-3 py-1 text-xs font-semibold text-[#CDB5F7]">
+            {changedResults.length} unsaved changes
+          </span>
+        }
+      >
+        <div className="mb-5">
+          <label
+            htmlFor="marks-student-search"
+            className="mb-2 block text-sm font-medium text-[#EAEAE6]"
+          >
+            Search Students
+          </label>
 
-        <p className="mt-1 text-sm leading-6 text-[#A7A7B0]">
-          This form validates values locally. It does not update or persist
-          assessment results.
-        </p>
-      </div>
+          <input
+            id="marks-student-search"
+            type="search"
+            value={search}
+            onChange={handleSearchChange}
+            placeholder="Search by student name or institutional ID"
+            className="w-full rounded-xl border border-[#343640] bg-[#1D1F27] px-4 py-3 text-sm text-[#EAEAE6] outline-none placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+          />
+        </div>
+
+        {loading ? (
+          <div className="flex min-h-40 items-center justify-center">
+            <p className="text-sm text-[#A7A7B0]">
+              Loading student records...
+            </p>
+          </div>
+        ) : error ? (
+          <div className="rounded-xl border border-red-400/20 bg-red-400/5 p-5">
+            <p className="text-sm font-semibold text-red-300">
+              Something went wrong
+            </p>
+
+            <p className="mt-2 text-sm text-[#A7A7B0]">
+              {error}
+            </p>
+
+            <div className="mt-4">
+              <ActionButton
+                variant="secondary"
+                onClick={() => {
+                  const controller = new AbortController();
+                  loadResults(controller.signal);
+                }}
+              >
+                Try Again
+              </ActionButton>
+            </div>
+          </div>
+        ) : results.length === 0 ? (
+          <div className="rounded-xl border border-[#343640] bg-[#1D1F27] px-5 py-10 text-center">
+            <p className="font-semibold text-[#EAEAE6]">
+              No student records found
+            </p>
+
+            <p className="mt-2 text-sm text-[#A7A7B0]">
+              No students match the current search.
+            </p>
+          </div>
+        ) : (
+          <form onSubmit={handleSave}>
+            <div className="overflow-x-auto rounded-xl border border-[#343640]">
+              <table className="w-full min-w-[900px] text-left text-sm">
+                <thead className="bg-[#26272B] text-xs uppercase tracking-wide text-[#A7A7B0]">
+                  <tr>
+                    <th className="px-4 py-3">Student</th>
+                    <th className="px-4 py-3">Institutional ID</th>
+                    <th className="px-4 py-3">Marks Obtained</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Remarks</th>
+                  </tr>
+                </thead>
+
+                <tbody className="divide-y divide-[#343640]">
+                  {results.map((record) => (
+                    <tr
+                      key={record.id}
+                      className="align-top text-[#EAEAE6] hover:bg-[#26272B]/50"
+                    >
+                      <td className="px-4 py-4">
+                        <p className="font-semibold">
+                          {record.studentName}
+                        </p>
+                      </td>
+
+                      <td className="px-4 py-4 text-[#A7A7B0]">
+                        {record.institutionalId || "—"}
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <input
+                          type="number"
+                          min="0"
+                          max={assessment.totalMarks}
+                          step="any"
+                          value={record.marksObtained}
+                          disabled={record.status !== "ENTERED"}
+                          onChange={(event) =>
+                            handleResultChange(
+                              record.studentId,
+                              "marksObtained",
+                              event.target.value,
+                            )
+                          }
+                          aria-label={`Marks for ${record.studentName}`}
+                          placeholder="Enter marks"
+                          className="w-32 rounded-lg border border-[#454650] bg-[#1D1F27] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition focus:border-[#CDB5F7] disabled:cursor-not-allowed disabled:opacity-40"
+                        />
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <select
+                          value={record.status}
+                          onChange={(event) =>
+                            handleResultChange(
+                              record.studentId,
+                              "status",
+                              event.target.value,
+                            )
+                          }
+                          aria-label={`Status for ${record.studentName}`}
+                          className="w-40 rounded-lg border border-[#454650] bg-[#1D1F27] px-3 py-2 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7]"
+                        >
+                          {RESULT_STATUSES.map((status) => (
+                            <option
+                              key={status.value}
+                              value={status.value}
+                            >
+                              {status.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+
+                      <td className="px-4 py-4">
+                        <input
+                          type="text"
+                          maxLength={1000}
+                          value={record.remarks}
+                          onChange={(event) =>
+                            handleResultChange(
+                              record.studentId,
+                              "remarks",
+                              event.target.value,
+                            )
+                          }
+                          aria-label={`Remarks for ${record.studentName}`}
+                          placeholder="Optional remarks"
+                          className="w-48 rounded-lg border border-[#454650] bg-[#1D1F27] px-3 py-2 text-sm text-[#EAEAE6] outline-none placeholder:text-[#858590] focus:border-[#CDB5F7]"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
+              <p className="text-sm text-[#A7A7B0]">
+                Page {pagination.page} of {pagination.totalPages}
+                {" · "}
+                {pagination.total} student records
+              </p>
+
+              <div className="flex items-center gap-2">
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  disabled={page <= 1 || saving}
+                  onClick={() => setPage((current) => current - 1)}
+                >
+                  Previous
+                </ActionButton>
+
+                <ActionButton
+                  type="button"
+                  variant="secondary"
+                  disabled={
+                    page >= pagination.totalPages || saving
+                  }
+                  onClick={() => setPage((current) => current + 1)}
+                >
+                  Next
+                </ActionButton>
+              </div>
+            </div>
+
+            {notice && (
+              <div
+                role="status"
+                className="mt-5 rounded-xl border border-emerald-400/20 bg-emerald-400/5 p-4 text-sm text-emerald-300"
+              >
+                {notice}
+              </div>
+            )}
+
+            <div className="mt-5 flex flex-wrap justify-end gap-3 border-t border-[#343640] pt-5">
+              <Link
+                to="/hod/results/details"
+                state={{ result: assessment }}
+              >
+                <ActionButton type="button" variant="secondary">
+                  Cancel
+                </ActionButton>
+              </Link>
+
+              <ActionButton
+                type="submit"
+                disabled={saving || loading || changedResults.length === 0}
+              >
+                {saving ? "Saving Marks..." : "Save Marks"}
+              </ActionButton>
+            </div>
+          </form>
+        )}
+      </SectionCard>
     </div>
   );
 }
