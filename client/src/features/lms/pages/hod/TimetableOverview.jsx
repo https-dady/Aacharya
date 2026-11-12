@@ -214,9 +214,19 @@ export default function TimetableOverview() {
     }
   }, []);
 
-  useEffect(() => {
-    loadTimetable();
-  }, [loadTimetable, refreshVersion]);
+ useEffect(() => {
+  let isActive = true;
+
+  Promise.resolve().then(() => {
+    if (isActive) {
+      loadTimetable();
+    }
+  });
+
+  return () => {
+    isActive = false;
+  };
+}, [loadTimetable, refreshVersion]);
 
   const activeEntries = useMemo(
     () =>
