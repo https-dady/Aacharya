@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
-import api from '../../../auth/services/api/axios.js';
+import facultyManagementService from '../../services/facultyManagementService.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import FormField from '../../components/FormField.jsx';
@@ -18,17 +18,61 @@ const INITIAL_FORM = {
 
 function getErrorMessage(error) {
   return (
-    error?.response?.data?.error?.message
-    || error?.response?.data?.message
-    || error?.message
-    || 'Unable to create the faculty account. Please try again.'
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unable to create the faculty account. Please try again.'
   );
 }
 
-function getResponseData(response) {
-  const body = response?.data;
+function validateFacultyForm(form) {
+  const errors = {};
 
-  return body?.data ?? body ?? {};
+  const institutionalId = form.institutionalId.trim();
+  const fullName = form.fullName.trim();
+  const email = form.email.trim();
+
+  if (institutionalId.length < 2) {
+    errors.institutionalId =
+      'Institutional ID must contain at least 2 characters.';
+  } else if (institutionalId.length > 50) {
+    errors.institutionalId =
+      'Institutional ID cannot exceed 50 characters.';
+  }
+
+  if (fullName.length < 2) {
+    errors.fullName =
+      'Full name must contain at least 2 characters.';
+  } else if (fullName.length > 100) {
+    errors.fullName =
+      'Full name cannot exceed 100 characters.';
+  }
+
+  if (!email) {
+    errors.email = 'Email address is required.';
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.email = 'Enter a valid email address.';
+  } else if (email.length > 254) {
+    errors.email =
+      'Email address cannot exceed 254 characters.';
+  }
+
+  if (form.password.length < 8) {
+    errors.password =
+      'Password must contain at least 8 characters.';
+  } else if (form.password.length > 72) {
+    errors.password =
+      'Password cannot exceed 72 characters.';
+  }
+
+  if (!form.confirmPassword) {
+    errors.confirmPassword =
+      'Please confirm the password.';
+  } else if (form.password !== form.confirmPassword) {
+    errors.confirmPassword = 'Passwords do not match.';
+  }
+
+  return errors;
 }
 
 export default function CreateFaculty() {
@@ -57,89 +101,32 @@ export default function CreateFaculty() {
     setNotice('');
   }
 
-  function validateForm() {
-    const nextErrors = {};
-
-    const institutionalId = form.institutionalId.trim();
-    const fullName = form.fullName.trim();
-    const email = form.email.trim();
-
-    if (institutionalId.length < 2) {
-      nextErrors.institutionalId =
-        'Institutional ID must contain at least 2 characters.';
-    } else if (institutionalId.length > 50) {
-      nextErrors.institutionalId =
-        'Institutional ID cannot exceed 50 characters.';
-    }
-
-    if (fullName.length < 2) {
-      nextErrors.fullName =
-        'Full name must contain at least 2 characters.';
-    } else if (fullName.length > 100) {
-      nextErrors.fullName =
-        'Full name cannot exceed 100 characters.';
-    }
-
-    if (!email) {
-      nextErrors.email = 'Email address is required.';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      nextErrors.email = 'Enter a valid email address.';
-    } else if (email.length > 254) {
-      nextErrors.email = 'Email address cannot exceed 254 characters.';
-    }
-
-    if (form.password.length < 8) {
-      nextErrors.password =
-        'Password must contain at least 8 characters.';
-    } else if (form.password.length > 72) {
-      nextErrors.password =
-        'Password cannot exceed 72 characters.';
-    }
-
-    if (!form.confirmPassword) {
-      nextErrors.confirmPassword =
-        'Please confirm the password.';
-    } else if (form.password !== form.confirmPassword) {
-      nextErrors.confirmPassword =
-        'Passwords do not match.';
-    }
-
-    return nextErrors;
-  }
-
   async function handleSubmit(event) {
     event.preventDefault();
 
-    if (isSubmitting) {
+    if (isSubmitting || createdFaculty) {
       return;
     }
 
     setErrors({});
     setNotice('');
-    setCreatedFaculty(null);
 
-    const nextErrors = validateForm();
+    const validationErrors = validateFacultyForm(form);
 
-    if (Object.keys(nextErrors).length > 0) {
-      setErrors(nextErrors);
+    if (Object.keys(validationErrors).length > 0) {
+      setErrors(validationErrors);
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const response = await api.post(
-        '/v1/provisioning/faculty',
-        {
-          institutionalId: form.institutionalId.trim().toUpperCase(),
-          fullName: form.fullName.trim(),
-          email: form.email.trim().toLowerCase(),
-          password: form.password,
-        },
-      );
-
-      const data = getResponseData(response);
-      const faculty = data.user;
+      const faculty = await facultyManagementService.createFaculty({
+        institutionalId: form.institutionalId.trim().toUpperCase(),
+        fullName: form.fullName.trim(),
+        email: form.email.trim().toLowerCase(),
+        password: form.password,
+      });
 
       if (!faculty?.id) {
         throw new Error(
@@ -149,9 +136,7 @@ export default function CreateFaculty() {
 
       setCreatedFaculty(faculty);
 
-      setNotice(
-        data.message || 'Faculty account created successfully.',
-      );
+      setNotice('Faculty account created successfully.');
 
       setForm(INITIAL_FORM);
       setErrors({});
