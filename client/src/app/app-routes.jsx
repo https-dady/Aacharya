@@ -55,6 +55,7 @@ import QuizDetails from "../features/lms/pages/hod/QuizDetails.jsx";
 import QuizEdit from "../features/lms/pages/hod/QuizEdit.jsx";
 
 import ResultOverview from "../features/lms/pages/hod/ResultOverview.jsx";
+import CreateAssessment from "../features/lms/pages/hod/CreateAssessment.jsx";
 import ResultDetails from "../features/lms/pages/hod/ResultDetails.jsx";
 import ResultEdit from "../features/lms/pages/hod/ResultEdit.jsx";
 
@@ -226,7 +227,7 @@ export const applicationRoutes = [
       },
       {
         id: "hod-mentor-assignments",
-        path: "mentors/assignments",
+        path: "mentor-assignments",
         element: <MentorAssignments />,
       },
 
@@ -359,6 +360,11 @@ export const applicationRoutes = [
         id: "hod-results",
         path: "results",
         element: <ResultOverview />,
+      },
+      {
+        id: "hod-result-create",
+        path: "results/new",
+        element: <CreateAssessment />,
       },
       {
         id: "hod-result-details",
