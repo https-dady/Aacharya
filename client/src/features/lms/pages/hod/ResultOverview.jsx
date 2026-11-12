@@ -1,192 +1,165 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
-import ActionButton from '../../components/ActionButton.jsx';
-import EmptyState from '../../components/EmptyState.jsx';
-import PageHeader from '../../components/PageHeader.jsx';
-import SearchInput from '../../components/SearchInput.jsx';
-import SectionCard from '../../components/SectionCard.jsx';
+import ActionButton from "../../components/ActionButton.jsx";
+import EmptyState from "../../components/EmptyState.jsx";
+import PageHeader from "../../components/PageHeader.jsx";
+import SearchInput from "../../components/SearchInput.jsx";
+import SectionCard from "../../components/SectionCard.jsx";
 
-import assessmentManagementService, {
+import {
   ASSESSMENT_TYPES,
   ASSESSMENT_STATUSES,
-} from '../../services/assessmentManagementService.js';
+  listAssessments,
+} from "../../services/assessmentManagementService.js";
 
-const TYPE_OPTIONS = [
-  { value: '', label: 'All assessment types' },
-  { value: ASSESSMENT_TYPES.INTERNAL, label: 'Internal' },
-  { value: ASSESSMENT_TYPES.MID_TERM_1, label: 'Mid Term 1' },
-  { value: ASSESSMENT_TYPES.MID_TERM_2, label: 'Mid Term 2' },
-  { value: ASSESSMENT_TYPES.CLASS_TEST, label: 'Class Test' },
-  { value: ASSESSMENT_TYPES.PRACTICAL, label: 'Practical' },
-  { value: ASSESSMENT_TYPES.ASSIGNMENT, label: 'Assignment' },
-  { value: ASSESSMENT_TYPES.OTHER, label: 'Other / Custom Test' },
-];
+const PAGE_SIZE = 10;
 
-const STATUS_OPTIONS = [
-  { value: '', label: 'All statuses' },
-  { value: ASSESSMENT_STATUSES.DRAFT, label: 'Draft' },
-  { value: ASSESSMENT_STATUSES.PUBLISHED, label: 'Published' },
-  { value: ASSESSMENT_STATUSES.CLOSED, label: 'Closed' },
-];
+const TYPE_LABELS = {
+  [ASSESSMENT_TYPES.INTERNAL]: "Internal",
+  [ASSESSMENT_TYPES.MID_TERM_1]: "Mid Term 1",
+  [ASSESSMENT_TYPES.MID_TERM_2]: "Mid Term 2",
+  [ASSESSMENT_TYPES.CLASS_TEST]: "Class Test",
+  [ASSESSMENT_TYPES.PRACTICAL]: "Practical",
+  [ASSESSMENT_TYPES.ASSIGNMENT]: "Assignment",
+  [ASSESSMENT_TYPES.OTHER]: "Other",
+};
 
-function formatDate(value) {
-  if (!value) return 'Not scheduled';
+const STATUS_STYLES = {
+  [ASSESSMENT_STATUSES.DRAFT]:
+    "border-[#E5DF98]/30 bg-[#E5DF98]/10 text-[#E5DF98]",
+  [ASSESSMENT_STATUSES.PUBLISHED]:
+    "border-emerald-400/30 bg-emerald-400/10 text-emerald-300",
+  [ASSESSMENT_STATUSES.CLOSED]:
+    "border-[#A7A7B0]/30 bg-[#A7A7B0]/10 text-[#A7A7B0]",
+};
 
-  const date = new Date(value);
+function getAssessmentTitle(assessment) {
+  return assessment?.title || "Untitled Assessment";
+}
 
-  if (Number.isNaN(date.getTime())) {
-    return 'Invalid date';
+function getCourseName(assessment) {
+  if (typeof assessment?.course === "string") {
+    return assessment.course;
   }
 
-  return new Intl.DateTimeFormat('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  }).format(date);
-}
-
-function formatStatus(status) {
-  const labels = {
-    DRAFT: 'Draft',
-    PUBLISHED: 'Published',
-    CLOSED: 'Closed',
-  };
-
-  return labels[status] || status || 'Unknown';
-}
-
-function getStatusStyles(status) {
-  const styles = {
-    DRAFT: 'border-[#E5DF98]/30 bg-[#E5DF98]/10 text-[#E5DF98]',
-    PUBLISHED: 'border-emerald-400/25 bg-emerald-400/10 text-emerald-300',
-    CLOSED: 'border-[#858590]/30 bg-[#858590]/10 text-[#B8B8C2]',
-  };
-
-  return styles[status] || styles.DRAFT;
-}
-
-function getTypeLabel(type) {
-  const option = TYPE_OPTIONS.find(
-    (item) => item.value === type,
-  );
-
-  return option?.label || type?.replaceAll('_', ' ') || 'Assessment';
-}
-
-function getAssessmentTargets(assessment) {
-  const batches = assessment.batches || [];
-  const sections = assessment.sections || [];
-
-  const batchNames = batches
-    .map((batch) => batch.name || batch.code)
-    .filter(Boolean);
-
-  const sectionNames = sections
-    .map((section) => section.name || section.code)
-    .filter(Boolean);
-
-  const targets = [
-    ...batchNames,
-    ...sectionNames,
-  ];
-
-  return targets.length
-    ? [...new Set(targets)].join(', ')
-    : 'No target information';
-}
-
-function SummaryCard({ label, value, description, variant = 'default' }) {
-  const variants = {
-    default: 'border-[#343640] bg-[#1D1F27]',
-    lavender: 'border-[#CDB5F7]/25 bg-[#CDB5F7]/5',
-    butter: 'border-[#E5DF98]/25 bg-[#E5DF98]/5',
-    green: 'border-emerald-400/20 bg-emerald-400/5',
-  };
-
   return (
-    <div
-      className={[
-        'rounded-2xl border p-5',
-        variants[variant] || variants.default,
-      ].join(' ')}
-    >
-      <p className="text-sm font-medium text-[#A7A7B0]">
-        {label}
-      </p>
+    assessment?.course?.name ||
+    assessment?.course?.title ||
+    assessment?.course?.code ||
+    "—"
+  );
+}
 
-      <p className="mt-3 text-3xl font-bold tracking-tight text-[#EAEAE6]">
+function getAssessmentType(assessment) {
+  return TYPE_LABELS[assessment?.type] || assessment?.type || "—";
+}
+
+function getAssessmentStatus(assessment) {
+  return assessment?.status || ASSESSMENT_STATUSES.DRAFT;
+}
+
+function getPagination(response) {
+  const meta = response?.meta || {};
+  const pagination = meta?.pagination || response?.pagination || {};
+
+  return {
+    page: Number(pagination.page) || 1,
+    limit: Number(pagination.limit) || PAGE_SIZE,
+    total: Number(pagination.total) || 0,
+    totalPages: Math.max(1, Number(pagination.totalPages) || 1),
+  };
+}
+
+function getAssessmentArray(response) {
+  if (Array.isArray(response)) {
+    return response;
+  }
+
+  if (Array.isArray(response?.data)) {
+    return response.data;
+  }
+
+  if (Array.isArray(response?.data?.assessments)) {
+    return response.data.assessments;
+  }
+
+  if (Array.isArray(response?.assessments)) {
+    return response.assessments;
+  }
+
+  return [];
+}
+
+function SummaryCard({ title, value, description }) {
+  return (
+    <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
+      <p className="text-sm font-medium text-[#A7A7B0]">{title}</p>
+
+      <p className="mt-3 text-3xl font-semibold text-[#EAEAE6]">
         {value}
       </p>
 
-      <p className="mt-2 text-xs leading-5 text-[#858590]">
-        {description}
-      </p>
+      <p className="mt-2 text-xs text-[#858590]">{description}</p>
     </div>
   );
 }
 
 export default function ResultOverview() {
+  const navigate = useNavigate();
+
   const [assessments, setAssessments] = useState([]);
-
-  const [pagination, setPagination] = useState({
-    page: 1,
-    limit: 20,
-    total: 0,
-    totalPages: 0,
-    hasNextPage: false,
-    hasPreviousPage: false,
-  });
-
-  const [department, setDepartment] = useState(null);
-
-  const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
 
   const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: PAGE_SIZE,
+    total: 0,
+    totalPages: 1,
+  });
 
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
 
   const loadAssessments = useCallback(
     async (signal) => {
+      setLoading(true);
+      setError("");
+
       try {
-        setError('');
-        setLoading(true);
+        const response = await listAssessments(
+          {
+            page,
+            limit: PAGE_SIZE,
+            search: search.trim(),
+            type: typeFilter || undefined,
+            status: statusFilter || undefined,
+          },
+          { signal },
+        );
 
-        const response =
-          await assessmentManagementService.listAssessments(
-            {
-              page,
-              limit: 20,
-              search,
-              type: typeFilter,
-              status: statusFilter,
-            },
-            { signal },
-          );
+        if (signal?.aborted) {
+          return;
+        }
 
-        setAssessments(response.assessments);
-        setPagination(response.pagination);
-        setDepartment(response.department);
+        setAssessments(getAssessmentArray(response));
+        setPagination(getPagination(response));
       } catch (requestError) {
-        if (
-          requestError?.code === 'ERR_CANCELED' ||
-          requestError?.name === 'AbortError'
-        ) {
+        if (signal?.aborted) {
           return;
         }
 
         setError(
-          requestError?.message ||
-            'Unable to load assessment records. Please try again.',
+          requestError?.response?.data?.message ||
+            requestError?.message ||
+            "Unable to load assessment records.",
         );
       } finally {
         if (!signal?.aborted) {
           setLoading(false);
-          setRefreshing(false);
         }
       }
     },
@@ -196,159 +169,152 @@ export default function ResultOverview() {
   useEffect(() => {
     const controller = new AbortController();
 
-    loadAssessments(controller.signal);
+    Promise.resolve().then(() => {
+      if (!controller.signal.aborted) {
+        loadAssessments(controller.signal);
+      }
+    });
 
-    return () => {
-      controller.abort();
-    };
+    return () => controller.abort();
   }, [loadAssessments]);
 
-  function handleSearchChange(event) {
+  const summary = useMemo(() => {
+    return assessments.reduce(
+      (counts, assessment) => {
+        const status = getAssessmentStatus(assessment);
+
+        counts.total += 1;
+
+        if (status === ASSESSMENT_STATUSES.DRAFT) {
+          counts.draft += 1;
+        }
+
+        if (status === ASSESSMENT_STATUSES.PUBLISHED) {
+          counts.published += 1;
+        }
+
+        if (status === ASSESSMENT_STATUSES.CLOSED) {
+          counts.closed += 1;
+        }
+
+        return counts;
+      },
+      {
+        total: assessments.length,
+        draft: 0,
+        published: 0,
+        closed: 0,
+      },
+    );
+  }, [assessments]);
+
+  const handleSearchChange = (event) => {
     setSearch(event.target.value);
     setPage(1);
-  }
+  };
 
-  function handleTypeChange(event) {
+  const handleTypeChange = (event) => {
     setTypeFilter(event.target.value);
     setPage(1);
-  }
+  };
 
-  function handleStatusChange(event) {
+  const handleStatusChange = (event) => {
     setStatusFilter(event.target.value);
     setPage(1);
-  }
+  };
 
-  function handleClearFilters() {
-    setSearch('');
-    setTypeFilter('');
-    setStatusFilter('');
-    setPage(1);
-  }
-
-  function handleRefresh() {
-    setRefreshing(true);
-
+  const handleRefresh = () => {
     const controller = new AbortController();
+    loadAssessments(controller.signal);
+  };
 
-    loadAssessments(controller.signal).finally(() => {
-      controller.abort();
+  const handleViewDetails = (assessment) => {
+    navigate("/hod/results/details", {
+      state: {
+        result: assessment,
+      },
     });
-  }
+  };
 
-  const draftCount = assessments.filter(
-    (assessment) =>
-      assessment.status === ASSESSMENT_STATUSES.DRAFT,
-  ).length;
-
-  const publishedCount = assessments.filter(
-    (assessment) =>
-      assessment.status === ASSESSMENT_STATUSES.PUBLISHED,
-  ).length;
-
-  const closedCount = assessments.filter(
-    (assessment) =>
-      assessment.status === ASSESSMENT_STATUSES.CLOSED,
-  ).length;
-
-  const hasFilters = Boolean(
-    search || typeFilter || statusFilter,
-  );
+  const hasFilters = Boolean(search || typeFilter || statusFilter);
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Academic Oversight"
-        title="Results Overview"
-        description="Manage department assessments, monitor result entry, and review academic performance."
+        title="Results & Assessments"
+        description="Create assessments, manage examination records and review department-level academic results."
         breadcrumbs={[
-          { label: 'HOD Dashboard', to: '/hod/dashboard' },
-          { label: 'Results' },
+          { label: "HOD Dashboard", to: "/hod/dashboard" },
+          { label: "Results" },
         ]}
         actions={
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-3">
             <ActionButton
               variant="secondary"
               onClick={handleRefresh}
-              loading={refreshing}
               disabled={loading}
             >
               Refresh
             </ActionButton>
 
-            <Link to="/hod/dashboard">
-              <ActionButton variant="secondary">
-                Back to Dashboard
-              </ActionButton>
-            </Link>
+            <ActionButton
+              onClick={() => navigate("/hod/results/new")}
+            >
+              + Create Assessment
+            </ActionButton>
           </div>
         }
       />
 
-      {department && (
-        <div className="rounded-xl border border-[#CDB5F7]/20 bg-[#CDB5F7]/5 px-4 py-3">
-          <p className="text-xs font-medium uppercase tracking-wide text-[#A7A7B0]">
-            Department
-          </p>
-
-          <p className="mt-1 font-semibold text-[#EAEAE6]">
-            {department.name}
-            {department.code ? ` (${department.code})` : ''}
-          </p>
-        </div>
-      )}
-
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard
-          label="Total Assessments"
+          title="Total Assessments"
           value={pagination.total}
-          description="Total records matching the current filters."
-          variant="lavender"
+          description="Assessments in your department"
         />
 
         <SummaryCard
-          label="Draft"
-          value={draftCount}
-          description="Draft assessments on this page."
-          variant="butter"
+          title="Draft"
+          value={summary.draft}
+          description="Awaiting publication"
         />
 
         <SummaryCard
-          label="Published"
-          value={publishedCount}
-          description="Published assessments on this page."
-          variant="green"
+          title="Published"
+          value={summary.published}
+          description="Results published"
         />
 
         <SummaryCard
-          label="Closed"
-          value={closedCount}
-          description="Closed assessments on this page."
+          title="Closed"
+          value={summary.closed}
+          description="Completed assessments"
         />
       </div>
 
       <SectionCard
-        title="Assessment Management"
-        description="View and filter Internal, Mid Term, Class Test, Practical, Assignment, and custom assessment records."
+        title="Assessment Records"
+        description="Search, filter and manage assessments across your department."
         action={
           <span className="rounded-full border border-[#343640] bg-[#26272B] px-3 py-1 text-xs font-medium text-[#A7A7B0]">
-            {pagination.total} total records
+            {pagination.total} records
           </span>
         }
       >
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px_190px]">
+        <div className="mb-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_220px_200px]">
           <SearchInput
             name="assessment-search"
             label="Search assessments"
             value={search}
             onChange={handleSearchChange}
-            placeholder="Search assessment title or description"
-            disabled={loading && !assessments.length}
+            placeholder="Search by assessment or course"
           />
 
           <div>
             <label
               htmlFor="assessment-type-filter"
-              className="mb-2 block text-xs font-semibold text-[#A7A7B0]"
+              className="mb-2 block text-sm font-medium text-[#EAEAE6]"
             >
               Assessment Type
             </label>
@@ -357,14 +323,13 @@ export default function ResultOverview() {
               id="assessment-type-filter"
               value={typeFilter}
               onChange={handleTypeChange}
-              className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3 text-sm text-[#EAEAE6] outline-none transition focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+              className="w-full rounded-xl border border-[#343640] bg-[#1D1F27] px-3 py-3 text-sm text-[#EAEAE6] outline-none transition focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
             >
-              {TYPE_OPTIONS.map((option) => (
-                <option
-                  key={option.value || 'all-types'}
-                  value={option.value}
-                >
-                  {option.label}
+              <option value="">All Types</option>
+
+              {Object.entries(TYPE_LABELS).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
                 </option>
               ))}
             </select>
@@ -373,232 +338,172 @@ export default function ResultOverview() {
           <div>
             <label
               htmlFor="assessment-status-filter"
-              className="mb-2 block text-xs font-semibold text-[#A7A7B0]"
+              className="mb-2 block text-sm font-medium text-[#EAEAE6]"
             >
-              Assessment Status
+              Status
             </label>
 
             <select
               id="assessment-status-filter"
               value={statusFilter}
               onChange={handleStatusChange}
-              className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3 text-sm text-[#EAEAE6] outline-none transition focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+              className="w-full rounded-xl border border-[#343640] bg-[#1D1F27] px-3 py-3 text-sm text-[#EAEAE6] outline-none transition focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
             >
-              {STATUS_OPTIONS.map((option) => (
-                <option
-                  key={option.value || 'all-statuses'}
-                  value={option.value}
-                >
-                  {option.label}
+              <option value="">All Statuses</option>
+
+              {Object.values(ASSESSMENT_STATUSES).map((status) => (
+                <option key={status} value={status}>
+                  {status}
                 </option>
               ))}
             </select>
           </div>
         </div>
 
-        {hasFilters && (
-          <div className="mt-4 flex justify-end">
-            <ActionButton
-              variant="ghost"
-              size="sm"
-              onClick={handleClearFilters}
-            >
-              Clear all filters
-            </ActionButton>
+        {loading ? (
+          <div className="flex min-h-48 items-center justify-center">
+            <p className="text-sm text-[#A7A7B0]">
+              Loading assessment records...
+            </p>
           </div>
-        )}
-
-        {error && (
-          <div
-            role="alert"
-            className="mt-5 rounded-xl border border-red-400/25 bg-red-400/5 p-4"
-          >
+        ) : error ? (
+          <div className="rounded-xl border border-red-400/20 bg-red-400/5 p-5">
             <p className="text-sm font-semibold text-red-300">
               Unable to load assessments
             </p>
 
-            <p className="mt-1 text-sm leading-6 text-[#C5A8AE]">
-              {error}
-            </p>
+            <p className="mt-2 text-sm text-[#A7A7B0]">{error}</p>
 
-            <div className="mt-3">
-              <ActionButton
-                variant="secondary"
-                size="sm"
-                onClick={handleRefresh}
-              >
-                Try again
+            <div className="mt-4">
+              <ActionButton variant="secondary" onClick={handleRefresh}>
+                Try Again
               </ActionButton>
             </div>
           </div>
-        )}
-
-        {loading && assessments.length === 0 ? (
-          <div
-            className="flex min-h-52 flex-col items-center justify-center gap-3"
-            role="status"
-            aria-live="polite"
-          >
-            <span className="h-8 w-8 animate-spin rounded-full border-2 border-[#CDB5F7] border-r-transparent motion-reduce:animate-none" />
-
-            <p className="text-sm text-[#A7A7B0]">
-              Loading department assessments...
-            </p>
-          </div>
         ) : assessments.length > 0 ? (
           <>
-            <div className="mt-6 overflow-x-auto rounded-xl border border-[#343640]">
+            <div className="overflow-x-auto rounded-xl border border-[#343640]">
               <table className="w-full min-w-[850px] text-left text-sm">
                 <thead className="bg-[#26272B] text-xs uppercase tracking-wide text-[#A7A7B0]">
                   <tr>
-                    <th scope="col" className="px-4 py-4">
+                    <th scope="col" className="px-4 py-3">
                       Assessment
                     </th>
 
-                    <th scope="col" className="px-4 py-4">
-                      Type
-                    </th>
-
-                    <th scope="col" className="px-4 py-4">
+                    <th scope="col" className="px-4 py-3">
                       Course
                     </th>
 
-                    <th scope="col" className="px-4 py-4">
-                      Batch / Section
+                    <th scope="col" className="px-4 py-3">
+                      Type
                     </th>
 
-                    <th scope="col" className="px-4 py-4">
+                    <th scope="col" className="px-4 py-3">
+                      Total Marks
+                    </th>
+
+                    <th scope="col" className="px-4 py-3">
                       Date
                     </th>
 
-                    <th scope="col" className="px-4 py-4">
-                      Results
-                    </th>
-
-                    <th scope="col" className="px-4 py-4">
+                    <th scope="col" className="px-4 py-3">
                       Status
                     </th>
 
-                    <th scope="col" className="px-4 py-4">
+                    <th scope="col" className="px-4 py-3">
                       Action
                     </th>
                   </tr>
                 </thead>
 
                 <tbody className="divide-y divide-[#343640]">
-                  {assessments.map((assessment) => (
-                    <tr
-                      key={assessment.id}
-                      className="text-[#EAEAE6] transition-colors hover:bg-[#26272B]/70"
-                    >
-                      <td className="max-w-64 px-4 py-4">
-                        <p className="break-words font-semibold">
-                          {assessment.title}
-                        </p>
+                  {assessments.map((assessment) => {
+                    const status = getAssessmentStatus(assessment);
 
-                        {assessment.description && (
-                          <p className="mt-1 line-clamp-2 text-xs leading-5 text-[#858590]">
-                            {assessment.description}
+                    return (
+                      <tr
+                        key={assessment._id || assessment.id}
+                        className="text-[#EAEAE6] transition-colors hover:bg-[#26272B]/70"
+                      >
+                        <td className="px-4 py-4">
+                          <p className="font-semibold">
+                            {getAssessmentTitle(assessment)}
                           </p>
-                        )}
-                      </td>
 
-                      <td className="px-4 py-4">
-                        <span className="inline-flex rounded-lg border border-[#CDB5F7]/20 bg-[#CDB5F7]/5 px-2.5 py-1 text-xs font-medium text-[#CDB5F7]">
-                          {getTypeLabel(assessment.type)}
-                        </span>
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <p className="font-medium">
-                          {assessment.course?.name || '—'}
-                        </p>
-
-                        {assessment.course?.code && (
                           <p className="mt-1 text-xs text-[#858590]">
-                            {assessment.course.code}
+                            {assessment.department?.name ||
+                              assessment.departmentName ||
+                              "Department assessment"}
                           </p>
-                        )}
-                      </td>
+                        </td>
 
-                      <td className="max-w-48 px-4 py-4 text-xs leading-5 text-[#A7A7B0]">
-                        {getAssessmentTargets(assessment)}
-                      </td>
+                        <td className="px-4 py-4 text-[#A7A7B0]">
+                          {getCourseName(assessment)}
+                        </td>
 
-                      <td className="whitespace-nowrap px-4 py-4 text-[#A7A7B0]">
-                        {formatDate(assessment.assessmentDate)}
-                      </td>
+                        <td className="px-4 py-4 text-[#A7A7B0]">
+                          {getAssessmentType(assessment)}
+                        </td>
 
-                      <td className="px-4 py-4">
-                        <span className="font-semibold text-[#EAEAE6]">
-                          {assessment.resultCount}
-                        </span>
+                        <td className="px-4 py-4 text-[#A7A7B0]">
+                          {assessment.totalMarks ?? "—"}
+                        </td>
 
-                        <span className="ml-1 text-xs text-[#858590]">
-                          students
-                        </span>
-                      </td>
+                        <td className="px-4 py-4 text-[#A7A7B0]">
+                          {assessment.assessmentDate
+                            ? new Date(
+                                assessment.assessmentDate,
+                              ).toLocaleDateString()
+                            : "—"}
+                        </td>
 
-                      <td className="px-4 py-4">
-                        <span
-                          className={[
-                            'inline-flex whitespace-nowrap rounded-full border px-2.5 py-1',
-                            'text-xs font-semibold',
-                            getStatusStyles(assessment.status),
-                          ].join(' ')}
-                        >
-                          {formatStatus(assessment.status)}
-                        </span>
-                      </td>
+                        <td className="px-4 py-4">
+                          <span
+                            className={`inline-flex rounded-full border px-3 py-1 text-xs font-semibold ${
+                              STATUS_STYLES[status] ||
+                              "border-[#343640] bg-[#26272B] text-[#A7A7B0]"
+                            }`}
+                          >
+                            {status}
+                          </span>
+                        </td>
 
-                      <td className="px-4 py-4">
-                        <Link
-                          to="/hod/results/details"
-                          state={{ result: assessment }}
-                          className="inline-flex rounded-lg font-semibold text-[#CDB5F7] transition-colors hover:text-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
-                        >
-                          View details
-                        </Link>
-                      </td>
-                    </tr>
-                  ))}
+                        <td className="px-4 py-4">
+                          <button
+                            type="button"
+                            onClick={() => handleViewDetails(assessment)}
+                            className="rounded-lg font-semibold text-[#CDB5F7] transition-colors hover:text-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                          >
+                            View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
 
-            <div className="mt-5 flex flex-col gap-3 border-t border-[#343640] pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-4">
               <p className="text-sm text-[#A7A7B0]">
-                Page {pagination.page} of{' '}
-                {Math.max(pagination.totalPages, 1)}
-                {' · '}
-                {pagination.total} assessments
+                Page {pagination.page} of {pagination.totalPages}
+                {" · "}
+                {pagination.total} total assessments
               </p>
 
               <div className="flex items-center gap-2">
                 <ActionButton
                   variant="secondary"
-                  size="sm"
-                  disabled={
-                    loading ||
-                    !pagination.hasPreviousPage
-                  }
-                  onClick={() => {
-                    setPage((current) => Math.max(1, current - 1));
-                  }}
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((current) => current - 1)}
                 >
                   Previous
                 </ActionButton>
 
                 <ActionButton
                   variant="secondary"
-                  size="sm"
-                  disabled={
-                    loading ||
-                    !pagination.hasNextPage
-                  }
-                  onClick={() => {
-                    setPage((current) => current + 1);
-                  }}
+                  disabled={page >= pagination.totalPages || loading}
+                  onClick={() => setPage((current) => current + 1)}
                 >
                   Next
                 </ActionButton>
@@ -606,47 +511,28 @@ export default function ResultOverview() {
             </div>
           </>
         ) : (
-          <div className="mt-6">
-            <EmptyState
-              title={
-                error
-                  ? 'Assessment records unavailable'
-                  : hasFilters
-                    ? 'No matching assessments'
-                    : 'No assessments created yet'
-              }
-              description={
-                error
-                  ? 'The assessment list could not be retrieved. Retry the request to continue.'
-                  : hasFilters
-                    ? 'No assessment matches the selected search and filters. Try changing your filters.'
-                    : 'Department assessment records will appear here after assessments are created.'
-              }
-              action={
-                hasFilters ? (
-                  <ActionButton
-                    variant="secondary"
-                    onClick={handleClearFilters}
-                  >
-                    Clear filters
-                  </ActionButton>
-                ) : null
-              }
-            />
-          </div>
+          <EmptyState
+            title={
+              hasFilters
+                ? "No matching assessments"
+                : "No assessments available"
+            }
+            description={
+              hasFilters
+                ? "Try changing your search or filter criteria."
+                : "Create your first assessment to start managing department results."
+            }
+          >
+            {!hasFilters && (
+              <ActionButton
+                onClick={() => navigate("/hod/results/new")}
+              >
+                + Create Assessment
+              </ActionButton>
+            )}
+          </EmptyState>
         )}
       </SectionCard>
-
-      <div className="rounded-xl border border-[#CDB5F7]/20 bg-[#CDB5F7]/5 p-4">
-        <p className="text-sm font-semibold text-[#CDB5F7]">
-          Assessment types supported
-        </p>
-
-        <p className="mt-1 text-sm leading-6 text-[#A7A7B0]">
-          Internal, Mid Term 1, Mid Term 2, Class Test, Practical,
-          Assignment, and Other / Custom Test.
-        </p>
-      </div>
     </div>
   );
 }
