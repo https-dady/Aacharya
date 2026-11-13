@@ -64,7 +64,7 @@ const assessmentResultStatusSchema = z.enum(
  * GET /api/v1/assessments/faculty
  *
  * Lists academic assessments and result summaries
- * accessible to the authenticated Faculty member.
+ * accessible to the authenticated Faculty or Mentor.
  */
 const listFacultyAcademicResultsSchema = z.object({
   params: emptyObjectSchema,
@@ -120,7 +120,7 @@ const listFacultyAcademicResultsSchema = z.object({
  * GET /api/v1/assessments/faculty/:assessmentId/results
  *
  * Lists student-wise results for an assessment
- * accessible to the authenticated Faculty member.
+ * accessible to the authenticated Faculty or Mentor.
  */
 const listFacultyAssessmentResultDetailsSchema = z.object({
   params: z
@@ -152,13 +152,16 @@ const listFacultyAssessmentResultDetailsSchema = z.object({
   body: emptyObjectSchema,
 });
 
-const facultyOnly = authorize(USER_ROLES.FACULTY);
+const facultyAndMentorAccess = authorize(
+  USER_ROLES.FACULTY,
+  USER_ROLES.MENTOR,
+);
 
 // Existing academic assessment listing endpoint.
 facultyAssessmentResultsRouter.get(
   '/faculty',
   authenticate,
-  facultyOnly,
+  facultyAndMentorAccess,
   validate(listFacultyAcademicResultsSchema),
   listFacultyAcademicResultsController,
 );
@@ -167,7 +170,7 @@ facultyAssessmentResultsRouter.get(
 facultyAssessmentResultsRouter.get(
   '/faculty/:assessmentId/results',
   authenticate,
-  facultyOnly,
+  facultyAndMentorAccess,
   validate(listFacultyAssessmentResultDetailsSchema),
   listFacultyAssessmentResultDetailsController,
 );
