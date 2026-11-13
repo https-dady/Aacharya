@@ -86,7 +86,7 @@ export default function FacultyAssignmentDetails() {
         <SectionCard>
           <EmptyState
             title="Assignment details unavailable"
-            description="No assignment record was provided to this page. Open an assignment from the assignment directory when actual records are available."
+            description="No assignment record was provided to this page. Open an assignment from the assignment directory."
             action={
               <Link
                 to="/faculty/assignments"
@@ -102,9 +102,8 @@ export default function FacultyAssignmentDetails() {
 
         <p className="mt-5 rounded-xl border border-[#454650] bg-[#191A21] p-4 text-sm leading-6 text-[#9697A2]">
           Assignment details currently depend on React Router navigation
-          state. A persistent backend lookup has not been connected, so
-          opening or refreshing this page without assignment data will
-          display this message.
+          state. Opening or refreshing this page without assignment data
+          displays this message.
         </p>
       </div>
     );
@@ -117,6 +116,7 @@ export default function FacultyAssignmentDetails() {
 
   const course =
     assignment.courseName ||
+    assignment.course?.title ||
     assignment.course ||
     'Not provided';
 
@@ -160,6 +160,12 @@ export default function FacultyAssignmentDetails() {
     assignment.gradedCount !== null
       ? Number(assignment.gradedCount)
       : null;
+
+  const assignmentId = String(
+    assignment.id ?? assignment._id ?? '',
+  );
+
+  const canOpenSubmissions = /^[a-f\d]{24}$/i.test(assignmentId);
 
   return (
     <div className="mx-auto w-full max-w-[1200px]">
@@ -222,40 +228,13 @@ export default function FacultyAssignmentDetails() {
         description="Academic details supplied by the selected assignment record."
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <DetailItem
-            label="Assignment Title"
-            value={title}
-          />
-
-          <DetailItem
-            label="Course"
-            value={course}
-          />
-
-          <DetailItem
-            label="Course Code"
-            value={assignment.courseCode}
-          />
-
-          <DetailItem
-            label="Section"
-            value={section}
-          />
-
-          <DetailItem
-            label="Batch"
-            value={batch}
-          />
-
-          <DetailItem
-            label="Submission Deadline"
-            value={dueDate}
-          />
-
-          <DetailItem
-            label="Total Marks"
-            value={totalMarks}
-          />
+          <DetailItem label="Assignment Title" value={title} />
+          <DetailItem label="Course" value={course} />
+          <DetailItem label="Course Code" value={assignment.courseCode} />
+          <DetailItem label="Section" value={section} />
+          <DetailItem label="Batch" value={batch} />
+          <DetailItem label="Submission Deadline" value={dueDate} />
+          <DetailItem label="Total Marks" value={totalMarks} />
 
           <DetailItem
             label="Allowed File Types"
@@ -320,7 +299,7 @@ export default function FacultyAssignmentDetails() {
         <SectionCard
           eyebrow="SUBMISSION OVERVIEW"
           title="Student Submissions"
-          description="Review the available submission summary for this assignment."
+          description="Open the submission workspace to review student responses and evaluate their work."
         >
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <DetailItem
@@ -334,16 +313,33 @@ export default function FacultyAssignmentDetails() {
             />
           </div>
 
-          <div className="mt-5 rounded-xl border border-[#454650] bg-[#191A21] p-4">
-            <p className="text-sm font-medium text-[#EAEAE6]">
-              Submission management
-            </p>
+          <div className="mt-5 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-[#454650] bg-[#191A21] p-4">
+            <div>
+              <p className="text-sm font-medium text-[#EAEAE6]">
+                Submission management
+              </p>
 
-            <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-              Individual student submissions, downloadable attachments,
-              grading, and feedback require a confirmed backend contract.
-              These operations are not connected on this page yet.
-            </p>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-[#9697A2]">
+                Review submitted work, inspect attachments, record marks,
+                and provide feedback to students.
+              </p>
+            </div>
+
+            {canOpenSubmissions ? (
+              <Link
+                to="/faculty/assignments/submissions"
+                state={{ assignment }}
+                className="inline-flex rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+              >
+                <ActionButton>
+                  View Submissions
+                </ActionButton>
+              </Link>
+            ) : (
+              <ActionButton disabled>
+                Assignment ID Unavailable
+              </ActionButton>
+            )}
           </div>
         </SectionCard>
       </div>
