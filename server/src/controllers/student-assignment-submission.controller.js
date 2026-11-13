@@ -55,6 +55,60 @@ function hasIntersection(first, second) {
   return first.some((id) => allowedIds.has(id));
 }
 
+/**
+ * Course allocation is the primary source of student access.
+ */
+function studentMatchesCourseAllocation(student, course) {
+  const studentBatches = normalizeIds(student.assignedBatches);
+  const studentSections = normalizeIds(student.assignedSections);
+
+  const courseBatches = normalizeIds(course.batches);
+  const courseSections = normalizeIds(course.sections);
+
+  if (
+    courseBatches.length > 0
+    && !hasIntersection(studentBatches, courseBatches)
+  ) {
+    return false;
+  }
+
+  if (
+    courseSections.length > 0
+    && !hasIntersection(studentSections, courseSections)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Assignment targeting can narrow course access further.
+ */
+function studentMatchesAssignmentTarget(student, assignment) {
+  const studentBatches = normalizeIds(student.assignedBatches);
+  const studentSections = normalizeIds(student.assignedSections);
+
+  const assignmentBatches = normalizeIds(assignment.batches);
+  const assignmentSections = normalizeIds(assignment.sections);
+
+  if (
+    assignmentBatches.length > 0
+    && !hasIntersection(studentBatches, assignmentBatches)
+  ) {
+    return false;
+  }
+
+  if (
+    assignmentSections.length > 0
+    && !hasIntersection(studentSections, assignmentSections)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function studentCanAccessAssignment(student, assignment) {
   const course = assignment.course;
 
@@ -73,40 +127,11 @@ function studentCanAccessAssignment(student, assignment) {
     return false;
   }
 
-  const studentBatches = normalizeIds(student.assignedBatches);
-  const studentSections = normalizeIds(student.assignedSections);
-
-  const courseBatches = normalizeIds(course.batches);
-  const courseSections = normalizeIds(course.sections);
-
-  const assignmentBatches = normalizeIds(assignment.batches);
-  const assignmentSections = normalizeIds(assignment.sections);
-
-  if (
-    courseBatches.length > 0
-    && !hasIntersection(studentBatches, courseBatches)
-  ) {
+  if (!studentMatchesCourseAllocation(student, course)) {
     return false;
   }
 
-  if (
-    courseSections.length > 0
-    && !hasIntersection(studentSections, courseSections)
-  ) {
-    return false;
-  }
-
-  if (
-    assignmentBatches.length > 0
-    && !hasIntersection(studentBatches, assignmentBatches)
-  ) {
-    return false;
-  }
-
-  if (
-    assignmentSections.length > 0
-    && !hasIntersection(studentSections, assignmentSections)
-  ) {
+  if (!studentMatchesAssignmentTarget(student, assignment)) {
     return false;
   }
 
@@ -196,20 +221,23 @@ function normalizeSubmission(submission) {
     student: String(submission.student),
     course: String(submission.course),
     department: String(submission.department),
-    responseText: submission.responseText,
-    attachments: (submission.attachments || []).map(
+
+    responseText: submission.responseText ?? '',
+
+    attachments: (submission.attachments ?? []).map(
       (attachment) => ({
         id: String(attachment._id),
         name: attachment.name,
         url: attachment.url,
-        mimeType: attachment.mimeType || '',
+        mimeType: attachment.mimeType ?? '',
         size: attachment.size ?? 0,
       }),
     ),
+
     submittedAt: submission.submittedAt,
     status: submission.status,
     marksObtained: submission.marksObtained,
-    feedback: submission.feedback,
+    feedback: submission.feedback ?? '',
     evaluatedAt: submission.evaluatedAt,
     createdAt: submission.createdAt,
     updatedAt: submission.updatedAt,
@@ -218,8 +246,6 @@ function normalizeSubmission(submission) {
 
 /**
  * GET /api/v1/assignments/:assignmentId/my-submission
- *
- * Retrieve the authenticated student's submission for an assignment.
  */
 export async function getMyAssignmentSubmissionController(
   req,
@@ -259,10 +285,6 @@ export async function getMyAssignmentSubmissionController(
 
 /**
  * POST /api/v1/assignments/:assignmentId/submit
- *
- * Create or update the authenticated student's assignment submission.
- *
- * The student identity is always derived from the access token.
  */
 export async function submitAssignmentController(
   req,
@@ -279,9 +301,9 @@ export async function submitAssignmentController(
       req.params.assignmentId,
     );
 
-    if (assignment.status === ASSIGNMENT_STATUSES.CLOSED) {
+    if (assignment.status !== ASSIGNMENT_STATUSES.PUBLISHED) {
       throw createControllerError(
-        'This assignment is closed and no longer accepts submissions.',
+        'This assignment is not accepting submissions.',
         'ASSIGNMENT_CLOSED',
         409,
       );
@@ -301,18 +323,10 @@ export async function submitAssignmentController(
 
     const attachments = req.body.attachments ?? [];
 
-    if (!Array.isArray(attachments)) {
-      throw createControllerError(
-        'Attachments must be provided as an array.',
-        'INVALID_ATTACHMENTS',
-        400,
-      );
-    }
-
-    if (attachments.length > 10) {
+    if (!Array.isArray(attachments) || attachments.length > 10) {
       throw createControllerError(
         'A submission can contain at most 10 attachments.',
-        'ATTACHMENT_LIMIT_EXCEEDED',
+        'INVALID_ATTACHMENTS',
         400,
       );
     }
@@ -357,9 +371,24 @@ export async function submitAssignmentController(
 
     const isLate = (
       assignment.dueDate
-      && submittedAt.getTime()
-        > new Date(assignment.dueDate).getTime()
+      && submittedAt.getTime() > new Date(assignment.dueDate).getTime()
     );
+
+    const existingSubmission = await AssignmentSubmission.findOne({
+      assignment: assignment._id,
+      student: student._id,
+    })
+      .select('_id status')
+      .lean()
+      .exec();
+
+    if (existingSubmission?.status === SUBMISSION_STATUSES.GRADED) {
+      throw createControllerError(
+        'An evaluated submission cannot be changed.',
+        'SUBMISSION_ALREADY_GRADED',
+        409,
+      );
+    }
 
     const submission = await AssignmentSubmission.findOneAndUpdate(
       {
