@@ -231,12 +231,11 @@ courseRouter.get(
   '/me',
   authenticate,
   authorize('STUDENT'),
-  authRateLimiter,
   listMyCoursesController,
 );
 
 /* -------------------------------------------------------------------------- */
-/* Faculty and HOD assigned courses                                            */
+/* Faculty, Mentor and HOD assigned courses                                    */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -251,7 +250,7 @@ courseRouter.get(
 );
 
 /* -------------------------------------------------------------------------- */
-/* Faculty course materials                                                   */
+/* Faculty, Mentor and HOD course materials                                    */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -260,7 +259,7 @@ courseRouter.get(
 courseRouter.get(
   '/:courseId/materials',
   authenticate,
-  authorize('FACULTY'),
+  authorize('FACULTY', 'MENTOR', 'HOD'),
   authRateLimiter,
   validate(courseMaterialsParamsSchema),
   listFacultyCourseMaterialsController,
@@ -272,7 +271,7 @@ courseRouter.get(
 courseRouter.get(
   '/:courseId/materials/:materialId',
   authenticate,
-  authorize('FACULTY'),
+  authorize('FACULTY', 'MENTOR', 'HOD'),
   authRateLimiter,
   validate(courseMaterialDetailsParamsSchema),
   getFacultyCourseMaterialController,
@@ -284,7 +283,7 @@ courseRouter.get(
 courseRouter.post(
   '/:courseId/materials',
   authenticate,
-  authorize('FACULTY'),
+  authorize('FACULTY', 'MENTOR', 'HOD'),
   authRateLimiter,
   handleCourseMaterialUpload,
   validate(createCourseMaterialSchema),
@@ -310,7 +309,7 @@ courseRouter.post(
 courseRouter.patch(
   '/:courseId/materials/:materialId/archive',
   authenticate,
-  authorize('FACULTY'),
+  authorize('FACULTY', 'MENTOR', 'HOD'),
   authRateLimiter,
   validate(archiveCourseMaterialSchema),
 

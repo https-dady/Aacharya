@@ -7,6 +7,10 @@ import {
 } from '../models/user.model.js';
 
 import {
+  Department,
+} from '../models/department.model.js';
+
+import {
   Course,
   COURSE_STATUSES,
 } from '../models/course.model.js';
@@ -21,6 +25,10 @@ import {
   uploadBufferToCloudinary,
   deleteFromCloudinary,
 } from '../services/storage/cloudinary-storage.service.js';
+
+import {
+  hasUserRole,
+} from '../utils/role-access.util.js';
 
 const DEFAULT_PAGE = 1;
 const DEFAULT_LIMIT = 12;
@@ -76,44 +84,115 @@ function normalizeMaterial(material) {
   };
 }
 
-async function getAuthenticatedFaculty(userId) {
+/**
+ * Retrieves the authenticated active teaching account.
+ *
+ * Supported roles:
+ * FACULTY, MENTOR and HOD.
+ *
+ * Supports both legacy primary-role accounts and
+ * multi-role accounts.
+ */
+async function getAuthenticatedTeachingUser(userId) {
   if (!mongoose.isValidObjectId(userId)) {
     throw createControllerError(
       401,
       'INVALID_AUTHENTICATED_USER',
-      'A valid authenticated faculty account is required.',
+      'A valid authenticated teaching account is required.',
     );
   }
 
-  const faculty = await User.findOne({
+  const teachingUser = await User.findOne({
     _id: userId,
-    role: USER_ROLES.FACULTY,
     status: ACCOUNT_STATUSES.ACTIVE,
+
+    $or: [
+      {
+        role: {
+          $in: [
+            USER_ROLES.FACULTY,
+            USER_ROLES.MENTOR,
+            USER_ROLES.HOD,
+          ],
+        },
+      },
+      {
+        roles: {
+          $in: [
+            USER_ROLES.FACULTY,
+            USER_ROLES.MENTOR,
+            USER_ROLES.HOD,
+          ],
+        },
+      },
+    ],
   })
-    .select('_id role department status')
+    .select('_id role roles department status')
     .lean()
     .exec();
 
-  if (!faculty) {
+  if (!teachingUser) {
     throw createControllerError(
       403,
-      'FACULTY_ACCOUNT_UNAVAILABLE',
-      'Your active faculty account could not be verified.',
+      'TEACHING_ACCOUNT_UNAVAILABLE',
+      'Your active Faculty, Mentor or HOD account could not be verified.',
     );
   }
 
-  if (!faculty.department) {
+  if (
+    !hasUserRole(
+      teachingUser,
+      USER_ROLES.FACULTY,
+      USER_ROLES.MENTOR,
+      USER_ROLES.HOD,
+    )
+  ) {
     throw createControllerError(
       403,
-      'FACULTY_DEPARTMENT_UNAVAILABLE',
-      'Your faculty account is not assigned to a department.',
+      'TEACHING_ACCESS_FORBIDDEN',
+      'Your account does not have teaching access.',
     );
   }
 
-  return faculty;
+  if (!teachingUser.department) {
+    throw createControllerError(
+      403,
+      'TEACHING_DEPARTMENT_UNAVAILABLE',
+      'Your account is not assigned to a department.',
+    );
+  }
+
+  // HOD must belong to the department they manage.
+  if (hasUserRole(teachingUser, USER_ROLES.HOD)) {
+    const department = await Department.findOne({
+      _id: teachingUser.department,
+      hod: teachingUser._id,
+      status: 'ACTIVE',
+    })
+      .select('_id')
+      .lean()
+      .exec();
+
+    if (!department) {
+      throw createControllerError(
+        403,
+        'HOD_DEPARTMENT_UNAVAILABLE',
+        'Your active HOD department assignment could not be verified.',
+      );
+    }
+  }
+
+  return teachingUser;
 }
 
-async function getFacultyAssignedCourse(userId, courseId) {
+/**
+ * Verifies that the authenticated teaching account
+ * is assigned to the requested active course.
+ *
+ * The existing Course.faculty ownership relationship
+ * remains the source of teaching assignment.
+ */
+async function getTeachingUserAssignedCourse(userId, courseId) {
   if (!mongoose.isValidObjectId(courseId)) {
     throw createControllerError(
       400,
@@ -122,12 +201,12 @@ async function getFacultyAssignedCourse(userId, courseId) {
     );
   }
 
-  const faculty = await getAuthenticatedFaculty(userId);
+  const teachingUser = await getAuthenticatedTeachingUser(userId);
 
   const course = await Course.findOne({
     _id: courseId,
-    faculty: faculty._id,
-    department: faculty.department,
+    faculty: teachingUser._id,
+    department: teachingUser.department,
     status: COURSE_STATUSES.ACTIVE,
   })
     .select('_id department faculty title code status')
@@ -143,7 +222,7 @@ async function getFacultyAssignedCourse(userId, courseId) {
   }
 
   return {
-    faculty,
+    faculty: teachingUser,
     course,
   };
 }
@@ -217,7 +296,7 @@ export async function listFacultyCourseMaterialsController(
   next,
 ) {
   try {
-    await getFacultyAssignedCourse(
+    await getTeachingUserAssignedCourse(
       req.user?.id,
       req.params.courseId,
     );
@@ -280,7 +359,7 @@ export async function getFacultyCourseMaterialController(
   next,
 ) {
   try {
-    await getFacultyAssignedCourse(
+    await getTeachingUserAssignedCourse(
       req.user?.id,
       req.params.courseId,
     );
@@ -332,10 +411,11 @@ export async function createFacultyCourseMaterialController(
   let uploadedAsset = null;
 
   try {
-    const { faculty, course } = await getFacultyAssignedCourse(
-      req.user?.id,
-      req.params.courseId,
-    );
+    const { faculty, course } =
+      await getTeachingUserAssignedCourse(
+        req.user?.id,
+        req.params.courseId,
+      );
 
     const {
       title,
@@ -459,7 +539,7 @@ export async function archiveFacultyCourseMaterialController(
   next,
 ) {
   try {
-    await getFacultyAssignedCourse(
+    await getTeachingUserAssignedCourse(
       req.user?.id,
       req.params.courseId,
     );
