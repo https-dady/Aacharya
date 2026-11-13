@@ -582,7 +582,7 @@ export default function QuizOverview() {
                       <td className="px-4 py-4">
                         <div className="flex justify-end gap-3">
                           <Link
-                            to="/hod/quizzes/details"
+                            to={`/hod/quizzes/details/${quiz.id}`}
                             state={{ quiz }}
                             className="rounded text-sm font-medium text-[#CDB5F7] transition hover:text-[#E0D0FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
                           >
@@ -590,7 +590,7 @@ export default function QuizOverview() {
                           </Link>
 
                           <Link
-                            to="/hod/quizzes/edit"
+                            to={`/hod/quizzes/edit/${quiz.id}`}
                             state={{ quiz }}
                             className="rounded text-sm font-medium text-[#CDB5F7] transition hover:text-[#E0D0FF] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
                           >
