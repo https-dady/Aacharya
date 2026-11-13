@@ -1,8 +1,11 @@
-import { Link, useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useParams } from 'react-router-dom';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
+
+import quizManagementService from '../../services/quizManagementService.js';
 
 function getId(value) {
   if (!value) return '';
@@ -18,12 +21,12 @@ function getLabel(value, fallback = 'Not provided') {
   if (typeof value === 'string') return value;
 
   return (
-    value.name
-    || value.title
-    || value.fullName
-    || value.code
-    || getId(value)
-    || fallback
+    value.name ||
+    value.title ||
+    value.fullName ||
+    value.code ||
+    getId(value) ||
+    fallback
   );
 }
 
@@ -170,53 +173,142 @@ function QuestionCard({ question, index }) {
   );
 }
 
+function LoadingState() {
+  return (
+    <div className="mx-auto w-full max-w-[1200px] space-y-6">
+      <PageHeader
+        eyebrow="ACADEMIC MANAGEMENT"
+        title="Loading Quiz Details"
+        description="Retrieving the latest quiz information."
+        breadcrumbs={[
+          { label: 'HOD Dashboard', to: '/hod/dashboard' },
+          { label: 'Quizzes', to: '/hod/quizzes' },
+          { label: 'Details' },
+        ]}
+      />
+
+      <SectionCard>
+        <div className="flex items-center gap-3 py-8">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#CDB5F7] border-t-transparent" />
+
+          <p className="text-sm text-[#A5A6B0]">
+            Loading quiz information...
+          </p>
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
+function ErrorState({ message }) {
+  return (
+    <div className="mx-auto w-full max-w-[1200px] space-y-6">
+      <PageHeader
+        eyebrow="ACADEMIC MANAGEMENT"
+        title="Quiz Details"
+        description="We could not retrieve the requested quiz."
+        breadcrumbs={[
+          { label: 'HOD Dashboard', to: '/hod/dashboard' },
+          { label: 'Quizzes', to: '/hod/quizzes' },
+          { label: 'Details' },
+        ]}
+      />
+
+      <SectionCard>
+        <div className="flex flex-col items-center justify-center px-5 py-12 text-center">
+          <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-red-500/30 bg-red-500/10 text-2xl text-red-300">
+            !
+          </div>
+
+          <h2 className="text-lg font-semibold text-[#EAEAE6]">
+            Unable to load quiz
+          </h2>
+
+          <p className="mt-2 max-w-md text-sm leading-6 text-[#A5A6B0]">
+            {message}
+          </p>
+
+          <div className="mt-6">
+            <Link to="/hod/quizzes">
+              <ActionButton variant="secondary">
+                Back to Quizzes
+              </ActionButton>
+            </Link>
+          </div>
+        </div>
+      </SectionCard>
+    </div>
+  );
+}
+
 export default function QuizDetails() {
   const location = useLocation();
+  const { quizId: routeQuizId } = useParams();
 
-  const quiz = location.state?.quiz;
+  const routeQuiz = location.state?.quiz ?? null;
+
+  const quizId = routeQuizId || getId(routeQuiz);
+
+  const [quiz, setQuiz] = useState(
+    routeQuizId ? null : routeQuiz,
+  );
+
+  const [loading, setLoading] = useState(Boolean(quizId));
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!quizId) {
+      setQuiz(routeQuiz);
+      setLoading(false);
+      setError('');
+      return undefined;
+    }
+
+    let isActive = true;
+
+    async function loadQuiz() {
+      setLoading(true);
+      setError('');
+
+      try {
+        const result = await quizManagementService.getQuiz(quizId);
+
+        if (isActive) {
+          setQuiz(result);
+        }
+      } catch (requestError) {
+        if (isActive) {
+          setError(
+            requestError?.response?.data?.message ||
+              requestError?.message ||
+              'The quiz could not be loaded. Please try again.',
+          );
+        }
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadQuiz();
+
+    return () => {
+      isActive = false;
+    };
+  }, [quizId, routeQuiz]);
+
+  if (loading) {
+    return <LoadingState />;
+  }
+
+  if (error) {
+    return <ErrorState message={error} />;
+  }
 
   if (!quiz) {
     return (
-      <div className="mx-auto w-full max-w-[1200px] space-y-6">
-        <PageHeader
-          eyebrow="ACADEMIC MANAGEMENT"
-          title="Quiz Details"
-          description="Review assessment information, scheduling and questions."
-          breadcrumbs={[
-            { label: 'HOD Dashboard', to: '/hod/dashboard' },
-            { label: 'Quizzes', to: '/hod/quizzes' },
-            { label: 'Details' },
-          ]}
-        />
-
-        <SectionCard>
-          <div className="flex flex-col items-center justify-center px-5 py-12 text-center">
-            <div className="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl border border-[#454650] bg-[#26272B] text-2xl text-[#CDB5F7]">
-              !
-            </div>
-
-            <h2 className="text-lg font-semibold text-[#EAEAE6]">
-              Quiz details unavailable
-            </h2>
-
-            <p className="mt-2 max-w-md text-sm leading-6 text-[#A5A6B0]">
-              No quiz record was supplied to this page. Open the quiz
-              from the quiz overview to view its details.
-
-              The current backend does not provide a GET-by-ID endpoint,
-              so refreshing this page may also require reopening the record.
-            </p>
-
-            <div className="mt-6">
-              <Link to="/hod/quizzes">
-                <ActionButton variant="secondary">
-                  Back to Quizzes
-                </ActionButton>
-              </Link>
-            </div>
-          </div>
-        </SectionCard>
-      </div>
+      <ErrorState message="No quiz ID or quiz record was supplied. Return to the quiz overview and select a quiz." />
     );
   }
 
@@ -234,12 +326,14 @@ export default function QuizDetails() {
     : [];
 
   const totalMarks = Number(
-    quiz.totalMarks
-    ?? questions.reduce(
-      (total, question) => total + Number(question.marks || 0),
-      0,
-    ),
+    quiz.totalMarks ??
+      questions.reduce(
+        (total, question) => total + Number(question.marks || 0),
+        0,
+      ),
   );
+
+  const currentQuizId = getId(quiz);
 
   return (
     <div className="mx-auto w-full max-w-[1200px] space-y-6">
@@ -255,7 +349,11 @@ export default function QuizDetails() {
         actions={(
           <div className="flex flex-wrap gap-2">
             <Link
-              to="/hod/quizzes/edit"
+              to={
+                currentQuizId
+                  ? `/hod/quizzes/edit/${currentQuizId}`
+                  : '/hod/quizzes/edit'
+              }
               state={{ quiz }}
             >
               <ActionButton>
@@ -339,7 +437,7 @@ export default function QuizDetails() {
 
           <DetailItem
             label="Quiz ID"
-            value={getId(quiz)}
+            value={currentQuizId}
           />
 
           <DetailItem
@@ -454,20 +552,6 @@ export default function QuizDetails() {
           />
         </div>
       </SectionCard>
-
-      <div className="rounded-xl border border-[#454650] bg-[#191A21] p-4">
-        <p className="text-sm font-semibold text-[#CDB5F7]">
-          Record loading behavior
-        </p>
-
-        <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-          This page displays the quiz record passed through React Router
-          navigation state. The current backend does not expose a
-          GET-by-ID endpoint for quiz management. Opening this page
-          directly or refreshing it may require reopening the quiz
-          from the quiz overview.
-        </p>
-      </div>
     </div>
   );
 }
