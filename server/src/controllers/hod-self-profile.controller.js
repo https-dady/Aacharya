@@ -18,16 +18,38 @@ function createError(statusCode, code, message) {
   return error;
 }
 
-function normalizeHodProfile(hod, department) {
+function normalizeUserRoles(user) {
+  const roles = new Set(
+    Array.isArray(user.roles) ? user.roles : [],
+  );
+
+  if (user.role) {
+    roles.add(user.role);
+  }
+
+  return [...roles];
+}
+
+function normalizeFacultyProfile(faculty, department) {
   return {
-    id: String(hod._id),
-    institutionalId: hod.institutionalId,
-    fullName: hod.fullName,
-    email: hod.email ?? null,
-    role: hod.role,
-    status: hod.status,
-    isEmailVerified: hod.isEmailVerified,
-    emailVerifiedAt: hod.emailVerifiedAt ?? null,
+    id: String(faculty._id),
+
+    institutionalId: faculty.institutionalId,
+
+    fullName: faculty.fullName,
+
+    email: faculty.email ?? null,
+
+    role: faculty.role,
+
+    roles: normalizeUserRoles(faculty),
+
+    status: faculty.status,
+
+    isEmailVerified: faculty.isEmailVerified,
+
+    emailVerifiedAt: faculty.emailVerifiedAt ?? null,
+
     department: department
       ? {
           id: String(department._id),
@@ -36,12 +58,14 @@ function normalizeHodProfile(hod, department) {
           status: department.status,
         }
       : null,
-    createdAt: hod.createdAt,
-    updatedAt: hod.updatedAt,
+
+    createdAt: faculty.createdAt,
+
+    updatedAt: faculty.updatedAt,
   };
 }
 
-async function getAuthenticatedHod(userId) {
+async function getAuthenticatedFaculty(userId) {
   if (!userId || !mongoose.isValidObjectId(userId)) {
     throw createError(
       401,
@@ -50,9 +74,27 @@ async function getAuthenticatedHod(userId) {
     );
   }
 
-  const hod = await User.findOne({
+  const faculty = await User.findOne({
     _id: userId,
-    role: USER_ROLES.HOD,
+
+    $or: [
+      {
+        role: {
+          $in: [
+            USER_ROLES.FACULTY,
+            USER_ROLES.MENTOR,
+          ],
+        },
+      },
+      {
+        roles: {
+          $in: [
+            USER_ROLES.FACULTY,
+            USER_ROLES.MENTOR,
+          ],
+        },
+      },
+    ],
   })
     .select(
       [
@@ -60,6 +102,7 @@ async function getAuthenticatedHod(userId) {
         'fullName',
         'email',
         'role',
+        'roles',
         'status',
         'isEmailVerified',
         'emailVerifiedAt',
@@ -70,68 +113,88 @@ async function getAuthenticatedHod(userId) {
     )
     .exec();
 
-  if (!hod) {
+  if (!faculty) {
     throw createError(
       404,
-      'HOD_NOT_FOUND',
-      'The authenticated HOD account could not be found.',
+      'FACULTY_OR_MENTOR_NOT_FOUND',
+      'The authenticated Faculty or Mentor account could not be found.',
     );
   }
 
-  if (hod.status !== ACCOUNT_STATUSES.ACTIVE) {
+  if (faculty.status !== ACCOUNT_STATUSES.ACTIVE) {
     throw createError(
       403,
-      'HOD_ACCOUNT_INACTIVE',
-      'Your HOD account is not active.',
+      'ACCOUNT_INACTIVE',
+      'Your account is not active.',
     );
   }
 
-  if (!hod.department) {
+  const userRoles = normalizeUserRoles(faculty);
+
+  const hasFacultyAccess = userRoles.some(
+    (role) => [
+      USER_ROLES.FACULTY,
+      USER_ROLES.MENTOR,
+    ].includes(role),
+  );
+
+  if (!hasFacultyAccess) {
     throw createError(
-      409,
-      'HOD_DEPARTMENT_NOT_ASSIGNED',
-      'Your account is not assigned to a department.',
+      403,
+      'FORBIDDEN',
+      'Your account does not have Faculty or Mentor access.',
     );
   }
 
-  const department = await Department.findOne({
-    _id: hod.department,
-    hod: hod._id,
-  })
-    .select('name code status')
-    .lean()
-    .exec();
+  let department = null;
 
-  if (!department) {
-    throw createError(
-      409,
-      'HOD_DEPARTMENT_MISMATCH',
-      'Your department assignment could not be verified.',
-    );
+  if (faculty.department) {
+    department = await Department.findById(
+      faculty.department,
+    )
+      .select('name code status')
+      .lean()
+      .exec();
+
+    if (!department) {
+      throw createError(
+        409,
+        'DEPARTMENT_NOT_FOUND',
+        'Your assigned department could not be found.',
+      );
+    }
   }
 
   return {
-    hod,
+    faculty,
     department,
   };
 }
 
 /**
- * GET /api/v1/hod-profile/me
+ * GET /api/v1/faculty-profile/me
  *
- * Retrieves the authenticated HOD's own profile.
+ * Retrieves the authenticated Faculty or Mentor profile.
  */
-export async function getHodSelfProfileController(req, res, next) {
+export async function getFacultySelfProfileController(
+  req,
+  res,
+  next,
+) {
   try {
-    const { hod, department } = await getAuthenticatedHod(
-      req.user?.id,
-    );
+    const { faculty, department } =
+      await getAuthenticatedFaculty(req.user?.id);
 
     return res.status(200).json({
       success: true,
-      message: 'HOD profile retrieved successfully.',
+
+      message: 'Profile retrieved successfully.',
+
       data: {
-        profile: normalizeHodProfile(hod, department),
+        profile: normalizeFacultyProfile(
+          faculty,
+          department,
+        ),
       },
     });
   } catch (error) {
@@ -140,19 +203,25 @@ export async function getHodSelfProfileController(req, res, next) {
 }
 
 /**
- * PATCH /api/v1/hod-profile/me
+ * PATCH /api/v1/faculty-profile/me
  *
- * Allows an authenticated HOD to update only their own full name
- * and email address.
- *
- * Institutional ID, role, department, account status and account
- * creation date are not editable through this endpoint.
+ * Allows Faculty and Mentor to update their own
+ * permitted profile fields.
  */
-export async function updateHodSelfProfileController(req, res, next) {
+export async function updateFacultySelfProfileController(
+  req,
+  res,
+  next,
+) {
   try {
-    const { hod } = await getAuthenticatedHod(req.user?.id);
+    const { faculty } = await getAuthenticatedFaculty(
+      req.user?.id,
+    );
 
-    const allowedFields = ['fullName', 'email'];
+    const allowedFields = [
+      'fullName',
+      'email',
+    ];
 
     const submittedFields = Object.keys(req.body ?? {});
 
@@ -164,7 +233,7 @@ export async function updateHodSelfProfileController(req, res, next) {
       throw createError(
         400,
         'PROFILE_FIELD_NOT_EDITABLE',
-        'Only fullName and email can be updated through the HOD profile.',
+        'Only fullName and email can be updated.',
       );
     }
 
@@ -180,17 +249,12 @@ export async function updateHodSelfProfileController(req, res, next) {
     let emailChanged = false;
 
     if (Object.hasOwn(req.body, 'fullName')) {
-      if (typeof req.body.fullName !== 'string') {
-        throw createError(
-          400,
-          'INVALID_FULL_NAME',
-          'Full name must be a string.',
-        );
-      }
-
       const fullName = req.body.fullName.trim();
 
-      if (fullName.length < 2 || fullName.length > 100) {
+      if (
+        fullName.length < 2
+        || fullName.length > 100
+      ) {
         throw createError(
           400,
           'INVALID_FULL_NAME',
@@ -198,21 +262,14 @@ export async function updateHodSelfProfileController(req, res, next) {
         );
       }
 
-      if (hod.fullName !== fullName) {
-        hod.fullName = fullName;
+      if (faculty.fullName !== fullName) {
+        faculty.fullName = fullName;
+
         profileChanged = true;
       }
     }
 
     if (Object.hasOwn(req.body, 'email')) {
-      if (typeof req.body.email !== 'string') {
-        throw createError(
-          400,
-          'INVALID_EMAIL',
-          'Email address must be a string.',
-        );
-      }
-
       const email = req.body.email.trim().toLowerCase();
 
       if (
@@ -226,10 +283,13 @@ export async function updateHodSelfProfileController(req, res, next) {
         );
       }
 
-      if ((hod.email ?? '') !== email) {
+      if ((faculty.email ?? '') !== email) {
         const existingUser = await User.findOne({
           email,
-          _id: { $ne: hod._id },
+
+          _id: {
+            $ne: faculty._id,
+          },
         })
           .select('_id')
           .lean()
@@ -243,33 +303,39 @@ export async function updateHodSelfProfileController(req, res, next) {
           );
         }
 
-        hod.email = email;
+        faculty.email = email;
 
-        // Changing the email invalidates the previous verification.
-        hod.isEmailVerified = false;
-        hod.emailVerifiedAt = null;
+        faculty.isEmailVerified = false;
+
+        faculty.emailVerifiedAt = null;
 
         profileChanged = true;
+
         emailChanged = true;
       }
     }
 
     if (!profileChanged) {
-      const { department } = await getAuthenticatedHod(
-        hod._id.toString(),
+      const { department } = await getAuthenticatedFaculty(
+        faculty._id.toString(),
       );
 
       return res.status(200).json({
         success: true,
+
         message: 'No profile changes were necessary.',
+
         data: {
-          profile: normalizeHodProfile(hod, department),
+          profile: normalizeFacultyProfile(
+            faculty,
+            department,
+          ),
         },
       });
     }
 
     try {
-      await hod.save();
+      await faculty.save();
     } catch (error) {
       if (error?.code === 11000) {
         throw createError(
@@ -282,17 +348,22 @@ export async function updateHodSelfProfileController(req, res, next) {
       throw error;
     }
 
-    const { department } = await getAuthenticatedHod(
-      hod._id.toString(),
+    const { department } = await getAuthenticatedFaculty(
+      faculty._id.toString(),
     );
 
     return res.status(200).json({
       success: true,
+
       message: emailChanged
-        ? 'HOD profile updated. Verify your new email address where required.'
-        : 'HOD profile updated successfully.',
+        ? 'Profile updated. Verify your new email address where required.'
+        : 'Profile updated successfully.',
+
       data: {
-        profile: normalizeHodProfile(hod, department),
+        profile: normalizeFacultyProfile(
+          faculty,
+          department,
+        ),
       },
     });
   } catch (error) {
