@@ -13,6 +13,27 @@ import SectionCard from '../../components/SectionCard.jsx';
 
 import assignmentManagementService from '../../services/assignmentManagementService.js';
 
+function getAssignmentId(assignment) {
+  return String(assignment?.id || assignment?._id || '');
+}
+
+function getReferenceName(reference) {
+  if (!reference) return '';
+
+  if (typeof reference === 'string') return reference;
+
+  return reference.name || reference.title || reference.code || '';
+}
+
+function getReferenceNames(references) {
+  if (!Array.isArray(references) || references.length === 0) {
+    return 'Not provided';
+  }
+
+  return references.map(getReferenceName).filter(Boolean).join(', ')
+    || 'Not provided';
+}
+
 function DetailItem({ label, value }) {
   const displayValue =
     value === undefined || value === null || value === ''
@@ -33,9 +54,7 @@ function DetailItem({ label, value }) {
 }
 
 function formatDate(value) {
-  if (!value) {
-    return 'Not provided';
-  }
+  if (!value) return 'Not provided';
 
   const date = new Date(value);
 
@@ -65,37 +84,6 @@ function getStatusStyles(status) {
   }
 }
 
-function getReferenceName(reference) {
-  if (!reference) {
-    return '';
-  }
-
-  if (typeof reference === 'string') {
-    return reference;
-  }
-
-  return reference.name || reference.title || reference.code || '';
-}
-
-function getReferenceNames(references) {
-  if (!Array.isArray(references) || references.length === 0) {
-    return 'Not provided';
-  }
-
-  return references
-    .map(getReferenceName)
-    .filter(Boolean)
-    .join(', ') || 'Not provided';
-}
-
-function getAssignmentId(assignment) {
-  return String(
-    assignment?.id ||
-    assignment?._id ||
-    '',
-  );
-}
-
 function extractInstructions(description = '') {
   const marker = 'Student Instructions:';
   const markerIndex = description.indexOf(marker);
@@ -109,16 +97,13 @@ function extractInstructions(description = '') {
 
   return {
     description: description.slice(0, markerIndex).trim(),
-    instructions: description
-      .slice(markerIndex + marker.length)
-      .trim(),
+    instructions: description.slice(markerIndex + marker.length).trim(),
   };
 }
 
 export default function FacultyAssignmentDetails() {
   const location = useLocation();
   const navigate = useNavigate();
-
   const [searchParams] = useSearchParams();
 
   const navigationAssignment = location.state?.assignment || null;
@@ -127,14 +112,8 @@ export default function FacultyAssignmentDetails() {
     searchParams.get('assignmentId') ||
     getAssignmentId(navigationAssignment);
 
-  const [assignment, setAssignment] = useState(
-    navigationAssignment,
-  );
-
-  const [loading, setLoading] = useState(
-    Boolean(requestedAssignmentId),
-  );
-
+  const [assignment, setAssignment] = useState(navigationAssignment);
+  const [loading, setLoading] = useState(Boolean(requestedAssignmentId));
   const [error, setError] = useState('');
 
   const loadAssignment = useCallback(async () => {
@@ -144,113 +123,74 @@ export default function FacultyAssignmentDetails() {
       return;
     }
 
-    const controller = new AbortController();
-
     setLoading(true);
     setError('');
 
     try {
-      const firstPage =
-        await assignmentManagementService.listAssignments(
-          {
+      let matchedAssignment =
+        getAssignmentId(navigationAssignment) === requestedAssignmentId
+          ? navigationAssignment
+          : null;
+
+      if (!matchedAssignment) {
+        const firstPage =
+          await assignmentManagementService.listAssignments({
             page: 1,
             limit: 100,
-          },
-          {
-            signal: controller.signal,
-          },
+          });
+
+        matchedAssignment = firstPage.items.find(
+          (item) => getAssignmentId(item) === requestedAssignmentId,
         );
 
-      let matchedAssignment = firstPage.items.find(
-        (item) => item.id === requestedAssignmentId,
-      );
+        const totalPages = firstPage.pagination.totalPages;
 
-      const totalPages = firstPage.pagination.totalPages;
-
-      if (!matchedAssignment && totalPages > 1) {
         for (
           let page = 2;
           page <= totalPages && !matchedAssignment;
           page += 1
         ) {
           const result =
-            await assignmentManagementService.listAssignments(
-              {
-                page,
-                limit: 100,
-              },
-              {
-                signal: controller.signal,
-              },
-            );
+            await assignmentManagementService.listAssignments({
+              page,
+              limit: 100,
+            });
 
           matchedAssignment = result.items.find(
-            (item) => item.id === requestedAssignmentId,
+            (item) => getAssignmentId(item) === requestedAssignmentId,
           );
         }
       }
 
-      if (!controller.signal.aborted) {
-        if (!matchedAssignment) {
-          setAssignment(null);
-          setError(
-            'The requested assignment could not be found in your accessible assignment records.',
-          );
-        } else {
-          setAssignment(matchedAssignment);
-        }
+      if (!matchedAssignment) {
+        setAssignment(null);
+        setError(
+          'The requested assignment could not be found in your accessible assignment records.',
+        );
+      } else {
+        setAssignment(matchedAssignment);
       }
     } catch (loadError) {
-      if (!controller.signal.aborted) {
-        setAssignment(null);
+      setAssignment(null);
 
-        setError(
-          loadError?.response?.data?.message ||
-          loadError?.message ||
-          'Unable to load assignment details.',
-        );
-      }
+      setError(
+        loadError?.response?.data?.message ||
+        loadError?.message ||
+        'Unable to load assignment details.',
+      );
     } finally {
-      if (!controller.signal.aborted) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
-
-    return () => controller.abort();
   }, [requestedAssignmentId, navigationAssignment]);
 
   useEffect(() => {
-    let cancelled = false;
-    let abortRequest;
-
-    async function run() {
-      const cleanup = await loadAssignment();
-
-      if (cancelled && typeof cleanup === 'function') {
-        cleanup();
-      } else {
-        abortRequest = cleanup;
-      }
-    }
-
-    run();
-
-    return () => {
-      cancelled = true;
-
-      if (typeof abortRequest === 'function') {
-        abortRequest();
-      }
-    };
+    loadAssignment();
   }, [loadAssignment]);
 
   useEffect(() => {
     const assignmentId = getAssignmentId(navigationAssignment);
 
-    if (
-      assignmentId &&
-      !searchParams.get('assignmentId')
-    ) {
+    if (assignmentId && !searchParams.get('assignmentId')) {
       const nextParams = new URLSearchParams(searchParams);
 
       nextParams.set('assignmentId', assignmentId);
@@ -275,15 +215,9 @@ export default function FacultyAssignmentDetails() {
   ]);
 
   const details = useMemo(() => {
-    if (!assignment) {
-      return null;
-    }
+    if (!assignment) return null;
 
-    const parsedDescription = extractInstructions(
-      assignment.description || '',
-    );
-
-    const explicitInstructions = assignment.instructions || '';
+    const parsed = extractInstructions(assignment.description || '');
 
     return {
       ...assignment,
@@ -293,10 +227,10 @@ export default function FacultyAssignmentDetails() {
         assignment.name ||
         'Untitled Assignment',
 
-      description: parsedDescription.description,
+      description: parsed.description,
 
       instructions:
-        explicitInstructions || parsedDescription.instructions,
+        assignment.instructions || parsed.instructions,
 
       courseName:
         getReferenceName(assignment.course) ||
@@ -313,30 +247,31 @@ export default function FacultyAssignmentDetails() {
         'Not provided',
 
       batchNames: getReferenceNames(assignment.batches),
-
       sectionNames: getReferenceNames(assignment.sections),
     };
   }, [assignment]);
 
-  const status = String(
-    details?.status || '',
-  ).toLowerCase();
+  const assignmentId = getAssignmentId(assignment);
+
+  const status = String(details?.status || '').toLowerCase();
+
+  const dueDate = formatDate(details?.dueDate);
 
   const submissionCount =
-    assignment?.submissionCount !== undefined &&
-    assignment?.submissionCount !== null
-      ? Number(assignment.submissionCount)
+    details?.submissionCount !== undefined &&
+    details?.submissionCount !== null
+      ? Number(details.submissionCount)
       : null;
 
   const gradedCount =
-    assignment?.gradedCount !== undefined &&
-    assignment?.gradedCount !== null
-      ? Number(assignment.gradedCount)
+    details?.gradedCount !== undefined &&
+    details?.gradedCount !== null
+      ? Number(details.gradedCount)
       : null;
 
-  function handleRetry() {
-    loadAssignment();
-  }
+  const editUrl = assignmentId
+    ? `/faculty/assignments/new?assignmentId=${encodeURIComponent(assignmentId)}`
+    : null;
 
   if (loading) {
     return (
@@ -345,19 +280,6 @@ export default function FacultyAssignmentDetails() {
           eyebrow="FACULTY WORKSPACE"
           title="Assignment Details"
           description="Loading assignment information."
-          breadcrumbs={[
-            {
-              label: 'Faculty Dashboard',
-              to: '/faculty/dashboard',
-            },
-            {
-              label: 'Assignments',
-              to: '/faculty/assignments',
-            },
-            {
-              label: 'Details',
-            },
-          ]}
         />
 
         <SectionCard>
@@ -377,20 +299,7 @@ export default function FacultyAssignmentDetails() {
         <PageHeader
           eyebrow="FACULTY WORKSPACE"
           title="Assignment Details"
-          description="Review assignment information, instructions, deadlines, and submission requirements."
-          breadcrumbs={[
-            {
-              label: 'Faculty Dashboard',
-              to: '/faculty/dashboard',
-            },
-            {
-              label: 'Assignments',
-              to: '/faculty/assignments',
-            },
-            {
-              label: 'Details',
-            },
-          ]}
+          description="Review assignment information and submission requirements."
         />
 
         <SectionCard>
@@ -398,20 +307,20 @@ export default function FacultyAssignmentDetails() {
             title="Assignment details unavailable"
             description={
               error ||
-              'No assignment record is available. Open an assignment from the assignment directory.'
+              'Open an assignment from the assignment directory.'
             }
             action={
               <div className="flex flex-wrap gap-3">
                 <ActionButton
                   variant="secondary"
-                  onClick={handleRetry}
+                  onClick={loadAssignment}
                 >
                   Retry
                 </ActionButton>
 
                 <Link
                   to="/faculty/assignments"
-                  className="inline-flex items-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-medium text-[#EAEAE6] transition-colors hover:bg-[#26272B]"
+                  className="inline-flex items-center rounded-xl border border-[#454650] px-4 py-2 text-sm text-[#EAEAE6]"
                 >
                   Back to Assignments
                 </Link>
@@ -422,8 +331,6 @@ export default function FacultyAssignmentDetails() {
       </div>
     );
   }
-
-  const dueDate = formatDate(details.dueDate);
 
   return (
     <div className="mx-auto w-full max-w-[1200px]">
@@ -445,14 +352,28 @@ export default function FacultyAssignmentDetails() {
           },
         ]}
         actions={
-          <Link
-            to="/faculty/assignments"
-            className="inline-flex rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
-          >
-            <ActionButton variant="secondary">
-              Back to Assignments
-            </ActionButton>
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            {editUrl && (
+              <Link
+                to={editUrl}
+                state={{ assignment }}
+                className="inline-flex rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+              >
+                <ActionButton>
+                  Edit Assignment
+                </ActionButton>
+              </Link>
+            )}
+
+            <Link
+              to="/faculty/assignments"
+              className="inline-flex rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+            >
+              <ActionButton variant="secondary">
+                Back
+              </ActionButton>
+            </Link>
+          </div>
         }
       />
 
@@ -486,61 +407,19 @@ export default function FacultyAssignmentDetails() {
         description="Academic details supplied by the assignment record."
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <DetailItem
-            label="Assignment Title"
-            value={details.title}
-          />
-
-          <DetailItem
-            label="Content Type"
-            value={details.contentType}
-          />
-
-          <DetailItem
-            label="Course"
-            value={details.courseName}
-          />
-
-          <DetailItem
-            label="Course Code"
-            value={details.courseCode}
-          />
-
-          <DetailItem
-            label="Department"
-            value={details.departmentName}
-          />
-
-          <DetailItem
-            label="Target Batches"
-            value={details.batchNames}
-          />
-
-          <DetailItem
-            label="Target Sections"
-            value={details.sectionNames}
-          />
-
-          <DetailItem
-            label="Submission Deadline"
-            value={dueDate}
-          />
-
-          <DetailItem
-            label="Total Marks"
-            value={details.totalMarks}
-          />
-
-          <DetailItem
-            label="Created By"
-            value={details.createdBy?.name || details.createdBy?.fullName}
-          />
-
+          <DetailItem label="Assignment Title" value={details.title} />
+          <DetailItem label="Content Type" value={details.contentType} />
+          <DetailItem label="Course" value={details.courseName} />
+          <DetailItem label="Course Code" value={details.courseCode} />
+          <DetailItem label="Department" value={details.departmentName} />
+          <DetailItem label="Target Batches" value={details.batchNames} />
+          <DetailItem label="Target Sections" value={details.sectionNames} />
+          <DetailItem label="Submission Deadline" value={dueDate} />
+          <DetailItem label="Total Marks" value={details.totalMarks} />
           <DetailItem
             label="Created At"
             value={formatDate(details.createdAt)}
           />
-
           <DetailItem
             label="Last Updated"
             value={formatDate(details.updatedAt)}
@@ -580,7 +459,7 @@ export default function FacultyAssignmentDetails() {
           ) : (
             <EmptyState
               title="No additional instructions"
-              description="No separate student instructions were supplied with this assignment record."
+              description="No separate student instructions were supplied."
             />
           )}
         </SectionCard>
@@ -590,7 +469,7 @@ export default function FacultyAssignmentDetails() {
         <SectionCard
           eyebrow="SUPPORTING DOCUMENTS"
           title="Attachments"
-          description="Reference documents and files attached to this assignment."
+          description="Reference documents attached to this assignment."
         >
           {details.attachments?.length > 0 ? (
             <div className="space-y-3">
@@ -606,9 +485,6 @@ export default function FacultyAssignmentDetails() {
 
                     <p className="mt-1 text-xs text-[#9697A2]">
                       {attachment.mimeType || 'Document'}
-                      {attachment.size
-                        ? ` · ${(attachment.size / (1024 * 1024)).toFixed(2)} MB`
-                        : ''}
                     </p>
                   </div>
 
@@ -617,7 +493,7 @@ export default function FacultyAssignmentDetails() {
                       href={attachment.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex min-h-9 items-center rounded-lg border border-[#454650] px-3 py-2 text-xs font-semibold text-[#CDB5F7] transition-colors hover:border-[#CDB5F7]/60 hover:bg-[#CDB5F7]/10"
+                      className="inline-flex min-h-9 items-center rounded-lg border border-[#454650] px-3 py-2 text-xs font-semibold text-[#CDB5F7] hover:bg-[#CDB5F7]/10"
                     >
                       Open Attachment
                     </a>
@@ -628,7 +504,7 @@ export default function FacultyAssignmentDetails() {
           ) : (
             <EmptyState
               title="No attachments"
-              description="No supporting documents are attached to this assignment."
+              description="No supporting documents are attached."
             />
           )}
         </SectionCard>
@@ -659,15 +535,13 @@ export default function FacultyAssignmentDetails() {
 
             <p className="mt-2 text-sm leading-6 text-[#9697A2]">
               Individual student submissions, evaluation, and feedback
-              are handled by the Faculty Assignment Submissions module.
+              are managed separately.
             </p>
 
             <Link
               to="/faculty/assignments/submissions"
-              state={{
-                assignment,
-              }}
-              className="mt-4 inline-flex min-h-10 items-center rounded-xl border border-[#CDB5F7]/30 bg-[#CDB5F7]/10 px-4 py-2 text-sm font-semibold text-[#DCCBFA] transition-colors hover:bg-[#CDB5F7]/20"
+              state={{ assignment }}
+              className="mt-4 inline-flex min-h-10 items-center rounded-xl border border-[#CDB5F7]/30 bg-[#CDB5F7]/10 px-4 py-2 text-sm font-semibold text-[#DCCBFA] hover:bg-[#CDB5F7]/20"
             >
               View Student Submissions
             </Link>
@@ -675,10 +549,22 @@ export default function FacultyAssignmentDetails() {
         </SectionCard>
       </div>
 
-      <div className="mt-6 flex justify-end">
+      <div className="mt-6 flex flex-wrap justify-end gap-3">
+        {editUrl && (
+          <Link
+            to={editUrl}
+            state={{ assignment }}
+            className="inline-flex rounded-xl"
+          >
+            <ActionButton>
+              Edit Assignment
+            </ActionButton>
+          </Link>
+        )}
+
         <Link
           to="/faculty/assignments"
-          className="inline-flex rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+          className="inline-flex rounded-xl"
         >
           <ActionButton variant="secondary">
             Back to Assignments
