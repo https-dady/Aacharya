@@ -6,6 +6,10 @@ import {
   markFacultyAttendanceController,
 } from '../controllers/faculty-attendance.controller.js';
 
+import {
+  listFacultyAttendanceStudentsController,
+} from '../controllers/faculty-attendance-students.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
@@ -53,6 +57,16 @@ const paginationSchema = {
     .max(100)
     .optional(),
 };
+
+const attendanceStudentsSchema = z.object({
+  params: z.object({
+    courseId: objectIdSchema,
+  }).strict(),
+
+  query: emptyObjectSchema,
+
+  body: emptyObjectSchema,
+});
 
 const attendanceListSchema = z.object({
   params: z.object({
@@ -111,6 +125,20 @@ const markAttendanceSchema = z.object({
       .max(200),
   }).strict(),
 });
+
+/**
+ * GET /api/v1/attendance/faculty/:courseId/students
+ *
+ * Lists eligible students for an assigned course.
+ */
+facultyAttendanceRouter.get(
+  '/faculty/:courseId/students',
+  authenticate,
+  authorize(USER_ROLES.FACULTY),
+  authRateLimiter,
+  validate(attendanceStudentsSchema),
+  listFacultyAttendanceStudentsController,
+);
 
 /**
  * GET /api/v1/attendance/faculty/:courseId
