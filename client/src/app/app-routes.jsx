@@ -350,8 +350,18 @@ export const applicationRoutes = [
         element: <QuizDetails />,
       },
       {
+        id: "hod-quiz-details-by-id",
+        path: "quizzes/details/:quizId",
+        element: <QuizDetails />,
+      },
+      {
         id: "hod-quiz-edit",
         path: "quizzes/edit",
+        element: <QuizEdit />,
+      },
+      {
+        id: "hod-quiz-edit-by-id",
+        path: "quizzes/edit/:quizId",
         element: <QuizEdit />,
       },
 
