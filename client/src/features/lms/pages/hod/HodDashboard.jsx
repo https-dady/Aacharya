@@ -17,7 +17,7 @@ const dashboardSections = [
     title: 'Mentors & TG',
     description:
       'Manage mentor responsibilities and batch or section assignments.',
-    path: '/hod/mentors/assignments',
+    path: '/hod/mentor-assignments',
     label: 'Open mentors',
     icon: 'mentors',
     category: 'DEPARTMENT',
@@ -217,6 +217,7 @@ function WorkspaceCard({ section }) {
 
       <span className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-[#CDB5F7]">
         {section.label}
+
         <span
           aria-hidden="true"
           className="transition-transform group-hover:translate-x-1 motion-reduce:transition-none"
