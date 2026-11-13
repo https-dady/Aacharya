@@ -34,13 +34,13 @@ const getFacultyQuizResultDetailsSchema = z.object({
  * GET /api/v1/quiz-results/faculty/:attemptId
  *
  * Access:
- * - Authenticated Faculty only.
- * - Faculty must own the assigned course.
+ * - Authenticated Faculty or Mentor.
+ * - Access must remain limited to their assigned courses.
  */
 facultyQuizResultDetailsRouter.get(
   '/faculty/:attemptId',
   authenticate,
-  authorize(USER_ROLES.FACULTY),
+  authorize(USER_ROLES.FACULTY, USER_ROLES.MENTOR),
   authRateLimiter,
   validate(getFacultyQuizResultDetailsSchema),
   getFacultyQuizResultDetailsController,
