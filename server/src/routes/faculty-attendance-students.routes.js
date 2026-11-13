@@ -35,7 +35,7 @@ const attendanceStudentsSchema = z.object({
 facultyAttendanceStudentsRouter.get(
   '/faculty/:courseId/students',
   authenticate,
-  authorize(USER_ROLES.FACULTY),
+  authorize(USER_ROLES.FACULTY, USER_ROLES.MENTOR),
   authRateLimiter,
   validate(attendanceStudentsSchema),
   listFacultyAttendanceStudentsController,
