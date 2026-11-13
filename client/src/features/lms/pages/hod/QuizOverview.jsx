@@ -49,16 +49,22 @@ function getCourseCode(quiz) {
 }
 
 function getFacultyName(quiz) {
-  if (quiz.faculty && typeof quiz.faculty === "object") {
+  const faculty = quiz.course?.faculty ?? quiz.faculty;
+
+  if (faculty && typeof faculty === "object") {
     return (
-      quiz.faculty.name ||
-      quiz.faculty.fullName ||
-      quiz.faculty.email ||
-      "—"
+      faculty.fullName ||
+      faculty.name ||
+      faculty.email ||
+      "Faculty details unavailable"
     );
   }
 
-  return quiz.facultyName || quiz.faculty || "—";
+  if (typeof faculty === "string" && faculty.trim()) {
+    return "Faculty details unavailable";
+  }
+
+  return "Not assigned";
 }
 
 function getSchedule(quiz) {
@@ -240,25 +246,6 @@ export default function QuizOverview() {
     };
   }, [quizzes, pagination.total]);
 
-  const semesterOptions = useMemo(() => {
-    const semesters = new Set();
-
-    quizzes.forEach((quiz) => {
-      const semester =
-        quiz.semester ??
-        quiz.course?.semester ??
-        quiz.courseSemester;
-
-      if (semester !== undefined && semester !== null && semester !== "") {
-        semesters.add(String(semester));
-      }
-    });
-
-    return [...semesters].sort((first, second) =>
-      first.localeCompare(second, undefined, { numeric: true }),
-    );
-  }, [quizzes]);
-
   function handleSearchChange(event) {
     setSearch(event.target.value);
     setPage(1);
@@ -357,19 +344,19 @@ export default function QuizOverview() {
         <SummaryCard
           label="Upcoming"
           value={loading ? "—" : summary.upcoming}
-          description="Quizzes scheduled for a future date"
+          description="Scheduled for a future date on this page"
         />
 
         <SummaryCard
           label="Published"
           value={loading ? "—" : summary.published}
-          description="Quizzes marked as published"
+          description="Published quizzes on this page"
         />
 
         <SummaryCard
           label="Completed"
           value={loading ? "—" : summary.completed}
-          description="Quizzes whose scheduled window has ended"
+          description="Completed quizzes on this page"
         />
       </div>
 
@@ -384,7 +371,7 @@ export default function QuizOverview() {
             label="Search quizzes"
             value={search}
             onChange={handleSearchChange}
-            placeholder="Search by title, course, faculty..."
+            placeholder="Search by quiz title..."
           />
 
           <div>
@@ -417,20 +404,23 @@ export default function QuizOverview() {
               Semester
             </label>
 
-            <select
+            <input
               id="quizSemesterFilter"
+              type="text"
               value={semesterFilter}
               onChange={handleSemesterChange}
-              className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
-            >
-              <option value="">All Semesters</option>
+              maxLength={30}
+              placeholder="e.g. 3"
+              className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition placeholder:text-[#777986] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+              aria-describedby="quizSemesterHelp"
+            />
 
-              {semesterOptions.map((semester) => (
-                <option key={semester} value={semester}>
-                  Semester {semester}
-                </option>
-              ))}
-            </select>
+            <p
+              id="quizSemesterHelp"
+              className="mt-1.5 text-xs text-[#858590]"
+            >
+              Enter the exact semester value to filter quizzes.
+            </p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -540,7 +530,10 @@ export default function QuizOverview() {
                       Status
                     </th>
 
-                    <th scope="col" className="px-4 py-3 text-right font-medium">
+                    <th
+                      scope="col"
+                      className="px-4 py-3 text-right font-medium"
+                    >
                       Actions
                     </th>
                   </tr>
