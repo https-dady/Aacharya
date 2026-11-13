@@ -99,6 +99,9 @@ function normalizeMentor(mentor, department, batches, sections) {
     fullName: mentor.fullName,
     email: mentor.email ?? null,
     role: mentor.role,
+    roles: Array.isArray(mentor.roles)
+      ? [...new Set([...mentor.roles, mentor.role].filter(Boolean))]
+      : [mentor.role].filter(Boolean),
     status: mentor.status,
 
     department: {
@@ -208,14 +211,19 @@ export async function assignMentorController(req, res, next) {
       const faculty = await User.findOne({
         _id: facultyId,
         department: department._id,
-        role: {
-          $in: [USER_ROLES.FACULTY, USER_ROLES.MENTOR],
-        },
+        $and: [
+          {
+            $or: [
+              { role: { $in: [USER_ROLES.FACULTY, USER_ROLES.MENTOR] } },
+              { roles: { $in: [USER_ROLES.FACULTY, USER_ROLES.MENTOR] } },
+            ],
+          },
+        ],
         status: ACCOUNT_STATUSES.ACTIVE,
       })
         .session(session)
         .select(
-          'institutionalId fullName email role status department assignedBatches assignedSections createdAt updatedAt',
+          'institutionalId fullName email role roles status department assignedBatches assignedSections createdAt updatedAt',
         );
 
       if (!faculty) {
@@ -388,8 +396,16 @@ export async function assignMentorController(req, res, next) {
       /*
        * Synchronize the User document with the submitted selection.
        * This deliberately replaces the arrays rather than appending.
+       *
+       * Preserve the existing primary role. Add Mentor as an
+       * additional role instead of replacing Faculty.
        */
-      faculty.role = USER_ROLES.MENTOR;
+      faculty.roles = [...new Set([
+        ...(Array.isArray(faculty.roles) ? faculty.roles : []),
+        faculty.role,
+        USER_ROLES.MENTOR,
+      ].filter(Boolean))];
+
       faculty.assignedBatches = batches.map((batch) => batch._id);
       faculty.assignedSections = selectedSectionObjectIds;
 
@@ -476,7 +492,10 @@ export async function clearDepartmentMentorAssignmentsController(
 
       const departmentMentors = await User.find({
         department: department._id,
-        role: USER_ROLES.MENTOR,
+        $or: [
+          { role: USER_ROLES.MENTOR },
+          { roles: USER_ROLES.MENTOR },
+        ],
       })
         .session(session)
         .select('_id');
@@ -553,7 +572,10 @@ export async function clearDepartmentMentorAssignmentsController(
           {
             _id: { $in: mentorIds },
             department: department._id,
-            role: USER_ROLES.MENTOR,
+            $or: [
+              { role: USER_ROLES.MENTOR },
+              { roles: USER_ROLES.MENTOR },
+            ],
           },
           {
             $set: {
@@ -616,7 +638,10 @@ export async function listMentorsController(req, res, next) {
 
     const filter = {
       department: department._id,
-      role: USER_ROLES.MENTOR,
+      $or: [
+        { role: USER_ROLES.MENTOR },
+        { roles: USER_ROLES.MENTOR },
+      ],
     };
 
     if (req.query.status) {
@@ -629,10 +654,14 @@ export async function listMentorsController(req, res, next) {
         'i',
       );
 
-      filter.$or = [
-        { institutionalId: searchRegex },
-        { fullName: searchRegex },
-        { email: searchRegex },
+      filter.$and = [
+        {
+          $or: [
+            { institutionalId: searchRegex },
+            { fullName: searchRegex },
+            { email: searchRegex },
+          ],
+        },
       ];
     }
 
@@ -641,7 +670,7 @@ export async function listMentorsController(req, res, next) {
     const [mentors, total] = await Promise.all([
       User.find(filter)
         .select(
-          'institutionalId fullName email role status department assignedBatches assignedSections createdAt updatedAt',
+          'institutionalId fullName email role roles status department assignedBatches assignedSections createdAt updatedAt',
         )
         .sort({
           fullName: 1,
