@@ -496,7 +496,7 @@ export default function FacultyQuizResults() {
           ) : (
             <>
               <div className="overflow-x-auto rounded-xl border border-[#343640]">
-                <table className="w-full min-w-[950px] text-left text-sm">
+                <table className="w-full min-w-[1080px] text-left text-sm">
                   <caption className="sr-only">
                     Submitted Faculty quiz results
                   </caption>
@@ -529,6 +529,10 @@ export default function FacultyQuizResults() {
 
                       <th scope="col" className="px-4 py-3 font-medium">
                         Status
+                      </th>
+
+                      <th scope="col" className="px-4 py-3 text-right font-medium">
+                        Actions
                       </th>
                     </tr>
                   </thead>
@@ -582,6 +586,16 @@ export default function FacultyQuizResults() {
 
                         <td className="px-4 py-4">
                           <StatusBadge status={result.status} />
+                        </td>
+
+                        <td className="px-4 py-4 text-right">
+                          <Link
+                            to={`/faculty/quizzes/results/${encodeURIComponent(result.id)}`}
+                            className="inline-flex min-h-9 items-center justify-center rounded-lg border border-[#CDB5F7]/40 px-3 py-2 text-xs font-semibold text-[#CDB5F7] transition-colors hover:border-[#CDB5F7] hover:bg-[#CDB5F7]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                            aria-label={`View result details for ${result.student?.fullName || 'student'}`}
+                          >
+                            View Details
+                          </Link>
                         </td>
                       </tr>
                     ))}
