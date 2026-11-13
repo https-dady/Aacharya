@@ -20,6 +20,7 @@ import notificationRoutes from './routes/notification.routes.js';
 
 import studentProfileRoutes from './routes/student-profile.routes.js';
 import hodSelfProfileRoutes from './routes/hod-self-profile.routes.js';
+import facultySelfProfileRoutes from './routes/faculty-self-profile.routes.js';
 
 import courseRoutes from './routes/course.routes.js';
 import assignmentRoutes from './routes/assignment.routes.js';
@@ -123,6 +124,9 @@ app.use('/api/v1/provisioning', hodRoutes);
 
 // HOD self-service profile.
 app.use('/api/v1/hod-profile', hodSelfProfileRoutes);
+
+// Faculty self-service profile.
+app.use('/api/v1/faculty-profile', facultySelfProfileRoutes);
 
 // Faculty account provisioning.
 app.use('/api/v1/provisioning/faculty', facultyRoutes);
