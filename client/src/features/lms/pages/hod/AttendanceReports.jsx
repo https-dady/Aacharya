@@ -7,7 +7,7 @@ import FormField from '../../components/FormField.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
-import hodAttendanceService from '../../services/hodAttendanceService.js';
+import attendanceManagementService from '../../services/attendanceManagementService.js';
 
 const PAGE_SIZE = 20;
 
@@ -62,16 +62,8 @@ function getErrorMessage(error) {
   );
 }
 
-export default function AttendanceReports() {
-  const [filters, setFilters] = useState({
-    startDate: '',
-    endDate: '',
-    section: '',
-  });
-
-  const [appliedFilters, setAppliedFilters] = useState(null);
-
-  const [report, setReport] = useState({
+function createEmptyReport(page = 1) {
+  return {
     department: null,
     summary: {
       totalRecords: 0,
@@ -81,71 +73,97 @@ export default function AttendanceReports() {
     },
     records: [],
     pagination: {
-      page: 1,
+      page,
       limit: PAGE_SIZE,
       total: 0,
       totalPages: 0,
     },
+  };
+}
+
+export default function AttendanceReports() {
+  const [filters, setFilters] = useState({
+    startDate: '',
+    endDate: '',
+    section: '',
   });
 
+  const [appliedFilters, setAppliedFilters] = useState(null);
+
+  const [report, setReport] = useState(createEmptyReport());
+
   const [page, setPage] = useState(1);
+
   const [errors, setErrors] = useState({});
+
   const [loading, setLoading] = useState(false);
+
   const [error, setError] = useState('');
-  const [hasGeneratedReport, setHasGeneratedReport] = useState(false);
+
+  const [hasGeneratedReport, setHasGeneratedReport] =
+    useState(false);
+
   const [refreshVersion, setRefreshVersion] = useState(0);
 
-  const loadReport = useCallback(async () => {
-    if (!appliedFilters) {
-      return;
-    }
+  const loadReport = useCallback(
+    async (signal) => {
+      if (!appliedFilters) {
+        return;
+      }
 
-    setLoading(true);
-    setError('');
+      setLoading(true);
+      setError('');
 
-    try {
-      const result = await hodAttendanceService.getAttendanceReports({
-        ...appliedFilters,
-        page,
-        limit: PAGE_SIZE,
-      });
+      try {
+        const result =
+          await attendanceManagementService.getAttendanceReports(
+            {
+              ...appliedFilters,
+              page,
+              limit: PAGE_SIZE,
+            },
+            {
+              signal,
+            },
+          );
 
-      setReport(result);
-      setHasGeneratedReport(true);
-    } catch (requestError) {
-      setError(getErrorMessage(requestError));
-      setReport({
-        department: null,
-        summary: {
-          totalRecords: 0,
-          averageAttendance: 0,
-          belowThreshold: 0,
-          attendanceThreshold: 75,
-        },
-        records: [],
-        pagination: {
-          page,
-          limit: PAGE_SIZE,
-          total: 0,
-          totalPages: 0,
-        },
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [appliedFilters, page]);
+        if (signal.aborted) {
+          return;
+        }
+
+        setReport(result);
+        setHasGeneratedReport(true);
+      } catch (requestError) {
+        if (signal.aborted) {
+          return;
+        }
+
+        setError(getErrorMessage(requestError));
+        setReport(createEmptyReport(page));
+      } finally {
+        if (!signal.aborted) {
+          setLoading(false);
+        }
+      }
+    },
+    [appliedFilters, page],
+  );
 
   useEffect(() => {
-    let isActive = true;
+    if (!appliedFilters) {
+      return undefined;
+    }
+
+    const controller = new AbortController();
 
     Promise.resolve().then(() => {
-      if (isActive && appliedFilters) {
-        loadReport();
+      if (!controller.signal.aborted) {
+        loadReport(controller.signal);
       }
     });
 
     return () => {
-      isActive = false;
+      controller.abort();
     };
   }, [loadReport, appliedFilters, refreshVersion]);
 
@@ -185,6 +203,8 @@ export default function AttendanceReports() {
 
     setPage(1);
     setError('');
+    setHasGeneratedReport(false);
+
     setAppliedFilters({
       startDate: filters.startDate,
       endDate: filters.endDate,
@@ -204,23 +224,7 @@ export default function AttendanceReports() {
     setHasGeneratedReport(false);
     setError('');
     setPage(1);
-
-    setReport({
-      department: null,
-      summary: {
-        totalRecords: 0,
-        averageAttendance: 0,
-        belowThreshold: 0,
-        attendanceThreshold: 75,
-      },
-      records: [],
-      pagination: {
-        page: 1,
-        limit: PAGE_SIZE,
-        total: 0,
-        totalPages: 0,
-      },
-    });
+    setReport(createEmptyReport());
   }
 
   function handleRefresh() {
@@ -243,6 +247,7 @@ export default function AttendanceReports() {
   const summary = report.summary;
   const records = report.records;
   const pagination = report.pagination;
+
   const threshold = summary.attendanceThreshold || 75;
 
   return (
