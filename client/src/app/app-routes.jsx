@@ -79,6 +79,8 @@ import FacultyQuizResults from "../features/lms/pages/faculty/FacultyQuizResults
 import FacultyQuizResultDetails from "../features/lms/pages/faculty/FacultyQuizResultDetails.jsx";
 
 import FacultyResults from "../features/lms/pages/faculty/FacultyResults.jsx";
+import FacultyAssessmentResultDetails from "../features/lms/pages/faculty/FacultyAssessmentResultDetails.jsx";
+
 import FacultyCourseDetails from "../features/lms/pages/faculty/FacultyCourseDetails.jsx";
 import FacultyCourseMaterialDetails from "../features/lms/pages/faculty/FacultyCourseMaterialDetails.jsx";
 import FacultyCourseMaterialUpload from "../features/lms/pages/faculty/FacultyCourseMaterialUpload.jsx";
@@ -483,6 +485,11 @@ export const applicationRoutes = [
         id: "faculty-results",
         path: "results",
         element: <FacultyResults />,
+      },
+      {
+        id: "faculty-assessment-result-details",
+        path: "results/:assessmentId",
+        element: <FacultyAssessmentResultDetails />,
       },
       {
         id: "faculty-course-details",
