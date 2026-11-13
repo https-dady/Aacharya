@@ -33,6 +33,8 @@ import studentQuizResultRoutes from './routes/student-quiz-result.routes.js';
 
 import studentAttendanceRoutes from './routes/student-attendance.routes.js';
 import hodAttendanceRoutes from './routes/hod-attendance.routes.js';
+import facultyAttendanceRoutes from './routes/faculty-attendance.routes.js';
+
 import timetableRoutes from './routes/timetable.routes.js';
 import assessmentRoutes from './routes/assessment.routes.js';
 
@@ -178,8 +180,10 @@ app.use('/api/v1/quiz-results', studentQuizResultRoutes);
 app.use('/api/v1/attendance', studentAttendanceRoutes);
 
 // HOD department-wide attendance overview and reports.
-// Keep the existing student attendance endpoints available.
 app.use('/api/v1/attendance', hodAttendanceRoutes);
+
+// Faculty assigned-course attendance.
+app.use('/api/v1/attendance', facultyAttendanceRoutes);
 
 // HOD timetable management.
 app.use('/api/v1/timetable', timetableRoutes);
