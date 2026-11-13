@@ -8,6 +8,10 @@ import {
   deleteTimetableController,
 } from '../controllers/timetable.controller.js';
 
+import {
+  listMyFacultyTimetableController,
+} from '../controllers/faculty-timetable.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
@@ -74,6 +78,38 @@ const listTimetableSchema = z.object({
     sectionId: objectIdSchema.optional(),
 
     search: z.string().trim().max(100).optional(),
+  }).strict(),
+});
+
+const facultyTimetableSchema = z.object({
+  params: z.object({}).strict(),
+
+  body: z.object({}).strict(),
+
+  query: z.object({
+    page: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100000)
+      .optional(),
+
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional(),
+
+    day: daySchema.optional(),
+
+    status: statusSchema.optional(),
+
+    courseId: objectIdSchema.optional(),
+
+    batchId: objectIdSchema.optional(),
+
+    sectionId: objectIdSchema.optional(),
   }).strict(),
 });
 
@@ -163,21 +199,24 @@ const deleteTimetableSchema = z.object({
 });
 
 /**
- * List timetable entries belonging to the authenticated HOD's
- * department.
+ * GET /api/v1/timetable/my-schedule
  *
+ * Returns timetable entries belonging only to the authenticated
+ * Faculty account.
+ */
+timetableRouter.get(
+  '/my-schedule',
+  authenticate,
+  authorize('FACULTY'),
+  validate(facultyTimetableSchema),
+  listMyFacultyTimetableController,
+);
+
+/**
  * GET /api/v1/timetable/manage
  *
- * Supported filters:
- * - page
- * - limit
- * - day
- * - status
- * - courseId
- * - facultyId
- * - batchId
- * - sectionId
- * - search
+ * Lists timetable entries belonging to the authenticated HOD's
+ * department.
  */
 timetableRouter.get(
   '/manage',
@@ -188,10 +227,6 @@ timetableRouter.get(
 );
 
 /**
- * Create a timetable entry.
- *
- * The controller resolves the department from the authenticated HOD.
- *
  * POST /api/v1/timetable/manage
  */
 timetableRouter.post(
@@ -221,11 +256,6 @@ timetableRouter.post(
 );
 
 /**
- * Update an existing timetable entry.
- *
- * The controller must verify that the entry belongs to the
- * authenticated HOD's department.
- *
  * PATCH /api/v1/timetable/manage/:timetableId
  */
 timetableRouter.patch(
@@ -251,10 +281,6 @@ timetableRouter.patch(
 );
 
 /**
- * Delete an existing timetable entry.
- *
- * The controller must verify department ownership before deletion.
- *
  * DELETE /api/v1/timetable/manage/:timetableId
  */
 timetableRouter.delete(
