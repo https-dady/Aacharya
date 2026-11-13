@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+
 import { Link } from 'react-router-dom';
 
 import api from '../../../auth/services/api/axios.js';
@@ -277,12 +283,6 @@ export default function FacultyAssignments() {
             {error}
           </p>
 
-          <p className="mt-2 text-xs leading-5 text-[#C8A8A8]">
-            If the request returns an authorization or server error, the
-            backend route, authenticated role, and course assignment should
-            be checked before changing the UI.
-          </p>
-
           <div className="mt-3">
             <ActionButton
               variant="secondary"
@@ -296,61 +296,53 @@ export default function FacultyAssignments() {
       )}
 
       <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <section className="rounded-2xl border border-[#343640] bg-[#191A21] p-5">
-          <p className="text-sm text-[#9697A2]">
-            Total Content
-          </p>
+        {[
+          {
+            label: 'Total Content',
+            value: statistics.total,
+            description: 'Assignments and practicals',
+            className: 'border-[#343640]',
+            valueClass: 'text-[#EAEAE6]',
+          },
+          {
+            label: 'Published',
+            value: statistics.published,
+            description: 'Published content',
+            className: 'border-emerald-500/20',
+            valueClass: 'text-emerald-300',
+          },
+          {
+            label: 'Drafts',
+            value: statistics.drafts,
+            description: 'Saved but not published',
+            className: 'border-amber-500/20',
+            valueClass: 'text-amber-200',
+          },
+          {
+            label: 'Practicals',
+            value: statistics.practicals,
+            description: 'Practical coursework',
+            className: 'border-[#CDB5F7]/20',
+            valueClass: 'text-[#CDB5F7]',
+          },
+        ].map((card) => (
+          <section
+            key={card.label}
+            className={`rounded-2xl border bg-[#191A21] p-5 ${card.className}`}
+          >
+            <p className="text-sm text-[#9697A2]">
+              {card.label}
+            </p>
 
-          <p className="mt-3 text-3xl font-semibold text-[#EAEAE6]">
-            {loading ? '—' : statistics.total}
-          </p>
+            <p className={`mt-3 text-3xl font-semibold ${card.valueClass}`}>
+              {loading ? '—' : card.value}
+            </p>
 
-          <p className="mt-2 text-xs leading-5 text-[#777986]">
-            Assignments and practicals
-          </p>
-        </section>
-
-        <section className="rounded-2xl border border-emerald-500/20 bg-[#191A21] p-5">
-          <p className="text-sm text-[#9697A2]">
-            Published
-          </p>
-
-          <p className="mt-3 text-3xl font-semibold text-emerald-300">
-            {loading ? '—' : statistics.published}
-          </p>
-
-          <p className="mt-2 text-xs leading-5 text-[#777986]">
-            Published content
-          </p>
-        </section>
-
-        <section className="rounded-2xl border border-amber-500/20 bg-[#191A21] p-5">
-          <p className="text-sm text-[#9697A2]">
-            Drafts
-          </p>
-
-          <p className="mt-3 text-3xl font-semibold text-amber-200">
-            {loading ? '—' : statistics.drafts}
-          </p>
-
-          <p className="mt-2 text-xs leading-5 text-[#777986]">
-            Saved but not published
-          </p>
-        </section>
-
-        <section className="rounded-2xl border border-[#CDB5F7]/20 bg-[#191A21] p-5">
-          <p className="text-sm text-[#9697A2]">
-            Practicals
-          </p>
-
-          <p className="mt-3 text-3xl font-semibold text-[#CDB5F7]">
-            {loading ? '—' : statistics.practicals}
-          </p>
-
-          <p className="mt-2 text-xs leading-5 text-[#777986]">
-            Practical coursework
-          </p>
-        </section>
+            <p className="mt-2 text-xs leading-5 text-[#777986]">
+              {card.description}
+            </p>
+          </section>
+        ))}
       </div>
 
       <SectionCard
@@ -380,7 +372,7 @@ export default function FacultyAssignments() {
                 id="faculty-content-type"
                 value={selectedType}
                 onChange={(event) => setSelectedType(event.target.value)}
-                className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+                className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
               >
                 {TYPE_FILTERS.map((type) => (
                   <option key={type.value} value={type.value}>
@@ -402,7 +394,7 @@ export default function FacultyAssignments() {
                 id="faculty-content-status"
                 value={selectedStatus}
                 onChange={(event) => setSelectedStatus(event.target.value)}
-                className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+                className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
               >
                 {STATUS_FILTERS.map((status) => (
                   <option key={status.value} value={status.value}>
@@ -414,10 +406,7 @@ export default function FacultyAssignments() {
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#343640] pt-4">
-            <p
-              className="text-sm text-[#9697A2]"
-              aria-live="polite"
-            >
+            <p className="text-sm text-[#9697A2]" aria-live="polite">
               Showing {filteredItems.length} of {items.length} records
             </p>
 
@@ -473,7 +462,7 @@ export default function FacultyAssignments() {
             />
           ) : (
             <div className="overflow-x-auto rounded-xl border border-[#343640]">
-              <table className="w-full min-w-[1000px] text-left text-sm">
+              <table className="w-full min-w-[1100px] text-left text-sm">
                 <caption className="sr-only">
                   Faculty assignment and practical directory
                 </caption>
@@ -506,6 +495,10 @@ export default function FacultyAssignments() {
 
                     <th scope="col" className="px-4 py-3 font-medium">
                       Status
+                    </th>
+
+                    <th scope="col" className="px-4 py-3 font-medium">
+                      Action
                     </th>
                   </tr>
                 </thead>
@@ -584,6 +577,27 @@ export default function FacultyAssignments() {
                               : 'Unknown'}
                           </span>
                         </td>
+
+                        <td className="px-4 py-4">
+                          <Link
+                            to="/faculty/assignments/details"
+                            state={{
+                              assignment: {
+                                ...item,
+                                courseName: item.courseName,
+                                courseCode: item.courseCode,
+                              },
+                            }}
+                            className="inline-flex rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                          >
+                            <ActionButton
+                              variant="secondary"
+                              size="sm"
+                            >
+                              View Details
+                            </ActionButton>
+                          </Link>
+                        </td>
                       </tr>
                     );
                   })}
@@ -628,10 +642,10 @@ export default function FacultyAssignments() {
             </h2>
 
             <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-              Assignments and practicals use the same backend record structure.
-              The selected content type distinguishes the workflow. Editing,
-              publishing, direct file uploads, and student submission review
-              will be connected in their respective steps.
+              Assignments and practicals use the same backend record
+              structure. The selected content type distinguishes the
+              workflow. Submission review is available through the
+              assignment details workspace.
             </p>
           </div>
         </div>
