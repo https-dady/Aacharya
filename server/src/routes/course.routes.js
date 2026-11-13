@@ -245,7 +245,7 @@ courseRouter.get(
 courseRouter.get(
   '/assigned-to-me',
   authenticate,
-  authorize('FACULTY', 'HOD'),
+  authorize('FACULTY', 'MENTOR', 'HOD'),
   authRateLimiter,
   listMyAssignedCoursesController,
 );
