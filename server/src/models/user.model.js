@@ -62,6 +62,12 @@ const userSchema = new Schema(
       select: false,
     },
 
+    /*
+     * Primary account role.
+     *
+     * This field is retained for backward compatibility with
+     * existing authentication, provisioning and business logic.
+     */
     role: {
       type: String,
       required: [true, 'User role is required.'],
@@ -69,6 +75,28 @@ const userSchema = new Schema(
         values: Object.values(USER_ROLES),
         message: 'Invalid user role.',
       },
+    },
+
+    /*
+     * Additional account roles.
+     *
+     * A Faculty member assigned as a Mentor can retain FACULTY
+     * as the primary role and receive MENTOR as an additional role.
+     *
+     * The primary role is automatically included in this array
+     * during document validation.
+     */
+    roles: {
+      type: [
+        {
+          type: String,
+          enum: {
+            values: Object.values(USER_ROLES),
+            message: 'Invalid additional user role.',
+          },
+        },
+      ],
+      default: [],
     },
 
     status: {
@@ -170,6 +198,35 @@ const userSchema = new Schema(
   },
 );
 
+/*
+ * Keep the primary role synchronized with the additional roles.
+ *
+ * This ensures that older account creation flows which only set
+ * `role` continue to produce valid role membership.
+ */
+userSchema.pre('validate', function synchronizeUserRoles() {
+  const currentRoles = Array.isArray(this.roles)
+    ? this.roles
+    : [];
+
+  const normalizedRoles = new Set(
+    currentRoles.filter(
+      (role) => Object.values(USER_ROLES).includes(role),
+    ),
+  );
+
+  if (this.role) {
+    normalizedRoles.add(this.role);
+  }
+
+  this.roles = [...normalizedRoles];
+});
+
+/*
+ * Unique institutional email address.
+ *
+ * Accounts without an email address are excluded from this index.
+ */
 userSchema.index(
   { email: 1 },
   {
@@ -181,6 +238,8 @@ userSchema.index(
 );
 
 userSchema.index({ department: 1, role: 1, status: 1 });
+
+userSchema.index({ department: 1, roles: 1, status: 1 });
 
 userSchema.index({ createdBy: 1 });
 
