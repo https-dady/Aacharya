@@ -70,6 +70,7 @@ const attachmentSchema = z.object({
 const listContentSchema = z.object({
   params: emptyObjectSchema,
   body: emptyObjectSchema,
+
   query: z.object({
     page: z.coerce.number().int().min(1).max(100000).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
@@ -83,6 +84,7 @@ const listContentSchema = z.object({
 const createContentSchema = z.object({
   params: emptyObjectSchema,
   query: emptyObjectSchema,
+
   body: z.object({
     title: z.string().trim().min(2).max(200),
 
@@ -294,7 +296,7 @@ function handleAssignmentUpload(req, res, next) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Faculty submission review and evaluation                                  */
+/* Faculty, Mentor and HOD submission review and evaluation                   */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -303,7 +305,7 @@ function handleAssignmentUpload(req, res, next) {
 assignmentRouter.get(
   '/manage/:assignmentId/submissions',
   authenticate,
-  authorize('FACULTY'),
+  authorize('FACULTY', 'MENTOR', 'HOD'),
   authRateLimiter,
   validate(listSubmissionsSchema),
   listFacultyAssignmentSubmissionsController,
@@ -315,7 +317,7 @@ assignmentRouter.get(
 assignmentRouter.get(
   '/manage/:assignmentId/submissions/:submissionId',
   authenticate,
-  authorize('FACULTY'),
+  authorize('FACULTY', 'MENTOR', 'HOD'),
   authRateLimiter,
   validate(submissionDetailsSchema),
   getFacultyAssignmentSubmissionController,
@@ -327,7 +329,7 @@ assignmentRouter.get(
 assignmentRouter.patch(
   '/manage/:assignmentId/submissions/:submissionId/evaluate',
   authenticate,
-  authorize('FACULTY'),
+  authorize('FACULTY', 'MENTOR', 'HOD'),
   authRateLimiter,
   validate(evaluateSubmissionSchema),
 

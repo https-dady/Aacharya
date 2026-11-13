@@ -12,6 +12,14 @@ import {
 } from '../models/course.model.js';
 
 import {
+  Department,
+} from '../models/department.model.js';
+
+import {
+  hasUserRole,
+} from '../utils/role-access.util.js';
+
+import {
   Assignment,
   ASSIGNMENT_STATUSES,
 } from '../models/assignment.model.js';
@@ -93,7 +101,15 @@ function normalizeSubmission(submission) {
   };
 }
 
-async function getActiveFaculty(userId) {
+/**
+ * Retrieves an authenticated active teaching account.
+ *
+ * Supported roles:
+ * FACULTY, MENTOR and HOD.
+ *
+ * Supports legacy primary-role accounts and multi-role accounts.
+ */
+async function getActiveTeachingUser(userId) {
   if (!mongoose.isValidObjectId(userId)) {
     throw createControllerError(
       'Authentication is required.',
@@ -102,27 +118,92 @@ async function getActiveFaculty(userId) {
     );
   }
 
-  const faculty = await User.findOne({
+  const teachingUser = await User.findOne({
     _id: userId,
-    role: USER_ROLES.FACULTY,
     status: ACCOUNT_STATUSES.ACTIVE,
+
+    $or: [
+      {
+        role: {
+          $in: [
+            USER_ROLES.FACULTY,
+            USER_ROLES.MENTOR,
+            USER_ROLES.HOD,
+          ],
+        },
+      },
+      {
+        roles: {
+          $in: [
+            USER_ROLES.FACULTY,
+            USER_ROLES.MENTOR,
+            USER_ROLES.HOD,
+          ],
+        },
+      },
+    ],
   })
-    .select('_id department role status')
+    .select('_id department role roles status')
     .lean()
     .exec();
 
-  if (!faculty) {
+  if (!teachingUser) {
     throw createControllerError(
-      'The active faculty account could not be found.',
-      'FACULTY_NOT_FOUND',
+      'The active Faculty, Mentor or HOD account could not be found.',
+      'TEACHING_ACCOUNT_NOT_FOUND',
       404,
     );
   }
 
-  return faculty;
+  if (
+    !hasUserRole(
+      teachingUser,
+      USER_ROLES.FACULTY,
+      USER_ROLES.MENTOR,
+      USER_ROLES.HOD,
+    )
+  ) {
+    throw createControllerError(
+      'Your account does not have teaching access.',
+      'TEACHING_ACCESS_FORBIDDEN',
+      403,
+    );
+  }
+
+  if (!teachingUser.department) {
+    throw createControllerError(
+      'Your teaching account is not assigned to a department.',
+      'TEACHING_DEPARTMENT_UNAVAILABLE',
+      403,
+    );
+  }
+
+  if (hasUserRole(teachingUser, USER_ROLES.HOD)) {
+    const department = await Department.findOne({
+      _id: teachingUser.department,
+      hod: teachingUser._id,
+      status: 'ACTIVE',
+    })
+      .select('_id')
+      .lean()
+      .exec();
+
+    if (!department) {
+      throw createControllerError(
+        'Your active HOD department assignment could not be verified.',
+        'HOD_DEPARTMENT_UNAVAILABLE',
+        403,
+      );
+    }
+  }
+
+  return teachingUser;
 }
 
-async function getAssignedCourse(faculty, courseId) {
+/**
+ * Retrieves an assigned active course.
+ */
+async function getAssignedCourse(teachingUser, courseId) {
   if (!mongoose.isValidObjectId(courseId)) {
     throw createControllerError(
       'A valid course ID is required.',
@@ -133,8 +214,8 @@ async function getAssignedCourse(faculty, courseId) {
 
   const course = await Course.findOne({
     _id: courseId,
-    department: faculty.department,
-    faculty: faculty._id,
+    department: teachingUser.department,
+    faculty: teachingUser._id,
     status: COURSE_STATUSES.ACTIVE,
   })
     .select('_id title code department faculty batches sections status')
@@ -143,7 +224,7 @@ async function getAssignedCourse(faculty, courseId) {
 
   if (!course) {
     throw createControllerError(
-      'This course is not assigned to your faculty account.',
+      'This course is not assigned to your teaching account.',
       'COURSE_ACCESS_DENIED',
       403,
     );
@@ -152,7 +233,11 @@ async function getAssignedCourse(faculty, courseId) {
   return course;
 }
 
-async function getFacultyAssignment(faculty, assignmentId) {
+/**
+ * Retrieves an assignment belonging to the authenticated
+ * teaching account through its assigned course.
+ */
+async function getTeachingAssignment(teachingUser, assignmentId) {
   if (!mongoose.isValidObjectId(assignmentId)) {
     throw createControllerError(
       'A valid assignment ID is required.',
@@ -163,7 +248,8 @@ async function getFacultyAssignment(faculty, assignmentId) {
 
   const assignment = await Assignment.findOne({
     _id: assignmentId,
-    department: faculty.department,
+    department: teachingUser.department,
+
     status: {
       $in: [
         ASSIGNMENT_STATUSES.PUBLISHED,
@@ -182,7 +268,10 @@ async function getFacultyAssignment(faculty, assignmentId) {
   if (
     !assignment
     || !assignment.course
-    || normalizeId(assignment.course.faculty) !== String(faculty._id)
+    || normalizeId(assignment.course.faculty)
+      !== String(teachingUser._id)
+    || normalizeId(assignment.course.department)
+      !== String(teachingUser.department)
     || assignment.course.status !== COURSE_STATUSES.ACTIVE
   ) {
     throw createControllerError(
@@ -198,8 +287,7 @@ async function getFacultyAssignment(faculty, assignmentId) {
 /**
  * GET /api/v1/assignments/manage/:assignmentId/submissions
  *
- * List submissions for an assignment owned by the authenticated
- * faculty member through their assigned course.
+ * Lists student submissions for an assigned assignment.
  */
 export async function listFacultyAssignmentSubmissionsController(
   req,
@@ -207,12 +295,12 @@ export async function listFacultyAssignmentSubmissionsController(
   next,
 ) {
   try {
-    const faculty = await getActiveFaculty(
+    const teachingUser = await getActiveTeachingUser(
       req.user?._id ?? req.user?.id,
     );
 
-    const assignment = await getFacultyAssignment(
-      faculty,
+    const assignment = await getTeachingAssignment(
+      teachingUser,
       req.params.assignmentId,
     );
 
@@ -222,7 +310,7 @@ export async function listFacultyAssignmentSubmissionsController(
     const filter = {
       assignment: assignment._id,
       course: assignment.course._id,
-      department: faculty.department,
+      department: teachingUser.department,
     };
 
     if (req.query.status) {
@@ -300,7 +388,7 @@ export async function listFacultyAssignmentSubmissionsController(
 /**
  * GET /api/v1/assignments/manage/:assignmentId/submissions/:submissionId
  *
- * Retrieve one student submission.
+ * Retrieves an individual student submission.
  */
 export async function getFacultyAssignmentSubmissionController(
   req,
@@ -308,12 +396,12 @@ export async function getFacultyAssignmentSubmissionController(
   next,
 ) {
   try {
-    const faculty = await getActiveFaculty(
+    const teachingUser = await getActiveTeachingUser(
       req.user?._id ?? req.user?.id,
     );
 
-    const assignment = await getFacultyAssignment(
-      faculty,
+    const assignment = await getTeachingAssignment(
+      teachingUser,
       req.params.assignmentId,
     );
 
@@ -329,7 +417,7 @@ export async function getFacultyAssignmentSubmissionController(
       _id: req.params.submissionId,
       assignment: assignment._id,
       course: assignment.course._id,
-      department: faculty.department,
+      department: teachingUser.department,
     })
       .populate({
         path: 'student',
@@ -393,7 +481,7 @@ export async function getFacultyAssignmentSubmissionController(
 /**
  * PATCH /api/v1/assignments/manage/:assignmentId/submissions/:submissionId/evaluate
  *
- * Evaluate a student submission.
+ * Evaluates a student submission.
  */
 export async function evaluateFacultyAssignmentSubmissionController(
   req,
@@ -401,12 +489,12 @@ export async function evaluateFacultyAssignmentSubmissionController(
   next,
 ) {
   try {
-    const faculty = await getActiveFaculty(
+    const teachingUser = await getActiveTeachingUser(
       req.user?._id ?? req.user?.id,
     );
 
-    const assignment = await getFacultyAssignment(
-      faculty,
+    const assignment = await getTeachingAssignment(
+      teachingUser,
       req.params.assignmentId,
     );
 
@@ -449,14 +537,14 @@ export async function evaluateFacultyAssignmentSubmissionController(
         _id: req.params.submissionId,
         assignment: assignment._id,
         course: assignment.course._id,
-        department: faculty.department,
+        department: teachingUser.department,
       },
       {
         $set: {
           marksObtained,
           feedback,
           status: SUBMISSION_STATUSES.GRADED,
-          evaluatedBy: faculty._id,
+          evaluatedBy: teachingUser._id,
           evaluatedAt: new Date(),
         },
       },
