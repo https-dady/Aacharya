@@ -11,6 +11,10 @@ import {
   COURSE_STATUSES,
 } from '../models/course.model.js';
 
+import {
+  buildRoleQuery,
+} from '../utils/role-access.util.js';
+
 function createControllerError(statusCode, code, message) {
   const error = new Error(message);
 
@@ -50,16 +54,19 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       401,
       'INVALID_AUTHENTICATED_USER',
-      'A valid authenticated Faculty account is required.',
+      'A valid authenticated Faculty or Mentor account is required.',
     );
   }
 
   const faculty = await User.findOne({
     _id: facultyId,
-    role: USER_ROLES.FACULTY,
+    ...buildRoleQuery(
+      USER_ROLES.FACULTY,
+      USER_ROLES.MENTOR,
+    ),
     status: ACCOUNT_STATUSES.ACTIVE,
   })
-    .select('_id department')
+    .select('_id department role roles')
     .lean()
     .exec();
 
@@ -67,7 +74,7 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       401,
       'ACTIVE_FACULTY_NOT_FOUND',
-      'The active Faculty account could not be found.',
+      'The active Faculty or Mentor account could not be found.',
     );
   }
 
@@ -75,7 +82,7 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       403,
       'FACULTY_DEPARTMENT_REQUIRED',
-      'Your Faculty account is not assigned to a department.',
+      'Your Faculty or Mentor account is not assigned to a department.',
     );
   }
 
