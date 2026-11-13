@@ -597,7 +597,14 @@ function normalizeQuiz(quiz) {
           title: course.title || '',
           code: course.code || '',
           semester: course.semester || '',
-          faculty: normalizeId(course.faculty),
+          faculty:
+            course.faculty && typeof course.faculty === 'object'
+              ? {
+                  id: normalizeId(course.faculty),
+                  fullName: course.faculty.fullName || '',
+                  email: course.faculty.email || '',
+                }
+              : normalizeId(course.faculty),
         }
       : normalizeId(quiz.course),
 
@@ -717,6 +724,10 @@ async function populateQuiz(quizId) {
     .populate({
       path: 'course',
       select: 'title code semester faculty',
+      populate: {
+        path: 'faculty',
+        select: 'fullName email',
+      },
     })
     .populate({
       path: 'batches',
@@ -900,6 +911,10 @@ export async function listDepartmentQuizzesController(
         .populate({
           path: 'course',
           select: 'title code semester faculty',
+          populate: {
+            path: 'faculty',
+            select: 'fullName email',
+          },
         })
         .populate({
           path: 'batches',
