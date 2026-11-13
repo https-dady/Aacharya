@@ -1,77 +1,142 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
-const QUESTION_TYPES = [
-  { value: 'mcq', label: 'Multiple Choice (Single Answer)' },
-  { value: 'multiple-select', label: 'Multiple Choice (Multiple Answers)' },
-  { value: 'true-false', label: 'True / False' },
-  { value: 'short-answer', label: 'Short Answer' },
-];
+import quizManagementService from '../../services/quizManagementService.js';
 
-const INITIAL_QUESTION = {
-  id: '',
-  type: 'mcq',
-  text: '',
-  marks: '1',
-  options: [
-    { id: 'a', text: '' },
-    { id: 'b', text: '' },
-    { id: 'c', text: '' },
-    { id: 'd', text: '' },
-  ],
-  correctAnswer: '',
-  correctAnswers: [],
-  explanation: '',
-};
+const MAX_QUESTIONS = 200;
+const MAX_OPTIONS = 10;
+const MAX_TOTAL_MARKS = 10000;
 
-function createQuestion() {
+function createOption(text = '') {
   return {
-    ...INITIAL_QUESTION,
     id: crypto.randomUUID(),
-    options: INITIAL_QUESTION.options.map((option) => ({
-      ...option,
-    })),
-    correctAnswers: [],
+    text,
   };
 }
 
-function getQuestionTypeLabel(type) {
+function createQuestion(question = {}) {
+  const options = Array.isArray(question.options)
+    ? question.options.map((option) =>
+        createOption(typeof option === 'string' ? option : ''),
+      )
+    : [createOption(), createOption()];
+
+  return {
+    id: crypto.randomUUID(),
+    text: question.question || '',
+    marks: String(question.marks ?? 1),
+    options,
+    correctOptionIndex: String(
+      question.correctOptionIndex ?? 0,
+    ),
+  };
+}
+
+function normalizeQuestion(question) {
+  return {
+    question: question.text.trim(),
+    options: question.options.map((option) =>
+      option.text.trim(),
+    ),
+    correctOptionIndex: Number(question.correctOptionIndex),
+    marks: Number(question.marks),
+  };
+}
+
+function formatError(error) {
   return (
-    QUESTION_TYPES.find((item) => item.value === type)?.label ??
-    'Unknown question type'
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unable to complete the question management request.'
+  );
+}
+
+function QuestionFieldError({ children }) {
+  if (!children) return null;
+
+  return (
+    <p className="mt-2 text-sm text-red-300" role="alert">
+      {children}
+    </p>
   );
 }
 
 export default function FacultyQuizQuestions() {
+  const [searchParams] = useSearchParams();
+
+  const quizId = searchParams.get('quizId');
+
+  const [quiz, setQuiz] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [activeQuestionId, setActiveQuestionId] = useState(null);
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
 
-  const activeQuestion =
-    questions.find((question) => question.id === activeQuestionId) ??
-    null;
+  const activeQuestion = questions.find(
+    (question) => question.id === activeQuestionId,
+  ) || null;
 
-  const totalMarks = questions.reduce((total, question) => {
-    const marks = Number(question.marks);
+  const totalMarks = useMemo(
+    () =>
+      questions.reduce((total, question) => {
+        const marks = Number(question.marks);
 
-    return total + (
-      Number.isFinite(marks) && marks > 0 ? marks : 0
-    );
-  }, 0);
+        return total + (
+          Number.isInteger(marks) && marks > 0 ? marks : 0
+        );
+      }, 0),
+    [questions],
+  );
 
-  function addQuestion() {
-    const question = createQuestion();
+  const loadQuiz = useCallback(async () => {
+    if (!quizId) {
+      setError(
+        'Quiz ID is missing. Open Question Management from a saved quiz.',
+      );
+      setLoading(false);
+      return;
+    }
 
-    setQuestions((current) => [...current, question]);
-    setActiveQuestionId(question.id);
-    setErrors({});
+    setLoading(true);
+    setError('');
     setNotice('');
-  }
+
+    try {
+      const result = await quizManagementService.getQuiz(quizId);
+
+      const loadedQuestions = Array.isArray(result.questions)
+        ? result.questions.map(createQuestion)
+        : [];
+
+      setQuiz(result);
+      setQuestions(loadedQuestions);
+      setActiveQuestionId(
+        loadedQuestions[0]?.id || null,
+      );
+      setErrors({});
+    } catch (loadError) {
+      setQuiz(null);
+      setQuestions([]);
+      setActiveQuestionId(null);
+      setError(formatError(loadError));
+    } finally {
+      setLoading(false);
+    }
+  }, [quizId]);
+
+  useEffect(() => {
+    loadQuiz();
+  }, [loadQuiz]);
 
   function updateQuestion(questionId, updates) {
     setQuestions((current) =>
@@ -84,6 +149,42 @@ export default function FacultyQuizQuestions() {
 
     setErrors({});
     setNotice('');
+    setError('');
+  }
+
+  function addQuestion() {
+    if (questions.length >= MAX_QUESTIONS) {
+      setError(
+        `A quiz cannot contain more than ${MAX_QUESTIONS} questions.`,
+      );
+      return;
+    }
+
+    const question = createQuestion();
+
+    setQuestions((current) => [...current, question]);
+    setActiveQuestionId(question.id);
+    setErrors({});
+    setNotice('');
+    setError('');
+  }
+
+  function removeQuestion(questionId) {
+    const nextQuestions = questions.filter(
+      (question) => question.id !== questionId,
+    );
+
+    setQuestions(nextQuestions);
+
+    if (activeQuestionId === questionId) {
+      setActiveQuestionId(
+        nextQuestions[0]?.id || null,
+      );
+    }
+
+    setErrors({});
+    setNotice('');
+    setError('');
   }
 
   function updateOption(questionId, optionId, text) {
@@ -109,86 +210,51 @@ export default function FacultyQuizQuestions() {
   }
 
   function addOption(questionId) {
-    setQuestions((current) =>
-      current.map((question) => {
-        if (question.id !== questionId) {
-          return question;
-        }
-
-        if (question.options.length >= 6) {
-          return question;
-        }
-
-        const nextId = crypto.randomUUID();
-
-        return {
-          ...question,
-          options: [
-            ...question.options,
-            { id: nextId, text: '' },
-          ],
-        };
-      }),
-    );
-
-    setErrors({});
-    setNotice('');
-  }
-
-  function removeOption(questionId, optionId) {
-    setQuestions((current) =>
-      current.map((question) => {
-        if (question.id !== questionId) {
-          return question;
-        }
-
-        const remainingOptions = question.options.filter(
-          (option) => option.id !== optionId,
-        );
-
-        return {
-          ...question,
-          options: remainingOptions,
-          correctAnswer:
-            question.correctAnswer === optionId
-              ? ''
-              : question.correctAnswer,
-          correctAnswers: question.correctAnswers.filter(
-            (answerId) => answerId !== optionId,
-          ),
-        };
-      }),
-    );
-
-    setErrors({});
-    setNotice('');
-  }
-
-  function handleTypeChange(questionId, type) {
     const question = questions.find(
       (item) => item.id === questionId,
     );
 
-    if (!question) {
+    if (!question || question.options.length >= MAX_OPTIONS) {
       return;
     }
 
     updateQuestion(questionId, {
-      type,
-      correctAnswer: '',
-      correctAnswers: [],
-      options:
-        type === 'true-false'
-          ? [
-              { id: 'true', text: 'True' },
-              { id: 'false', text: 'False' },
-            ]
-          : question.options.length >= 2
-            ? question.options
-            : [
-                { id: crypto.randomUUID(), text: '' },
-                { id: crypto.randomUUID(), text: '' },
-              ],
+      options: [...question.options, createOption()],
+    });
+  }
+
+  function removeOption(questionId, optionId) {
+    const question = questions.find(
+      (item) => item.id === questionId,
+    );
+
+    if (!question || question.options.length <= 2) {
+      return;
+    }
+
+    const removedIndex = question.options.findIndex(
+      (option) => option.id === optionId,
+    );
+
+    const remainingOptions = question.options.filter(
+      (option) => option.id !== optionId,
+    );
+
+    const currentCorrectIndex = Number(
+      question.correctOptionIndex,
+    );
+
+    let nextCorrectIndex = currentCorrectIndex;
+
+    if (removedIndex === currentCorrectIndex) {
+      nextCorrectIndex = 0;
+    } else if (removedIndex < currentCorrectIndex) {
+      nextCorrectIndex -= 1;
+    }
+
+    updateQuestion(questionId, {
+      options: remainingOptions,
+      correctOptionIndex: String(nextCorrectIndex),
     });
   }
 
@@ -196,73 +262,77 @@ export default function FacultyQuizQuestions() {
     const nextErrors = {};
 
     if (questions.length === 0) {
-      nextErrors.general = 'Add at least one question.';
+      nextErrors.general =
+        'Add at least one question before saving.';
     }
+
+    if (questions.length > MAX_QUESTIONS) {
+      nextErrors.general =
+        `A quiz cannot contain more than ${MAX_QUESTIONS} questions.`;
+    }
+
+    let calculatedMarks = 0;
 
     questions.forEach((question, index) => {
       const questionErrors = {};
 
       if (!question.text.trim()) {
         questionErrors.text = 'Question text is required.';
+      } else if (question.text.trim().length > 5000) {
+        questionErrors.text =
+          'Question text cannot exceed 5,000 characters.';
       }
 
       const marks = Number(question.marks);
 
       if (
-        !question.marks ||
-        !Number.isFinite(marks) ||
-        marks <= 0 ||
-        marks > 10000
+        !Number.isInteger(marks) ||
+        marks < 1 ||
+        marks > 1000
       ) {
         questionErrors.marks =
-          'Marks must be greater than 0 and at most 10,000.';
+          'Marks must be a whole number between 1 and 1,000.';
+      } else {
+        calculatedMarks += marks;
       }
 
       if (
-        question.type === 'mcq' ||
-        question.type === 'multiple-select' ||
-        question.type === 'true-false'
+        question.options.length < 2 ||
+        question.options.length > MAX_OPTIONS
       ) {
-        if (question.options.length < 2) {
-          questionErrors.options =
-            'At least two answer options are required.';
-        }
+        questionErrors.options =
+          'Each question must contain between 2 and 10 options.';
+      }
 
-        if (
-          question.options.some((option) => !option.text.trim())
-        ) {
-          questionErrors.options =
-            'Complete all option fields before continuing.';
-        }
+      if (
+        question.options.some(
+          (option) => !option.text.trim(),
+        )
+      ) {
+        questionErrors.options =
+          'Complete every answer option.';
+      }
 
-        if (question.type === 'mcq' && !question.correctAnswer) {
-          questionErrors.answer = 'Select the correct answer.';
-        }
+      if (
+        question.options.some(
+          (option) => option.text.trim().length > 1000,
+        )
+      ) {
+        questionErrors.options =
+          'An answer option cannot exceed 1,000 characters.';
+      }
 
-        if (
-          question.type === 'multiple-select' &&
-          question.correctAnswers.length === 0
-        ) {
-          questionErrors.answer =
-            'Select at least one correct answer.';
-        }
+      const correctIndex = Number(
+        question.correctOptionIndex,
+      );
 
-        const selectedAnswers =
-          question.type === 'multiple-select'
-            ? question.correctAnswers
-            : [question.correctAnswer];
-
-        if (
-          selectedAnswers.some(
-            (answerId) =>
-              !question.options.some(
-                (option) => option.id === answerId,
-              ),
-          )
-        ) {
-          questionErrors.answer =
-            'Choose a valid answer from the available options.';
-        }
+      if (
+        !Number.isInteger(correctIndex) ||
+        correctIndex < 0 ||
+        correctIndex >= question.options.length
+      ) {
+        questionErrors.correctOptionIndex =
+          'Select a valid correct answer.';
       }
 
       if (Object.keys(questionErrors).length > 0) {
@@ -273,13 +343,22 @@ export default function FacultyQuizQuestions() {
       }
     });
 
+    if (calculatedMarks > MAX_TOTAL_MARKS) {
+      nextErrors.general =
+        `Total marks cannot exceed ${MAX_TOTAL_MARKS}.`;
+    }
+
     return nextErrors;
   }
 
-  function handleValidate() {
+  async function handleSave() {
+    if (saving || !quizId) return;
+
     const nextErrors = validateQuestions();
 
     setErrors(nextErrors);
+    setNotice('');
+    setError('');
 
     if (Object.keys(nextErrors).length > 0) {
       const firstInvalidQuestion = questions.find(
@@ -290,52 +369,102 @@ export default function FacultyQuizQuestions() {
         setActiveQuestionId(firstInvalidQuestion.id);
       }
 
-      setNotice('Review the highlighted questions before continuing.');
+      setError(
+        nextErrors.general ||
+        'Review the highlighted questions before saving.',
+      );
+
       return;
     }
 
-    // Validation only. No quiz persistence is simulated.
-    setNotice(
-      'All questions passed client-side validation. They have not been saved because quiz backend integration is not available yet.',
-    );
-  }
+    setSaving(true);
 
-  function removeQuestion(questionId) {
-    setQuestions((current) =>
-      current.filter((question) => question.id !== questionId),
-    );
+    try {
+      const payload = {
+        questions: questions.map(normalizeQuestion),
+      };
 
-    setErrors({});
-    setNotice('');
-
-    if (activeQuestionId === questionId) {
-      setActiveQuestionId(null);
-    }
-  }
-
-  function toggleCorrectAnswer(questionId, optionId, checked) {
-    const question = questions.find(
-      (item) => item.id === questionId,
-    );
-
-    if (!question) {
-      return;
-    }
-
-    const correctAnswers = checked
-      ? [...new Set([...question.correctAnswers, optionId])]
-      : question.correctAnswers.filter(
-          (answerId) => answerId !== optionId,
+      const updatedQuiz =
+        await quizManagementService.updateQuiz(
+          quizId,
+          payload,
         );
 
-    updateQuestion(questionId, { correctAnswers });
+      setQuiz(updatedQuiz);
+
+      const savedQuestions = Array.isArray(updatedQuiz.questions)
+        ? updatedQuiz.questions.map(createQuestion)
+        : [];
+
+      setQuestions(savedQuestions);
+
+      setActiveQuestionId(
+        savedQuestions[0]?.id || null,
+      );
+
+      setErrors({});
+      setNotice('Quiz questions saved successfully.');
+    } catch (saveError) {
+      setError(formatError(saveError));
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function resetQuestions() {
-    setQuestions([]);
-    setActiveQuestionId(null);
-    setErrors({});
-    setNotice('');
+  if (loading) {
+    return (
+      <div className="mx-auto w-full max-w-[1200px]">
+        <PageHeader
+          eyebrow="FACULTY WORKSPACE"
+          title="Quiz Questions"
+          description="Loading quiz and its saved questions."
+        />
+
+        <SectionCard>
+          <div className="flex min-h-48 items-center justify-center">
+            <p className="text-sm text-[#9697A2]">
+              Loading question editor...
+            </p>
+          </div>
+        </SectionCard>
+      </div>
+    );
+  }
+
+  if (!quiz) {
+    return (
+      <div className="mx-auto w-full max-w-[1200px] space-y-6">
+        <PageHeader
+          eyebrow="FACULTY WORKSPACE"
+          title="Quiz Questions"
+          description="Open a saved quiz to manage its questions."
+        />
+
+        <SectionCard>
+          <div className="space-y-4 p-5">
+            <p className="text-sm leading-6 text-red-300" role="alert">
+              {error || 'Quiz details could not be loaded.'}
+            </p>
+
+            <div className="flex flex-wrap gap-3">
+              <ActionButton
+                variant="secondary"
+                onClick={loadQuiz}
+              >
+                Retry
+              </ActionButton>
+
+              <Link
+                to="/faculty/quizzes"
+                className="inline-flex min-h-10 items-center rounded-xl border border-[#454650] px-4 py-2 text-sm text-[#EAEAE6]"
+              >
+                Back to Quizzes
+              </Link>
+            </div>
+          </div>
+        </SectionCard>
+      </div>
+    );
   }
 
   return (
@@ -343,7 +472,7 @@ export default function FacultyQuizQuestions() {
       <PageHeader
         eyebrow="FACULTY WORKSPACE"
         title="Quiz Questions"
-        description="Create questions, configure answer options, set correct answers, and assign marks."
+        description={`Manage the questions for ${quiz.title}.`}
         breadcrumbs={[
           {
             label: 'Faculty Dashboard',
@@ -362,36 +491,56 @@ export default function FacultyQuizQuestions() {
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-[#343640] bg-[#191A21] p-5">
         <div>
           <p className="text-sm font-semibold text-[#EAEAE6]">
-            Question Builder
+            {quiz.title}
           </p>
 
           <p className="mt-1 text-sm text-[#9697A2]">
-            {questions.length} question
-            {questions.length === 1 ? '' : 's'} · {totalMarks} total marks
+            {questions.length} / {MAX_QUESTIONS} questions · {totalMarks} total marks
           </p>
         </div>
 
         <div className="flex flex-wrap gap-3">
           <Link
             to="/faculty/quizzes"
-            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-medium text-[#D0D0D8] transition-colors hover:border-[#CDB5F7]/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+            className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-medium text-[#D0D0D8] transition-colors hover:border-[#CDB5F7]/50"
           >
             Back to Quizzes
           </Link>
 
-          <ActionButton onClick={addQuestion}>
+          <ActionButton
+            onClick={addQuestion}
+            disabled={questions.length >= MAX_QUESTIONS || saving}
+          >
             Add Question
           </ActionButton>
         </div>
       </div>
 
-      {errors.general && (
-        <p
+      {error && (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm leading-6 text-red-300"
+        >
+          {error}
+        </div>
+      )}
+
+      {notice && (
+        <div
+          role="status"
+          className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm leading-6 text-emerald-300"
+        >
+          {notice}
+        </div>
+      )}
+
+      {errors.general && !error && (
+        <div
           role="alert"
           className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300"
         >
           {errors.general}
-        </p>
+        </div>
       )}
 
       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -400,7 +549,7 @@ export default function FacultyQuizQuestions() {
           title="Questions"
           description="Select a question to edit its content."
         >
-          <div className="space-y-2">
+          <div className="space-y-3">
             {questions.length === 0 ? (
               <div className="rounded-xl border border-dashed border-[#454650] p-5 text-center">
                 <p className="text-sm font-medium text-[#EAEAE6]">
@@ -408,7 +557,7 @@ export default function FacultyQuizQuestions() {
                 </p>
 
                 <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-                  Start by creating your first quiz question.
+                  Add your first multiple-choice question.
                 </p>
               </div>
             ) : (
@@ -442,17 +591,12 @@ export default function FacultyQuizQuestions() {
                         </span>
 
                         <span className="text-xs text-[#CDB5F7]">
-                          {question.marks || 0} marks
+                          {question.marks} marks
                         </span>
                       </span>
 
                       <span className="mt-2 block break-words text-sm font-medium text-[#EAEAE6]">
-                        {question.text.trim() ||
-                          'Untitled question'}
-                      </span>
-
-                      <span className="mt-2 block text-xs text-[#9697A2]">
-                        {getQuestionTypeLabel(question.type)}
+                        {question.text.trim() || 'Untitled question'}
                       </span>
                     </button>
 
@@ -464,8 +608,10 @@ export default function FacultyQuizQuestions() {
 
                     <div className="mt-3 border-t border-[#343640] pt-3">
                       <ActionButton
+                        type="button"
                         variant="secondary"
                         size="sm"
+                        disabled={saving}
                         onClick={() =>
                           removeQuestion(question.id)
                         }
@@ -488,7 +634,10 @@ export default function FacultyQuizQuestions() {
               description="Choose a question from the list or add a new one."
             >
               <div className="p-5 sm:p-6">
-                <ActionButton onClick={addQuestion}>
+                <ActionButton
+                  onClick={addQuestion}
+                  disabled={questions.length >= MAX_QUESTIONS}
+                >
                   Create First Question
                 </ActionButton>
               </div>
@@ -498,40 +647,10 @@ export default function FacultyQuizQuestions() {
               eyebrow={`QUESTION ${questions.findIndex(
                 (question) => question.id === activeQuestion.id,
               ) + 1}`}
-              title="Question Editor"
-              description="Configure question text, answer options, scoring, and explanation."
+              title="Multiple Choice Question"
+              description="Configure the question, answer options, correct answer, and marks."
             >
               <div className="space-y-6 p-5 sm:p-6">
-                <div>
-                  <label
-                    htmlFor="quiz-question-type"
-                    className="mb-2 block text-sm font-semibold text-[#EAEAE6]"
-                  >
-                    Question Type
-                  </label>
-
-                  <select
-                    id="quiz-question-type"
-                    value={activeQuestion.type}
-                    onChange={(event) =>
-                      handleTypeChange(
-                        activeQuestion.id,
-                        event.target.value,
-                      )
-                    }
-                    className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-2.5 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
-                  >
-                    {QUESTION_TYPES.map((type) => (
-                      <option
-                        key={type.value}
-                        value={type.value}
-                      >
-                        {type.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
                 <div>
                   <label
                     htmlFor="quiz-question-text"
@@ -555,33 +674,133 @@ export default function FacultyQuizQuestions() {
                     aria-invalid={Boolean(
                       errors[activeQuestion.id]?.text,
                     )}
-                    className="w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-3 text-sm leading-6 text-[#EAEAE6] outline-none transition-colors placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+                    className="w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-3 text-sm leading-6 text-[#EAEAE6] outline-none placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
                     placeholder="Write your question here..."
                   />
 
-                  {errors[activeQuestion.id]?.text && (
-                    <p
-                      role="alert"
-                      className="mt-2 text-sm text-red-300"
-                    >
-                      {errors[activeQuestion.id].text}
-                    </p>
-                  )}
+                  <QuestionFieldError>
+                    {errors[activeQuestion.id]?.text}
+                  </QuestionFieldError>
                 </div>
 
                 <div>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-[#EAEAE6]">
+                        Answer Options
+                      </p>
+
+                      <p className="mt-1 text-xs text-[#9697A2]">
+                        Add between 2 and {MAX_OPTIONS} options.
+                      </p>
+                    </div>
+
+                    <ActionButton
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={
+                        activeQuestion.options.length >= MAX_OPTIONS ||
+                        saving
+                      }
+                      onClick={() =>
+                        addOption(activeQuestion.id)
+                      }
+                    >
+                      Add Option
+                    </ActionButton>
+                  </div>
+
+                  <div className="space-y-3">
+                    {activeQuestion.options.map((option, index) => (
+                      <div
+                        key={option.id}
+                        className="flex flex-wrap items-center gap-3 rounded-xl border border-[#343640] bg-[#191A21] p-3"
+                      >
+                        <label className="flex min-w-0 flex-1 items-center gap-3">
+                          <input
+                            type="radio"
+                            name={`correct-answer-${activeQuestion.id}`}
+                            value={String(index)}
+                            checked={
+                              activeQuestion.correctOptionIndex ===
+                              String(index)
+                            }
+                            onChange={() =>
+                              updateQuestion(activeQuestion.id, {
+                                correctOptionIndex: String(index),
+                              })
+                            }
+                            className="h-4 w-4 accent-[#CDB5F7]"
+                            aria-label={`Mark option ${index + 1} as correct`}
+                          />
+
+                          <span className="w-8 shrink-0 text-xs font-semibold text-[#9697A2]">
+                            {String.fromCharCode(65 + index)}
+                          </span>
+
+                          <input
+                            type="text"
+                            value={option.text}
+                            onChange={(event) =>
+                              updateOption(
+                                activeQuestion.id,
+                                option.id,
+                                event.target.value,
+                              )
+                            }
+                            maxLength={1000}
+                            placeholder={`Enter option ${index + 1}`}
+                            className="min-h-10 min-w-0 flex-1 rounded-lg border border-[#454650] bg-[#1D1F27] px-3 py-2 text-sm text-[#EAEAE6] outline-none placeholder:text-[#858590] focus:border-[#CDB5F7]"
+                          />
+                        </label>
+
+                        <button
+                          type="button"
+                          disabled={
+                            activeQuestion.options.length <= 2 ||
+                            saving
+                          }
+                          onClick={() =>
+                            removeOption(
+                              activeQuestion.id,
+                              option.id,
+                            )
+                          }
+                          className="rounded-lg px-3 py-2 text-xs font-semibold text-red-300 transition-colors hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <QuestionFieldError>
+                    {errors[activeQuestion.id]?.options}
+                  </QuestionFieldError>
+
+                  <QuestionFieldError>
+                    {errors[activeQuestion.id]?.correctOptionIndex}
+                  </QuestionFieldError>
+
+                  <p className="mt-3 text-xs leading-5 text-[#9697A2]">
+                    Select the radio button next to the correct answer.
+                  </p>
+                </div>
+
+                <div className="max-w-xs">
                   <label
                     htmlFor="quiz-question-marks"
                     className="mb-2 block text-sm font-semibold text-[#EAEAE6]"
                   >
-                    Marks
+                    Question Marks
                   </label>
 
                   <input
                     id="quiz-question-marks"
                     type="number"
                     min="1"
-                    max="10000"
+                    max="1000"
                     step="1"
                     value={activeQuestion.marks}
                     onChange={(event) =>
@@ -589,182 +808,12 @@ export default function FacultyQuizQuestions() {
                         marks: event.target.value,
                       })
                     }
-                    className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-2.5 text-sm text-[#EAEAE6] outline-none transition-colors focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20 sm:max-w-[200px]"
+                    className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-2.5 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
                   />
 
-                  {errors[activeQuestion.id]?.marks && (
-                    <p
-                      role="alert"
-                      className="mt-2 text-sm text-red-300"
-                    >
-                      {errors[activeQuestion.id].marks}
-                    </p>
-                  )}
-                </div>
-
-                {activeQuestion.type !== 'short-answer' && (
-                  <div className="space-y-4">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold text-[#EAEAE6]">
-                          Answer Options
-                        </h3>
-
-                        <p className="mt-1 text-xs leading-5 text-[#9697A2]">
-                          {activeQuestion.type === 'multiple-select'
-                            ? 'Select every correct answer.'
-                            : 'Select the correct answer.'}
-                        </p>
-                      </div>
-
-                      {activeQuestion.type !== 'true-false' &&
-                        activeQuestion.options.length < 6 && (
-                          <ActionButton
-                            variant="secondary"
-                            size="sm"
-                            onClick={() =>
-                              addOption(activeQuestion.id)
-                            }
-                          >
-                            Add Option
-                          </ActionButton>
-                        )}
-                    </div>
-
-                    <div className="space-y-3">
-                      {activeQuestion.options.map(
-                        (option, optionIndex) => {
-                          const isMultiple =
-                            activeQuestion.type ===
-                            'multiple-select';
-
-                          const isCorrect = isMultiple
-                            ? activeQuestion.correctAnswers.includes(
-                                option.id,
-                              )
-                            : activeQuestion.correctAnswer ===
-                              option.id;
-
-                          return (
-                            <div
-                              key={option.id}
-                              className="flex items-start gap-3 rounded-xl border border-[#343640] bg-[#191A21] p-3"
-                            >
-                              <input
-                                type={
-                                  isMultiple ? 'checkbox' : 'radio'
-                                }
-                                name={`correct-${activeQuestion.id}`}
-                                checked={isCorrect}
-                                onChange={(event) => {
-                                  if (isMultiple) {
-                                    toggleCorrectAnswer(
-                                      activeQuestion.id,
-                                      option.id,
-                                      event.target.checked,
-                                    );
-                                  } else {
-                                    updateQuestion(
-                                      activeQuestion.id,
-                                      {
-                                        correctAnswer: option.id,
-                                      },
-                                    );
-                                  }
-                                }}
-                                aria-label={`Mark option ${optionIndex + 1} as correct`}
-                                className="mt-3 h-4 w-4 shrink-0 accent-[#CDB5F7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
-                              />
-
-                              <div className="min-w-0 flex-1">
-                                {activeQuestion.type ===
-                                'true-false' ? (
-                                  <p className="py-2 text-sm font-medium text-[#EAEAE6]">
-                                    {option.text}
-                                  </p>
-                                ) : (
-                                  <input
-                                    type="text"
-                                    value={option.text}
-                                    onChange={(event) =>
-                                      updateOption(
-                                        activeQuestion.id,
-                                        option.id,
-                                        event.target.value,
-                                      )
-                                    }
-                                    maxLength={1000}
-                                    aria-label={`Option ${optionIndex + 1}`}
-                                    placeholder={`Enter option ${optionIndex + 1}`}
-                                    className="min-h-10 w-full rounded-lg border border-[#454650] bg-[#1D1F27] px-3 py-2 text-sm text-[#EAEAE6] outline-none transition-colors placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
-                                  />
-                                )}
-                              </div>
-
-                              {activeQuestion.type !==
-                                'true-false' &&
-                                activeQuestion.options.length > 2 && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      removeOption(
-                                        activeQuestion.id,
-                                        option.id,
-                                      )
-                                    }
-                                    className="mt-2 rounded-lg px-2 py-1 text-xs text-[#D58B95] transition-colors hover:bg-red-500/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
-                                    aria-label={`Remove option ${optionIndex + 1}`}
-                                  >
-                                    Remove
-                                  </button>
-                                )}
-                            </div>
-                          );
-                        },
-                      )}
-                    </div>
-
-                    {errors[activeQuestion.id]?.options && (
-                      <p
-                        role="alert"
-                        className="text-sm text-red-300"
-                      >
-                        {errors[activeQuestion.id].options}
-                      </p>
-                    )}
-
-                    {errors[activeQuestion.id]?.answer && (
-                      <p
-                        role="alert"
-                        className="text-sm text-red-300"
-                      >
-                        {errors[activeQuestion.id].answer}
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                <div>
-                  <label
-                    htmlFor="quiz-question-explanation"
-                    className="mb-2 block text-sm font-semibold text-[#EAEAE6]"
-                  >
-                    Explanation (Optional)
-                  </label>
-
-                  <textarea
-                    id="quiz-question-explanation"
-                    value={activeQuestion.explanation}
-                    onChange={(event) =>
-                      updateQuestion(activeQuestion.id, {
-                        explanation: event.target.value,
-                      })
-                    }
-                    rows={3}
-                    maxLength={3000}
-                    className="w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-3 text-sm leading-6 text-[#EAEAE6] outline-none transition-colors placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
-                    placeholder="Explain why the correct answer is right..."
-                  />
+                  <QuestionFieldError>
+                    {errors[activeQuestion.id]?.marks}
+                  </QuestionFieldError>
                 </div>
               </div>
             </SectionCard>
@@ -772,53 +821,20 @@ export default function FacultyQuizQuestions() {
         </div>
       </div>
 
-      {notice && (
-        <div
-          role="status"
-          className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-200"
-        >
-          {notice}
-        </div>
-      )}
-
       <div className="flex flex-col-reverse gap-3 border-t border-[#343640] pt-5 sm:flex-row sm:items-center sm:justify-between">
-        <ActionButton
-          type="button"
-          variant="secondary"
-          onClick={resetQuestions}
+        <Link
+          to="/faculty/quizzes"
+          className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[#454650] px-4 py-2.5 text-sm font-semibold text-[#EAEAE6] transition-colors hover:bg-[#26272B]"
         >
-          Clear All Questions
+          Back to Quizzes
+        </Link>
+
+        <ActionButton
+          onClick={handleSave}
+          disabled={saving || loading || questions.length === 0}
+        >
+          {saving ? 'Saving Questions...' : 'Save Questions'}
         </ActionButton>
-
-        <div className="flex flex-col-reverse gap-3 sm:flex-row">
-          <ActionButton
-            type="button"
-            variant="secondary"
-            onClick={addQuestion}
-          >
-            Add Another Question
-          </ActionButton>
-
-          <ActionButton
-            type="button"
-            onClick={handleValidate}
-          >
-            Validate Questions
-          </ActionButton>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-[#454650] bg-[#191A21] p-4">
-        <p className="text-sm font-medium text-[#E5DF98]">
-          Save integration pending
-        </p>
-
-        <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-          Questions are currently held in component state only. They are
-          not persisted, and refreshing this page will clear them.
-          Saving, editing persisted questions, and publishing a quiz
-          require a confirmed backend API contract.
-        </p>
       </div>
     </div>
   );
