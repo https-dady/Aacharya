@@ -45,23 +45,17 @@ const listFacultyQuizResultsSchema = z.object({
 });
 
 /**
- * List submitted quiz attempts for the authenticated Faculty.
+ * List submitted quiz attempts for the authenticated Faculty or Mentor.
  *
  * GET /api/v1/quiz-results/faculty
  *
  * Access:
- * - Authenticated Faculty only.
- *
- * Query parameters:
- * - page
- * - limit
- * - quizId
- * - search
+ * - Authenticated Faculty or Mentor.
  */
 facultyQuizResultsRouter.get(
   '/faculty',
   authenticate,
-  authorize(USER_ROLES.FACULTY),
+  authorize(USER_ROLES.FACULTY, USER_ROLES.MENTOR),
   authRateLimiter,
   validate(listFacultyQuizResultsSchema),
   listFacultyQuizResultsController,
