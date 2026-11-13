@@ -20,7 +20,6 @@ import notificationRoutes from './routes/notification.routes.js';
 
 import studentProfileRoutes from './routes/student-profile.routes.js';
 import hodSelfProfileRoutes from './routes/hod-self-profile.routes.js';
-import facultySelfProfileRoutes from './routes/faculty-self-profile.routes.js';
 
 import courseRoutes from './routes/course.routes.js';
 import assignmentRoutes from './routes/assignment.routes.js';
@@ -30,15 +29,15 @@ import quizManagementRoutes from './routes/quiz-management.routes.js';
 import studentQuizRoutes from './routes/student-quiz.routes.js';
 import studentQuizAttemptRoutes from './routes/student-quiz-attempt.routes.js';
 import studentQuizResultRoutes from './routes/student-quiz-result.routes.js';
+
 import facultyQuizResultsRoutes from './routes/faculty-quiz-results.routes.js';
 import facultyQuizResultDetailsRoutes from './routes/faculty-quiz-result-details.routes.js';
 
 import studentAttendanceRoutes from './routes/student-attendance.routes.js';
-import facultyAttendanceRoutes from './routes/faculty-attendance.routes.js';
 import hodAttendanceRoutes from './routes/hod-attendance.routes.js';
-
 import timetableRoutes from './routes/timetable.routes.js';
 import assessmentRoutes from './routes/assessment.routes.js';
+import facultyAssessmentResultsRoutes from './routes/faculty-assessment-results.routes.js';
 
 import {
   studentUploadErrorMiddleware,
@@ -129,9 +128,6 @@ app.use('/api/v1/provisioning', hodRoutes);
 // HOD self-service profile.
 app.use('/api/v1/hod-profile', hodSelfProfileRoutes);
 
-// Faculty self-service profile.
-app.use('/api/v1/faculty-profile', facultySelfProfileRoutes);
-
 // Faculty account provisioning.
 app.use('/api/v1/provisioning/faculty', facultyRoutes);
 
@@ -163,30 +159,32 @@ app.use('/api/v1/assignments', assignmentRoutes);
 app.use('/api/v1/assignments', studentAssignmentRoutes);
 
 // Quiz management for HOD and Faculty.
+//
+// IMPORTANT:
+// Mount this before the student quiz routers so that /manage
+// is handled by the management router first.
 app.use('/api/v1/quizzes', quizManagementRoutes);
 
 // Student quizzes.
 app.use('/api/v1/quizzes', studentQuizRoutes);
 
-// Student quiz attempts.
+// Student quiz attempts: start, retrieve, answer, submit.
 app.use('/api/v1/quizzes', studentQuizAttemptRoutes);
 
 // Student quiz results.
 app.use('/api/v1/quiz-results', studentQuizResultRoutes);
 
-// Faculty quiz results listing.
+// Faculty quiz results.
 app.use('/api/v1/quiz-results', facultyQuizResultsRoutes);
 
-// Individual Faculty quiz result details.
+// Faculty individual quiz result details.
 app.use('/api/v1/quiz-results', facultyQuizResultDetailsRoutes);
 
 // Student attendance.
 app.use('/api/v1/attendance', studentAttendanceRoutes);
 
-// Faculty attendance.
-app.use('/api/v1/attendance', facultyAttendanceRoutes);
-
 // HOD department-wide attendance overview and reports.
+// Keep the existing student attendance endpoints available.
 app.use('/api/v1/attendance', hodAttendanceRoutes);
 
 // HOD timetable management.
@@ -194,6 +192,9 @@ app.use('/api/v1/timetable', timetableRoutes);
 
 // HOD assessment and results management.
 app.use('/api/v1/assessments', assessmentRoutes);
+
+// Faculty academic assessment results.
+app.use('/api/v1/assessments', facultyAssessmentResultsRoutes);
 
 // Error handling.
 app.use(studentUploadErrorMiddleware);
