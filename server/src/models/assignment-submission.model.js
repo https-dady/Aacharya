@@ -14,29 +14,20 @@ const submissionAttachmentSchema = new Schema(
       type: String,
       required: [true, 'Attachment name is required.'],
       trim: true,
-      maxlength: [
-        255,
-        'Attachment name cannot exceed 255 characters.',
-      ],
+      maxlength: 255,
     },
 
     url: {
       type: String,
       required: [true, 'Attachment URL is required.'],
       trim: true,
-      maxlength: [
-        2048,
-        'Attachment URL cannot exceed 2048 characters.',
-      ],
+      maxlength: 2048,
     },
 
     mimeType: {
       type: String,
       trim: true,
-      maxlength: [
-        150,
-        'Attachment MIME type cannot exceed 150 characters.',
-      ],
+      maxlength: 150,
       default: '',
     },
 
@@ -49,16 +40,16 @@ const submissionAttachmentSchema = new Schema(
     publicId: {
       type: String,
       trim: true,
-      maxlength: [
-        512,
-        'Cloudinary public ID cannot exceed 512 characters.',
-      ],
+      maxlength: 512,
       default: undefined,
     },
 
     resourceType: {
       type: String,
-      enum: ['image', 'raw', 'video'],
+      enum: {
+        values: ['image', 'raw', 'video'],
+        message: 'Invalid attachment resource type.',
+      },
       default: undefined,
     },
   },
@@ -74,7 +65,7 @@ const assignmentSubmissionSchema = new Schema(
     assignment: {
       type: Schema.Types.ObjectId,
       ref: 'Assignment',
-      required: [true, 'Assignment reference is required.'],
+      required: true,
       immutable: true,
       index: true,
     },
@@ -82,7 +73,7 @@ const assignmentSubmissionSchema = new Schema(
     student: {
       type: Schema.Types.ObjectId,
       ref: 'User',
-      required: [true, 'Student reference is required.'],
+      required: true,
       immutable: true,
       index: true,
     },
@@ -90,7 +81,7 @@ const assignmentSubmissionSchema = new Schema(
     course: {
       type: Schema.Types.ObjectId,
       ref: 'Course',
-      required: [true, 'Course reference is required.'],
+      required: true,
       immutable: true,
       index: true,
     },
@@ -98,7 +89,7 @@ const assignmentSubmissionSchema = new Schema(
     department: {
       type: Schema.Types.ObjectId,
       ref: 'Department',
-      required: [true, 'Department reference is required.'],
+      required: true,
       immutable: true,
       index: true,
     },
@@ -126,7 +117,7 @@ const assignmentSubmissionSchema = new Schema(
 
     submittedAt: {
       type: Date,
-      required: [true, 'Submission date is required.'],
+      required: true,
       default: Date.now,
     },
 
@@ -136,7 +127,6 @@ const assignmentSubmissionSchema = new Schema(
         values: Object.values(SUBMISSION_STATUSES),
         message: 'Invalid submission status.',
       },
-      enum: Object.values(SUBMISSION_STATUSES),
       default: SUBMISSION_STATUSES.SUBMITTED,
       required: true,
       index: true,
@@ -206,5 +196,5 @@ assignmentSubmissionSchema.index({
 });
 
 export const AssignmentSubmission =
-  models.AssignmentSubmission ||
-  model('AssignmentSubmission', assignmentSubmissionSchema);
+  models.AssignmentSubmission
+  || model('AssignmentSubmission', assignmentSubmissionSchema);
