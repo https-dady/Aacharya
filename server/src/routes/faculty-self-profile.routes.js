@@ -33,19 +33,19 @@ const updateFacultyProfileSchema = z.object({
   query: emptyObjectSchema,
 });
 
-// Retrieve the authenticated faculty member's own profile.
+// Retrieve the authenticated faculty member's or mentor's own profile.
 facultySelfProfileRouter.get(
   '/me',
   authenticate,
-  authorize('FACULTY'),
+  authorize('FACULTY', 'MENTOR'),
   getFacultySelfProfileController,
 );
 
-// Update permitted fields on the authenticated faculty profile.
+// Update permitted fields on the authenticated faculty or mentor profile.
 facultySelfProfileRouter.patch(
   '/me',
   authenticate,
-  authorize('FACULTY'),
+  authorize('FACULTY', 'MENTOR'),
   authRateLimiter,
   validate(updateFacultyProfileSchema),
   auditEvent({
