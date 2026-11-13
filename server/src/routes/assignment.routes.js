@@ -7,6 +7,12 @@ import {
   updateDepartmentContentController,
 } from '../controllers/assignment.controller.js';
 
+import {
+  listFacultyAssignmentSubmissionsController,
+  getFacultyAssignmentSubmissionController,
+  evaluateFacultyAssignmentSubmissionController,
+} from '../controllers/faculty-assignment-submission.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
@@ -21,6 +27,10 @@ import {
   ASSIGNMENT_CONTENT_TYPES,
   ASSIGNMENT_STATUSES,
 } from '../models/assignment.model.js';
+
+import {
+  SUBMISSION_STATUSES,
+} from '../models/assignment-submission.model.js';
 
 const assignmentRouter = Router();
 
@@ -40,6 +50,10 @@ const contentTypeSchema = z.enum(
 
 const assignmentStatusSchema = z.enum(
   Object.values(ASSIGNMENT_STATUSES),
+);
+
+const submissionStatusSchema = z.enum(
+  Object.values(SUBMISSION_STATUSES),
 );
 
 const emptyObjectSchema = z.object({}).strict();
@@ -126,13 +140,46 @@ const updateContentSchema = z.object({
   }).strict(),
 });
 
+const listSubmissionsSchema = z.object({
+  params: z.object({
+    assignmentId: objectIdSchema,
+  }).strict(),
+
+  body: emptyObjectSchema,
+
+  query: z.object({
+    page: z.coerce.number().int().min(1).max(100000).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    status: submissionStatusSchema.optional(),
+  }).strict(),
+});
+
+const submissionDetailsSchema = z.object({
+  params: z.object({
+    assignmentId: objectIdSchema,
+    submissionId: objectIdSchema,
+  }).strict(),
+
+  body: emptyObjectSchema,
+  query: emptyObjectSchema,
+});
+
+const evaluateSubmissionSchema = z.object({
+  params: z.object({
+    assignmentId: objectIdSchema,
+    submissionId: objectIdSchema,
+  }).strict(),
+
+  query: emptyObjectSchema,
+
+  body: z.object({
+    marksObtained: z.coerce.number().finite().min(0).max(10000),
+    feedback: z.string().trim().max(10000).optional(),
+  }).strict(),
+});
+
 /**
  * Parse JSON-encoded array fields sent through FormData.
- *
- * The frontend sends arrays as JSON strings because FormData
- * cannot directly transport JavaScript arrays or objects.
- *
- * This middleware does not modify uploaded files in req.files.
  */
 function parseMultipartArrays(req, res, next) {
   try {
@@ -246,10 +293,64 @@ function handleAssignmentUpload(req, res, next) {
   });
 }
 
+/* -------------------------------------------------------------------------- */
+/* Faculty submission review and evaluation                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * GET /api/v1/assignments/manage/:assignmentId/submissions
+ */
+assignmentRouter.get(
+  '/manage/:assignmentId/submissions',
+  authenticate,
+  authorize('FACULTY'),
+  authRateLimiter,
+  validate(listSubmissionsSchema),
+  listFacultyAssignmentSubmissionsController,
+);
+
+/**
+ * GET /api/v1/assignments/manage/:assignmentId/submissions/:submissionId
+ */
+assignmentRouter.get(
+  '/manage/:assignmentId/submissions/:submissionId',
+  authenticate,
+  authorize('FACULTY'),
+  authRateLimiter,
+  validate(submissionDetailsSchema),
+  getFacultyAssignmentSubmissionController,
+);
+
+/**
+ * PATCH /api/v1/assignments/manage/:assignmentId/submissions/:submissionId/evaluate
+ */
+assignmentRouter.patch(
+  '/manage/:assignmentId/submissions/:submissionId/evaluate',
+  authenticate,
+  authorize('FACULTY'),
+  authRateLimiter,
+  validate(evaluateSubmissionSchema),
+
+  auditEvent({
+    action: 'ASSIGNMENT_SUBMISSION_EVALUATE',
+    resourceType: 'AssignmentSubmission',
+
+    getMetadata: (req) => ({
+      assignmentId: req.params.assignmentId,
+      submissionId: req.params.submissionId,
+      marksObtained: req.body.marksObtained,
+    }),
+  }),
+
+  evaluateFacultyAssignmentSubmissionController,
+);
+
+/* -------------------------------------------------------------------------- */
+/* Existing shared assignment management                                     */
+/* -------------------------------------------------------------------------- */
+
 /**
  * GET /api/v1/assignments/manage
- *
- * List assignments and practicals visible to the authenticated user.
  */
 assignmentRouter.get(
   '/manage',
@@ -262,12 +363,6 @@ assignmentRouter.get(
 
 /**
  * POST /api/v1/assignments/manage
- *
- * Create an assignment or practical.
- *
- * Supports:
- * - JSON requests containing attachment URLs.
- * - multipart/form-data requests containing attachment URLs and files.
  */
 assignmentRouter.post(
   '/manage',
@@ -299,12 +394,6 @@ assignmentRouter.post(
 
 /**
  * PATCH /api/v1/assignments/manage/:assignmentId
- *
- * Update an assignment or practical.
- *
- * Existing attachments are retained only when included in the
- * submitted attachments array. Removed attachments are handled
- * by the controller after the database update succeeds.
  */
 assignmentRouter.patch(
   '/manage/:assignmentId',
