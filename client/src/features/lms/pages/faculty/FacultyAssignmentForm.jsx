@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import api from '../../../auth/services/api/axios.js';
@@ -6,6 +6,8 @@ import api from '../../../auth/services/api/axios.js';
 import ActionButton from '../../components/ActionButton.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
+
+import assignmentManagementService from '../../services/assignmentManagementService.js';
 
 const INITIAL_FORM = {
   contentType: 'ASSIGNMENT',
@@ -18,6 +20,20 @@ const INITIAL_FORM = {
   dueDate: '',
   totalMarks: '100',
 };
+
+const MAX_FILES = 5;
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+const ALLOWED_EXTENSIONS = [
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.ppt',
+  '.pptx',
+  '.xls',
+  '.xlsx',
+  '.txt',
+];
 
 const INPUT_CLASS = [
   'w-full rounded-xl border border-[#454650] bg-[#1D1F27]',
@@ -33,9 +49,10 @@ const LABEL_CLASS =
 
 function getErrorMessage(error, fallback) {
   return (
-    error?.response?.data?.message
-    || error?.message
-    || fallback
+    error?.response?.data?.message ||
+    error?.response?.data?.error?.message ||
+    error?.message ||
+    fallback
   );
 }
 
@@ -56,11 +73,34 @@ function formatDate(value) {
   }).format(date);
 }
 
+function getFileExtension(fileName) {
+  const lastDot = fileName.lastIndexOf('.');
+
+  return lastDot >= 0
+    ? fileName.slice(lastDot).toLowerCase()
+    : '';
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 export default function FacultyAssignmentForm() {
   const navigate = useNavigate();
+  const fileInputRef = useRef(null);
 
   const [form, setForm] = useState(INITIAL_FORM);
   const [courses, setCourses] = useState([]);
+  const [files, setFiles] = useState([]);
+
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState('');
   const [noticeType, setNoticeType] = useState('error');
@@ -73,7 +113,6 @@ export default function FacultyAssignmentForm() {
 
     async function loadAssignedCourses() {
       setIsLoadingCourses(true);
-      setNotice('');
 
       try {
         const response = await api.get(
@@ -89,26 +128,22 @@ export default function FacultyAssignmentForm() {
           );
         }
 
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setCourses(assignedCourses);
         }
-
-        setCourses(assignedCourses);
       } catch (error) {
-        if (cancelled) {
-          return;
+        if (!cancelled) {
+          setCourses([]);
+
+          setNotice(
+            getErrorMessage(
+              error,
+              'Unable to load your assigned courses.',
+            ),
+          );
+
+          setNoticeType('error');
         }
-
-        setCourses([]);
-
-        setNotice(
-          getErrorMessage(
-            error,
-            'Unable to load your assigned courses.',
-          ),
-        );
-
-        setNoticeType('error');
       } finally {
         if (!cancelled) {
           setIsLoadingCourses(false);
@@ -200,6 +235,87 @@ export default function FacultyAssignmentForm() {
     setNotice('');
   }
 
+  function validateFiles(selectedFiles) {
+    const nextErrors = [];
+
+    if (selectedFiles.length > MAX_FILES) {
+      nextErrors.push(
+        `You can upload a maximum of ${MAX_FILES} files.`,
+      );
+    }
+
+    selectedFiles.forEach((file) => {
+      if (file.size === 0) {
+        nextErrors.push(`${file.name} is empty.`);
+      } else if (file.size > MAX_FILE_SIZE) {
+        nextErrors.push(
+          `${file.name} exceeds the 10 MB file size limit.`,
+        );
+      }
+
+      const extension = getFileExtension(file.name);
+
+      if (!ALLOWED_EXTENSIONS.includes(extension)) {
+        nextErrors.push(
+          `${file.name} has an unsupported file format.`,
+        );
+      }
+    });
+
+    return nextErrors;
+  }
+
+  function handleFileSelection(event) {
+    const selectedFiles = Array.from(event.target.files || []);
+
+    const combinedFiles = [
+      ...files,
+      ...selectedFiles,
+    ];
+
+    const uniqueFiles = combinedFiles.filter(
+      (file, index, collection) => (
+        collection.findIndex(
+          (item) => (
+            item.name === file.name &&
+            item.size === file.size &&
+            item.lastModified === file.lastModified
+          ),
+        ) === index
+      ),
+    );
+
+    const fileErrors = validateFiles(uniqueFiles);
+
+    if (fileErrors.length > 0) {
+      setErrors((current) => ({
+        ...current,
+        attachments: fileErrors.join(' '),
+      }));
+    } else {
+      setFiles(uniqueFiles);
+
+      setErrors((current) => ({
+        ...current,
+        attachments: '',
+      }));
+    }
+
+    event.target.value = '';
+    setNotice('');
+  }
+
+  function removeFile(indexToRemove) {
+    setFiles((current) => (
+      current.filter((_, index) => index !== indexToRemove)
+    ));
+
+    setErrors((current) => ({
+      ...current,
+      attachments: '',
+    }));
+  }
+
   function validateForm() {
     const nextErrors = {};
 
@@ -213,8 +329,12 @@ export default function FacultyAssignmentForm() {
 
     if (!form.title.trim()) {
       nextErrors.title = 'Title is required.';
-    } else if (form.title.trim().length > 150) {
-      nextErrors.title = 'Title cannot exceed 150 characters.';
+    } else if (
+      form.title.trim().length < 2 ||
+      form.title.trim().length > 200
+    ) {
+      nextErrors.title =
+        'Title must contain between 2 and 200 characters.';
     }
 
     if (!form.courseId) {
@@ -225,8 +345,8 @@ export default function FacultyAssignmentForm() {
     }
 
     if (
-      form.batchIds.length === 0
-      && form.sectionIds.length === 0
+      form.batchIds.length === 0 &&
+      form.sectionIds.length === 0
     ) {
       nextErrors.batchIds =
         'Select at least one batch or section.';
@@ -266,13 +386,19 @@ export default function FacultyAssignmentForm() {
       const marks = Number(form.totalMarks);
 
       if (
-        !Number.isFinite(marks)
-        || marks <= 0
-        || marks > 10000
+        !Number.isFinite(marks) ||
+        marks < 1 ||
+        marks > 10000
       ) {
         nextErrors.totalMarks =
           'Enter marks between 1 and 10,000.';
       }
+    }
+
+    const fileErrors = validateFiles(files);
+
+    if (fileErrors.length > 0) {
+      nextErrors.attachments = fileErrors.join(' ');
     }
 
     return nextErrors;
@@ -295,9 +421,9 @@ export default function FacultyAssignmentForm() {
     }
 
     /*
-     * The current Assignment model stores one description field.
-     * Keep the instructions with that description instead of sending
-     * unsupported fields that the backend schema does not define.
+     * The existing Assignment model stores one description field.
+     * Instructions remain part of that description to preserve
+     * the existing backend schema.
      */
     const combinedDescription = [
       form.description.trim(),
@@ -321,18 +447,27 @@ export default function FacultyAssignmentForm() {
     setIsSubmitting(true);
 
     try {
-      await api.post(
-        '/v1/assignments/manage',
-        payload,
-      );
+      const result =
+        await assignmentManagementService.createAssignment(
+          payload,
+          files,
+        );
 
       setNoticeType('success');
       setNotice(
         `${form.contentType === 'PRACTICAL' ? 'Practical' : 'Assignment'} saved successfully as a draft.`,
       );
 
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+
       window.setTimeout(() => {
-        navigate('/faculty/assignments');
+        navigate('/faculty/assignments', {
+          state: {
+            createdAssignmentId: result.assignment.id,
+          },
+        });
       }, 700);
     } catch (error) {
       setNoticeType('error');
@@ -350,9 +485,14 @@ export default function FacultyAssignmentForm() {
 
   function handleReset() {
     setForm(INITIAL_FORM);
+    setFiles([]);
     setErrors({});
     setNotice('');
     setNoticeType('error');
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
   }
 
   return (
@@ -388,7 +528,7 @@ export default function FacultyAssignmentForm() {
 
           <p className="mt-1 text-sm leading-5 text-[#9697A2]">
             Select an assigned course, choose its target groups,
-            and configure the deadline.
+            configure the deadline and attach supporting files.
           </p>
         </div>
 
@@ -450,7 +590,7 @@ export default function FacultyAssignmentForm() {
                   name="title"
                   value={form.title}
                   onChange={handleChange}
-                  maxLength={150}
+                  maxLength={200}
                   required
                   placeholder={
                     form.contentType === 'PRACTICAL'
@@ -759,6 +899,79 @@ export default function FacultyAssignmentForm() {
 
           <SectionCard
             eyebrow="STEP 04"
+            title="Supporting Attachments"
+            description="Attach reference documents, worksheets, or practical instructions for students."
+          >
+            <div className="space-y-4 p-5 sm:p-6">
+              <div>
+                <label
+                  htmlFor="assignment-attachments"
+                  className={LABEL_CLASS}
+                >
+                  Upload Files
+                </label>
+
+                <input
+                  ref={fileInputRef}
+                  id="assignment-attachments"
+                  type="file"
+                  multiple
+                  accept={ALLOWED_EXTENSIONS.join(',')}
+                  onChange={handleFileSelection}
+                  disabled={isSubmitting}
+                  className="block w-full cursor-pointer rounded-xl border border-dashed border-[#62636E] bg-[#1D1F27] p-4 text-sm text-[#D0D0D8] file:mr-4 file:rounded-lg file:border-0 file:bg-[#CDB5F7] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-[#17151D] hover:border-[#CDB5F7]/70"
+                />
+
+                <p className="mt-2 text-xs leading-5 text-[#9697A2]">
+                  Maximum {MAX_FILES} files, 10 MB each. Supported:
+                  PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX and TXT.
+                </p>
+
+                {errors.attachments && (
+                  <p className="mt-2 text-sm text-[#D58B95]">
+                    {errors.attachments}
+                  </p>
+                )}
+              </div>
+
+              {files.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[#9697A2]">
+                    Selected Files ({files.length}/{MAX_FILES})
+                  </p>
+
+                  {files.map((file, index) => (
+                    <div
+                      key={`${file.name}-${file.lastModified}-${index}`}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#454650] bg-[#191A21] p-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-[#EAEAE6]">
+                          {file.name}
+                        </p>
+
+                        <p className="mt-1 text-xs text-[#9697A2]">
+                          {formatFileSize(file.size)}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeFile(index)}
+                        disabled={isSubmitting}
+                        className="rounded-lg border border-rose-500/30 px-3 py-2 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/10 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            eyebrow="STEP 05"
             title="Deadline and Evaluation"
             description="Configure when students must submit their work and the maximum marks."
           >
@@ -835,9 +1048,8 @@ export default function FacultyAssignmentForm() {
             </p>
 
             <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-              This form saves the item as a draft. File uploads and
-              allowed submission-file restrictions are not included
-              in this request; those require backend support.
+              New assignments and practicals are saved as drafts.
+              They will not be published to students automatically.
             </p>
           </div>
 
@@ -877,9 +1089,9 @@ export default function FacultyAssignmentForm() {
               <ActionButton
                 type="submit"
                 disabled={
-                  isSubmitting
-                  || isLoadingCourses
-                  || courses.length === 0
+                  isSubmitting ||
+                  isLoadingCourses ||
+                  courses.length === 0
                 }
               >
                 {isSubmitting
