@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
@@ -249,17 +249,66 @@ function QuestionCard({
 export default function QuizEdit() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { quizId: routeQuizId } = useParams();
 
-  const quiz = location.state?.quiz;
-  const quizId = getId(quiz);
+  const routeQuiz = location.state?.quiz ?? null;
+  const quizId = routeQuizId || getId(routeQuiz);
 
-  const [form, setForm] = useState(
-    () => quiz ? normalizeQuiz(quiz) : null,
+  const [quiz, setQuiz] = useState(
+    () => routeQuizId ? null : routeQuiz,
   );
 
+  const [form, setForm] = useState(
+    () => routeQuizId || !routeQuiz ? null : normalizeQuiz(routeQuiz),
+  );
+
+  const [loading, setLoading] = useState(Boolean(quizId));
   const [errors, setErrors] = useState({});
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!quizId) {
+      setQuiz(routeQuiz);
+      setForm(routeQuiz ? normalizeQuiz(routeQuiz) : null);
+      setLoading(false);
+      setError('');
+      return undefined;
+    }
+
+    let isActive = true;
+
+    async function loadQuiz() {
+      setLoading(true);
+      setError('');
+
+      try {
+        const result = await quizManagementService.getQuiz(quizId);
+
+        if (isActive) {
+          setQuiz(result);
+          setForm(normalizeQuiz(result));
+          setErrors({});
+        }
+      } catch (requestError) {
+        if (isActive) {
+          setQuiz(null);
+          setForm(null);
+          setError(getErrorMessage(requestError));
+        }
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadQuiz();
+
+    return () => {
+      isActive = false;
+    };
+  }, [quizId, routeQuiz]);
 
   const originalQuestions = normalizeQuestions(quiz?.questions);
 
@@ -393,6 +442,8 @@ export default function QuizEdit() {
         };
       }),
     }));
+
+    setError('');
   }
 
   function updateCorrectOption(questionIndex, optionIndex) {
@@ -589,6 +640,33 @@ export default function QuizEdit() {
     }
   }
 
+  if (loading) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          eyebrow="ACADEMIC MANAGEMENT"
+          title="Loading Quiz"
+          description="Retrieving the latest quiz information."
+          breadcrumbs={[
+            { label: 'HOD Dashboard', to: '/hod/dashboard' },
+            { label: 'Quizzes', to: '/hod/quizzes' },
+            { label: 'Edit' },
+          ]}
+        />
+
+        <SectionCard>
+          <div className="flex items-center justify-center gap-3 px-5 py-10">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-[#CDB5F7] border-t-transparent" />
+
+            <p className="text-sm text-[#A7A7B0]">
+              Loading quiz information...
+            </p>
+          </div>
+        </SectionCard>
+      </div>
+    );
+  }
+
   if (!quiz || !form) {
     return (
       <div className="space-y-6">
@@ -606,12 +684,11 @@ export default function QuizEdit() {
         <SectionCard>
           <div className="px-5 py-10 text-center">
             <h2 className="text-lg font-semibold text-[#EAEAE6]">
-              Quiz not selected
+              {error ? 'Unable to load quiz' : 'Quiz not selected'}
             </h2>
 
             <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-[#A7A7B0]">
-              Open this page from a selected quiz record. No quiz information
-              has been supplied.
+              {error || 'No quiz ID or quiz record was supplied. Return to the quiz list and select a quiz.'}
             </p>
 
             <div className="mt-6">
@@ -768,6 +845,7 @@ export default function QuizEdit() {
                 className="rounded-xl border border-[#454650] bg-[#191A21] px-4 py-3 text-sm font-semibold text-[#CDB5F7]"
               >
                 {totalMarks}
+
                 <span className="ml-2 font-normal text-[#858590]">
                   Calculated from question marks
                 </span>
