@@ -13,6 +13,10 @@ import {
 
 import { Department } from '../models/department.model.js';
 
+import {
+  hasUserRole,
+} from '../utils/role-access.util.js';
+
 function createControllerError(statusCode, code, message) {
   const error = new Error(message);
 
@@ -98,7 +102,7 @@ export async function listMyAssignedCoursesController(
       _id: userId,
       status: ACCOUNT_STATUSES.ACTIVE,
     })
-      .select('_id role department status')
+      .select('_id role roles department status')
       .lean()
       .exec();
 
@@ -110,16 +114,18 @@ export async function listMyAssignedCoursesController(
       );
     }
 
-    if (
-      ![
-        USER_ROLES.FACULTY,
-        USER_ROLES.HOD,
-      ].includes(user.role)
-    ) {
+    const canAccessFacultyWorkspace = hasUserRole(
+      user,
+      USER_ROLES.FACULTY,
+      USER_ROLES.MENTOR,
+      USER_ROLES.HOD,
+    );
+
+    if (!canAccessFacultyWorkspace) {
       throw createControllerError(
         403,
         'ASSIGNED_COURSES_FORBIDDEN',
-        'Only Faculty and HOD accounts can access their assigned courses.',
+        'Only Faculty, Mentor and HOD accounts can access their assigned courses.',
       );
     }
 
