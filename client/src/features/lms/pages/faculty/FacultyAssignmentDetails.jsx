@@ -11,7 +11,9 @@ import EmptyState from '../../components/EmptyState.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
-import assignmentManagementService from '../../services/assignmentManagementService.js';
+import assignmentManagementService, {
+  ASSIGNMENT_STATUSES,
+} from '../../services/assignmentManagementService.js';
 
 function getAssignmentId(assignment) {
   return String(assignment?.id || assignment?._id || '');
@@ -69,14 +71,14 @@ function formatDate(value) {
 }
 
 function getStatusStyles(status) {
-  switch (String(status ?? '').toLowerCase()) {
-    case 'published':
+  switch (String(status ?? '').toUpperCase()) {
+    case ASSIGNMENT_STATUSES.PUBLISHED:
       return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
 
-    case 'closed':
+    case ASSIGNMENT_STATUSES.CLOSED:
       return 'border-red-500/30 bg-red-500/10 text-red-300';
 
-    case 'draft':
+    case ASSIGNMENT_STATUSES.DRAFT:
       return 'border-amber-500/30 bg-amber-500/10 text-amber-200';
 
     default:
@@ -114,7 +116,9 @@ export default function FacultyAssignmentDetails() {
 
   const [assignment, setAssignment] = useState(navigationAssignment);
   const [loading, setLoading] = useState(Boolean(requestedAssignmentId));
+  const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [actionMessage, setActionMessage] = useState('');
 
   const loadAssignment = useCallback(async () => {
     if (!requestedAssignmentId) {
@@ -253,7 +257,11 @@ export default function FacultyAssignmentDetails() {
 
   const assignmentId = getAssignmentId(assignment);
 
-  const status = String(details?.status || '').toLowerCase();
+  const status = String(details?.status || '').toUpperCase();
+
+  const isDraft = status === ASSIGNMENT_STATUSES.DRAFT;
+  const isPublished = status === ASSIGNMENT_STATUSES.PUBLISHED;
+  const isClosed = status === ASSIGNMENT_STATUSES.CLOSED;
 
   const dueDate = formatDate(details?.dueDate);
 
@@ -272,6 +280,66 @@ export default function FacultyAssignmentDetails() {
   const editUrl = assignmentId
     ? `/faculty/assignments/new?assignmentId=${encodeURIComponent(assignmentId)}`
     : null;
+
+  const handleStatusChange = async (nextStatus) => {
+    if (!assignmentId || actionLoading) return;
+
+    if (
+      nextStatus !== ASSIGNMENT_STATUSES.PUBLISHED &&
+      nextStatus !== ASSIGNMENT_STATUSES.CLOSED
+    ) {
+      return;
+    }
+
+    if (nextStatus === ASSIGNMENT_STATUSES.PUBLISHED && !isDraft) {
+      return;
+    }
+
+    if (nextStatus === ASSIGNMENT_STATUSES.CLOSED && !isPublished) {
+      return;
+    }
+
+    if (nextStatus === ASSIGNMENT_STATUSES.CLOSED) {
+      const confirmed = window.confirm(
+        'Are you sure you want to close this assignment? Students will no longer be able to submit it as an open assignment.',
+      );
+
+      if (!confirmed) return;
+    }
+
+    setActionLoading(true);
+    setError('');
+    setActionMessage('');
+
+    try {
+      const result = await assignmentManagementService.updateAssignment(
+        assignmentId,
+        {
+          status: nextStatus,
+        },
+      );
+
+      if (result?.assignment) {
+        setAssignment(result.assignment);
+      } else {
+        await loadAssignment();
+      }
+
+      setActionMessage(
+        nextStatus === ASSIGNMENT_STATUSES.PUBLISHED
+          ? 'Assignment published successfully.'
+          : 'Assignment closed successfully.',
+      );
+    } catch (actionError) {
+      setError(
+        actionError?.response?.data?.message ||
+        actionError?.message ||
+        'Unable to update assignment status.',
+      );
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -357,7 +425,7 @@ export default function FacultyAssignmentDetails() {
               <Link
                 to={editUrl}
                 state={{ assignment }}
-                className="inline-flex rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                className="inline-flex rounded-xl"
               >
                 <ActionButton>
                   Edit Assignment
@@ -367,7 +435,7 @@ export default function FacultyAssignmentDetails() {
 
             <Link
               to="/faculty/assignments"
-              className="inline-flex rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+              className="inline-flex rounded-xl"
             >
               <ActionButton variant="secondary">
                 Back
@@ -377,29 +445,95 @@ export default function FacultyAssignmentDetails() {
         }
       />
 
-      <div className="mb-6 flex flex-wrap items-center gap-3 rounded-2xl border border-[#343640] bg-[#191A21] p-4">
-        <span
-          className={[
-            'inline-flex rounded-full border px-3 py-1.5',
-            'text-xs font-semibold',
-            getStatusStyles(status),
-          ].join(' ')}
-        >
-          {status
-            ? status.charAt(0).toUpperCase() + status.slice(1)
-            : 'Status unavailable'}
-        </span>
+      <div className="mb-6 rounded-2xl border border-[#343640] bg-[#191A21] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-3">
+            <span
+              className={[
+                'inline-flex rounded-full border px-3 py-1.5',
+                'text-xs font-semibold',
+                getStatusStyles(status),
+              ].join(' ')}
+            >
+              {status || 'STATUS UNAVAILABLE'}
+            </span>
 
-        <span className="text-sm text-[#9697A2]">
-          Due: {dueDate}
-        </span>
+            <span className="text-sm text-[#9697A2]">
+              Due: {dueDate}
+            </span>
+          </div>
 
-        {details.courseCode !== 'Not provided' && (
-          <span className="rounded-lg border border-[#454650] bg-[#26272B] px-3 py-1.5 text-xs font-medium text-[#D0D0D8]">
-            {details.courseCode}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            {isDraft && (
+              <ActionButton
+                onClick={() =>
+                  handleStatusChange(ASSIGNMENT_STATUSES.PUBLISHED)
+                }
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Updating...' : 'Publish Assignment'}
+              </ActionButton>
+            )}
+
+            {isPublished && (
+              <ActionButton
+                variant="secondary"
+                onClick={() =>
+                  handleStatusChange(ASSIGNMENT_STATUSES.CLOSED)
+                }
+                disabled={actionLoading}
+              >
+                {actionLoading ? 'Updating...' : 'Close Assignment'}
+              </ActionButton>
+            )}
+
+            {isClosed && (
+              <span className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-300">
+                Assignment Closed
+              </span>
+            )}
+          </div>
+        </div>
+
+        {isDraft && (
+          <p className="mt-3 text-xs leading-5 text-[#9697A2]">
+            This assignment is currently a draft. Publish it when it is
+            ready for students.
+          </p>
+        )}
+
+        {isPublished && (
+          <p className="mt-3 text-xs leading-5 text-[#9697A2]">
+            This assignment is published. You can close it when submissions
+            should no longer remain open.
+          </p>
+        )}
+
+        {isClosed && (
+          <p className="mt-3 text-xs leading-5 text-[#9697A2]">
+            This assignment is closed. No further lifecycle action is
+            available here.
+          </p>
         )}
       </div>
+
+      {error && (
+        <div
+          role="alert"
+          className="mb-5 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300"
+        >
+          {error}
+        </div>
+      )}
+
+      {actionMessage && (
+        <div
+          role="status"
+          className="mb-5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-300"
+        >
+          {actionMessage}
+        </div>
+      )}
 
       <SectionCard
         eyebrow="ASSIGNMENT INFORMATION"
@@ -421,8 +555,12 @@ export default function FacultyAssignmentDetails() {
             value={formatDate(details.createdAt)}
           />
           <DetailItem
-            label="Last Updated"
-            value={formatDate(details.updatedAt)}
+            label="Published At"
+            value={formatDate(details.publishedAt)}
+          />
+          <DetailItem
+            label="Closed At"
+            value={formatDate(details.closedAt)}
           />
         </div>
       </SectionCard>
