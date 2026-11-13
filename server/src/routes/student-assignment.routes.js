@@ -28,33 +28,42 @@ const attachmentSchema = z.object({
   url: z.string().trim().url().max(2048),
   mimeType: z.string().trim().max(150).optional(),
   size: z.coerce.number().min(0).optional(),
-  publicId: z.string().trim().max(512).optional(),
+  publicId: z.string().trim().max(500).optional(),
   resourceType: z.enum(['image', 'raw', 'video']).optional(),
 }).strict();
 
 const assignmentParamsSchema = z.object({
-  assignmentId: objectIdSchema,
-}).strict();
-
-const getSubmissionSchema = z.object({
-  params: assignmentParamsSchema,
+  params: z.object({
+    assignmentId: objectIdSchema,
+  }).strict(),
   query: emptyObjectSchema,
   body: emptyObjectSchema,
 });
 
 const submitAssignmentSchema = z.object({
-  params: assignmentParamsSchema,
-  query: emptyObjectSchema,
-  body: z.object({
-    responseText: z.string().trim().max(20000).optional(),
-    attachments: z.array(attachmentSchema).max(10).optional(),
+  params: z.object({
+    assignmentId: objectIdSchema,
   }).strict(),
+
+  query: emptyObjectSchema,
+
+  body: z.object({
+    responseText: z.string().trim().max(10000).optional(),
+    attachments: z.array(attachmentSchema).max(10).optional(),
+  }).strict().refine(
+    (data) => (
+      Boolean(data.responseText?.trim())
+      || Boolean(data.attachments?.length)
+    ),
+    {
+      message: 'Provide response text or at least one attachment.',
+    },
+  ),
 });
 
 /**
  * GET /api/v1/assignments/me
- *
- * List published assignments available to the authenticated student.
+ * List assignments available to the authenticated student.
  */
 studentAssignmentRouter.get(
   '/me',
@@ -66,22 +75,20 @@ studentAssignmentRouter.get(
 
 /**
  * GET /api/v1/assignments/:assignmentId/my-submission
- *
- * Retrieve the authenticated student's submission for an assignment.
+ * Get the authenticated student's submission for an assignment.
  */
 studentAssignmentRouter.get(
   '/:assignmentId/my-submission',
   authenticate,
   authorize('STUDENT'),
   authRateLimiter,
-  validate(getSubmissionSchema),
+  validate(assignmentParamsSchema),
   getMyAssignmentSubmissionController,
 );
 
 /**
  * POST /api/v1/assignments/:assignmentId/submit
- *
- * Submit or update the authenticated student's assignment response.
+ * Submit an assignment as the authenticated student.
  */
 studentAssignmentRouter.post(
   '/:assignmentId/submit',
