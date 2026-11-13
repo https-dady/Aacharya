@@ -113,16 +113,21 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       401,
       'INVALID_AUTHENTICATED_USER',
-      'A valid authenticated Faculty account is required.',
+      'A valid authenticated Faculty or Mentor account is required.',
     );
   }
 
   const faculty = await User.findOne({
     _id: facultyId,
-    role: USER_ROLES.FACULTY,
+    $or: [
+      { role: USER_ROLES.FACULTY },
+      { roles: USER_ROLES.FACULTY },
+      { role: USER_ROLES.MENTOR },
+      { roles: USER_ROLES.MENTOR },
+    ],
     status: ACCOUNT_STATUSES.ACTIVE,
   })
-    .select('_id department role status')
+    .select('_id department role roles status')
     .lean()
     .exec();
 
@@ -130,7 +135,7 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       401,
       'ACTIVE_FACULTY_NOT_FOUND',
-      'The active Faculty account could not be found.',
+      'The active Faculty or Mentor account could not be found.',
     );
   }
 
@@ -138,7 +143,7 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       403,
       'FACULTY_DEPARTMENT_REQUIRED',
-      'Your Faculty account is not assigned to a department.',
+      'Your Faculty or Mentor account is not assigned to a department.',
     );
   }
 
