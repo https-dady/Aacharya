@@ -67,7 +67,7 @@ function getActionError(error) {
     error?.response?.data?.error?.message ||
     error?.response?.data?.message ||
     error?.message ||
-    'The quiz status could not be updated.'
+    'The requested quiz operation could not be completed.'
   );
 }
 
@@ -104,9 +104,7 @@ export default function FacultyQuizzes() {
 
       setQuizzes(result.items || []);
     } catch (error) {
-      setErrorMessage(
-        getActionError(error),
-      );
+      setErrorMessage(getActionError(error));
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -175,9 +173,7 @@ export default function FacultyQuizzes() {
     try {
       const updatedQuiz = await quizManagementService.updateQuiz(
         quiz.id,
-        {
-          status: nextStatus,
-        },
+        { status: nextStatus },
       );
 
       setQuizzes((current) =>
@@ -188,6 +184,34 @@ export default function FacultyQuizzes() {
 
       setSuccessMessage(
         `Quiz "${quiz.title}" has been ${actionLabel}ed successfully.`,
+      );
+    } catch (error) {
+      setErrorMessage(getActionError(error));
+    } finally {
+      setActionQuizId(null);
+    }
+  }
+
+  async function handleDeleteQuiz(quiz) {
+    const confirmed = window.confirm(
+      `Are you sure you want to permanently delete "${quiz.title}"?\n\nThis action cannot be undone. Quizzes with student attempts cannot be deleted.`,
+    );
+
+    if (!confirmed) return;
+
+    setActionQuizId(quiz.id);
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    try {
+      await quizManagementService.deleteQuiz(quiz.id);
+
+      setQuizzes((current) =>
+        current.filter((item) => item.id !== quiz.id),
+      );
+
+      setSuccessMessage(
+        `Quiz "${quiz.title}" was deleted successfully.`,
       );
     } catch (error) {
       setErrorMessage(getActionError(error));
@@ -256,9 +280,7 @@ export default function FacultyQuizzes() {
                 name="facultyQuizSearch"
                 label="Search quizzes"
                 value={searchTerm}
-                onChange={(event) =>
-                  setSearchTerm(event.target.value)
-                }
+                onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="Search quiz or course..."
               />
             </div>
@@ -375,7 +397,7 @@ export default function FacultyQuizzes() {
             />
           ) : (
             <div className="overflow-x-auto rounded-xl border border-[#343640]">
-              <table className="w-full min-w-[850px] border-collapse text-left">
+              <table className="w-full min-w-[950px] border-collapse text-left">
                 <thead className="bg-[#202129]">
                   <tr className="text-xs uppercase tracking-wider text-[#9697A2]">
                     <th className="px-4 py-4 font-semibold">Quiz</th>
@@ -491,6 +513,16 @@ export default function FacultyQuizzes() {
                                 Closed
                               </span>
                             )}
+
+                            <ActionButton
+                              size="sm"
+                              variant="danger"
+                              loading={isProcessing}
+                              disabled={Boolean(actionQuizId)}
+                              onClick={() => handleDeleteQuiz(quiz)}
+                            >
+                              Delete
+                            </ActionButton>
                           </div>
                         </td>
                       </tr>
