@@ -17,6 +17,29 @@ function createAuthError(statusCode, code, message) {
   return error;
 }
 
+function normalizeUserRoles(user) {
+  const roles = new Set();
+
+  if (Array.isArray(user.roles)) {
+    for (const role of user.roles) {
+      if (typeof role === 'string' && role.trim()) {
+        roles.add(role);
+      }
+    }
+  }
+
+  /*
+   * Backward compatibility:
+   * Older accounts may not have a roles array.
+   * Their existing primary role must remain valid.
+   */
+  if (typeof user.role === 'string' && user.role.trim()) {
+    roles.add(user.role);
+  }
+
+  return [...roles];
+}
+
 export async function authenticate(req, res, next) {
   const authorization = req.get('authorization');
 
@@ -64,7 +87,9 @@ export async function authenticate(req, res, next) {
 
   try {
     const user = await User.findById(payload.userId)
-      .select('_id role status isEmailVerified +tokenVersion')
+      .select(
+        '_id role roles status isEmailVerified +tokenVersion',
+      )
       .lean()
       .exec();
 
@@ -101,10 +126,32 @@ export async function authenticate(req, res, next) {
       );
     }
 
+    const userRoles = normalizeUserRoles(user);
+
+    if (userRoles.length === 0) {
+      return next(
+        createAuthError(
+          403,
+          'ACCOUNT_ROLE_MISSING',
+          'No valid role is assigned to this account.',
+        ),
+      );
+    }
+
     req.user = {
       id: user._id.toString(),
       _id: user._id.toString(),
+
+      /*
+       * Preserve the primary role for existing application code.
+       */
       role: user.role,
+
+      /*
+       * Expose all assigned roles to authorization middleware.
+       */
+      roles: userRoles,
+
       isEmailVerified: user.isEmailVerified === true,
     };
 
