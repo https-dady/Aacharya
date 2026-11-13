@@ -7,6 +7,10 @@ import {
   listMentorsController,
 } from '../controllers/mentor.controller.js';
 
+import {
+  getMentorDashboardController,
+} from '../controllers/mentor-dashboard.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
@@ -33,13 +37,13 @@ const assignMentorSchema = z.object({
     sectionIds: z.array(objectIdSchema).max(500),
   }).strict(),
 
-  query: z.object({}),
+  query: z.object({}).strict(),
 });
 
 const listMentorsSchema = z.object({
-  params: z.object({}),
+  params: z.object({}).strict(),
 
-  body: z.object({}),
+  body: z.object({}).strict(),
 
   query: z.object({
     page: z.coerce
@@ -68,12 +72,8 @@ const listMentorsSchema = z.object({
   }).strict(),
 });
 
-/*
- * Department-wide unassignment requires an explicit confirmation
- * value to reduce the risk of accidental bulk changes.
- */
 const clearDepartmentMentorAssignmentsSchema = z.object({
-  params: z.object({}),
+  params: z.object({}).strict(),
 
   body: z.object({
     confirmation: z.literal(
@@ -81,15 +81,24 @@ const clearDepartmentMentorAssignmentsSchema = z.object({
     ),
   }).strict(),
 
-  query: z.object({}),
+  query: z.object({}).strict(),
 });
 
-/*
- * GET /api/v1/provisioning/mentors
+/**
+ * GET /api/v1/provisioning/mentor/dashboard
  *
- * Retrieves mentors belonging to the authenticated HOD's
- * department. Authorization and department scoping are enforced
- * by the middleware and controller.
+ * Mentor dashboard summary.
+ */
+mentorRouter.get(
+  '/mentor/dashboard',
+  authenticate,
+  authorize('MENTOR'),
+  authRateLimiter,
+  getMentorDashboardController,
+);
+
+/**
+ * GET /api/v1/provisioning/mentors
  */
 mentorRouter.get(
   '/mentors',
@@ -99,11 +108,8 @@ mentorRouter.get(
   listMentorsController,
 );
 
-/*
+/**
  * PATCH /api/v1/provisioning/faculty/:facultyId/mentor
- *
- * Grants the Mentor role to an eligible faculty member or updates
- * an existing mentor's complete batch and section assignments.
  */
 mentorRouter.patch(
   '/faculty/:facultyId/mentor',
@@ -111,6 +117,7 @@ mentorRouter.patch(
   authorize('HOD'),
   authRateLimiter,
   validate(assignMentorSchema),
+
   auditEvent({
     action: 'MENTOR_ASSIGNMENT_UPDATE',
     resourceType: 'FacultyMentorAssignment',
@@ -122,21 +129,12 @@ mentorRouter.patch(
       sectionCount: req.body.sectionIds.length,
     }),
   }),
+
   assignMentorController,
 );
 
-/*
+/**
  * POST /api/v1/provisioning/mentors/assignments/clear-department
- *
- * Clears all mentor-to-section assignments within the authenticated
- * HOD's department.
- *
- * Important:
- * - Faculty accounts are not deleted or disabled.
- * - Mentor roles are not removed.
- * - Assignments belonging to other departments are untouched.
- * - Explicit confirmation is required.
- * - The controller executes the operation transactionally.
  */
 mentorRouter.post(
   '/mentors/assignments/clear-department',
@@ -144,6 +142,7 @@ mentorRouter.post(
   authorize('HOD'),
   authRateLimiter,
   validate(clearDepartmentMentorAssignmentsSchema),
+
   auditEvent({
     action: 'DEPARTMENT_MENTOR_ASSIGNMENTS_CLEAR',
     resourceType: 'DepartmentMentorAssignments',
@@ -156,6 +155,7 @@ mentorRouter.post(
       operation: 'CLEAR_DEPARTMENT_MENTOR_ASSIGNMENTS',
     }),
   }),
+
   clearDepartmentMentorAssignmentsController,
 );
 
