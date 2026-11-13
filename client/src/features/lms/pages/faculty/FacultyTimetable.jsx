@@ -1,10 +1,17 @@
-import { useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
 import ActionButton from '../../components/ActionButton.jsx';
 import EmptyState from '../../components/EmptyState.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SearchInput from '../../components/SearchInput.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
+
+import facultyTimetableService from '../../services/facultyTimetableService.js';
 
 const WEEKDAYS = [
   'Monday',
@@ -17,18 +24,78 @@ const WEEKDAYS = [
 
 const INITIAL_DAY = 'Monday';
 
-const INITIAL_SCHEDULE = [];
-
 function getDayAbbreviation(day) {
   return day.slice(0, 3);
+}
+
+function getUniqueCourseCount(entries) {
+  return new Set(
+    entries
+      .map((entry) => entry.courseId)
+      .filter(Boolean),
+  ).size;
+}
+
+function TimetableLoadingState() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-center justify-center gap-3 rounded-xl border border-[#343640] bg-[#191A21] py-12 text-sm text-[#A5A6B0]"
+    >
+      <span
+        aria-hidden="true"
+        className="h-5 w-5 animate-spin rounded-full border-2 border-[#CDB5F7] border-r-transparent motion-reduce:animate-none"
+      />
+
+      Loading your timetable...
+    </div>
+  );
 }
 
 export default function FacultyTimetable() {
   const [selectedDay, setSelectedDay] = useState(INITIAL_DAY);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Real timetable records will be connected when the backend contract exists.
-  const timetableEntries = INITIAL_SCHEDULE;
+  const [timetableEntries, setTimetableEntries] = useState([]);
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const [error, setError] = useState('');
+
+  const loadTimetable = useCallback(async ({ silent = false } = {}) => {
+    if (silent) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
+    }
+
+    setError('');
+
+    try {
+      const result = await facultyTimetableService.getMyTimetable({
+        page: 1,
+        limit: 100,
+        status: 'ACTIVE',
+      });
+
+      setTimetableEntries(result.entries);
+    } catch (requestError) {
+      setError(
+        requestError?.message ||
+          'Unable to load your timetable. Please try again.',
+      );
+    } finally {
+      setIsLoading(false);
+      setIsRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTimetable();
+
+  }, [loadTimetable]);
 
   const filteredEntries = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -63,6 +130,10 @@ export default function FacultyTimetable() {
     setSearchTerm('');
   };
 
+  const handleRefresh = () => {
+    loadTimetable({ silent: true });
+  };
+
   return (
     <div className="mx-auto w-full max-w-[1200px]">
       <PageHeader
@@ -78,7 +149,19 @@ export default function FacultyTimetable() {
             label: 'My Timetable',
           },
         ]}
+        actions={
+          <ActionButton
+            variant="secondary"
+            onClick={handleRefresh}
+            loading={isRefreshing}
+            disabled={isLoading || isRefreshing}
+          >
+            Refresh Schedule
+          </ActionButton>
+        }
       />
+
+      {/* Timetable summary */}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <section className="rounded-2xl border border-[#343640] bg-[#191A21] p-5">
@@ -105,6 +188,7 @@ export default function FacultyTimetable() {
                   height="16"
                   rx="2"
                 />
+
                 <path
                   d="M16 3v4M8 3v4M3 10h18"
                   strokeLinecap="round"
@@ -114,11 +198,11 @@ export default function FacultyTimetable() {
           </div>
 
           <p className="mt-4 text-3xl font-semibold text-[#EAEAE6]">
-            —
+            {isLoading ? '—' : timetableEntries.length}
           </p>
 
           <p className="mt-2 text-xs leading-5 text-[#777986]">
-            Available when schedule records are connected
+            Active timetable entries retrieved from your account.
           </p>
         </section>
 
@@ -143,6 +227,7 @@ export default function FacultyTimetable() {
                   d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v16H6.5A2.5 2.5 0 0 0 4 21V5.5Z"
                   strokeLinejoin="round"
                 />
+
                 <path
                   d="M4 17a2.5 2.5 0 0 1 2.5-2.5H20M8 7h7M8 10h7"
                   strokeLinecap="round"
@@ -152,11 +237,11 @@ export default function FacultyTimetable() {
           </div>
 
           <p className="mt-4 text-3xl font-semibold text-[#EAEAE6]">
-            —
+            {isLoading ? '—' : getUniqueCourseCount(timetableEntries)}
           </p>
 
           <p className="mt-2 text-xs leading-5 text-[#777986]">
-            Based on your assigned teaching responsibilities
+            Unique courses appearing in your timetable.
           </p>
         </section>
 
@@ -178,6 +263,7 @@ export default function FacultyTimetable() {
                 className="h-5 w-5"
               >
                 <circle cx="12" cy="12" r="9" />
+
                 <path
                   d="M12 7v5l3 2"
                   strokeLinecap="round"
@@ -192,14 +278,18 @@ export default function FacultyTimetable() {
           </p>
 
           <p className="mt-2 text-xs leading-5 text-[#777986]">
-            {filteredEntries.length > 0
-              ? `${filteredEntries.length} scheduled ${
-                  filteredEntries.length === 1 ? 'class' : 'classes'
-                }`
-              : 'No schedule records available'}
+            {isLoading
+              ? 'Loading schedule...'
+              : filteredEntries.length > 0
+                ? `${filteredEntries.length} scheduled ${
+                    filteredEntries.length === 1 ? 'class' : 'classes'
+                  }`
+                : 'No classes scheduled'}
           </p>
         </section>
       </div>
+
+      {/* Weekly schedule */}
 
       <div className="mt-6">
         <SectionCard
@@ -258,7 +348,25 @@ export default function FacultyTimetable() {
             </div>
 
             <div className="mt-6">
-              {filteredEntries.length === 0 ? (
+              {isLoading ? (
+                <TimetableLoadingState />
+              ) : error ? (
+                <div className="space-y-4">
+                  <div
+                    role="alert"
+                    className="rounded-xl border border-[#B86D78]/30 bg-[#B86D78]/10 p-4 text-sm leading-6 text-[#F0B0B9]"
+                  >
+                    {error}
+                  </div>
+
+                  <ActionButton
+                    variant="secondary"
+                    onClick={() => loadTimetable()}
+                  >
+                    Try Again
+                  </ActionButton>
+                </div>
+              ) : filteredEntries.length === 0 ? (
                 <EmptyState
                   title={
                     searchTerm.trim()
@@ -268,7 +376,7 @@ export default function FacultyTimetable() {
                   description={
                     searchTerm.trim()
                       ? 'Try another search term or clear your search to review the selected day.'
-                      : 'Your teaching schedule will appear here when actual timetable records are available.'
+                      : 'There are currently no active timetable records assigned to you for this weekday.'
                   }
                   action={
                     searchTerm.trim() ? (
@@ -321,9 +429,9 @@ export default function FacultyTimetable() {
                     </thead>
 
                     <tbody className="divide-y divide-[#343640]">
-                      {filteredEntries.map((entry, index) => (
+                      {filteredEntries.map((entry) => (
                         <tr
-                          key={entry.id ?? entry._id ?? index}
+                          key={entry.id}
                           className="bg-[#191A21] transition-colors hover:bg-[#202129]"
                         >
                           <td className="whitespace-nowrap px-4 py-4 text-[#D0D0D8]">
@@ -360,6 +468,8 @@ export default function FacultyTimetable() {
         </SectionCard>
       </div>
 
+      {/* Information */}
+
       <section className="mt-5 rounded-2xl border border-[#343640] bg-[#191A21] p-5 sm:p-6">
         <div className="flex items-start gap-3">
           <span
@@ -374,6 +484,7 @@ export default function FacultyTimetable() {
               className="h-5 w-5"
             >
               <circle cx="12" cy="12" r="9" />
+
               <path
                 d="M12 11v5M12 8h.01"
                 strokeLinecap="round"
@@ -383,14 +494,15 @@ export default function FacultyTimetable() {
 
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-[#EAEAE6]">
-              Schedule data availability
+              Schedule information
             </h2>
 
             <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-              This page currently provides the faculty timetable interface.
-              Live schedule retrieval, class details, and timetable updates
-              require a confirmed backend API contract and will be integrated
-              without introducing sample schedule records.
+              Your timetable is retrieved using your authenticated
+              Faculty account. You can review your assigned courses,
+              batches, sections, weekdays, and classroom details here.
+              Timetable changes are managed through the authorized
+              department workflow.
             </p>
           </div>
         </div>
