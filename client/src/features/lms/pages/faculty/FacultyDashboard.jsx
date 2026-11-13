@@ -10,11 +10,10 @@ import SectionCard from '../../components/SectionCard.jsx';
 import StatusBadge from '../../components/StatusBadge.jsx';
 
 import notificationService from '../../services/notificationService.js';
+import facultyAcademicService from '../../services/facultyAcademicService.js';
 
 function formatDate(value) {
-  if (!value) {
-    return 'Date unavailable';
-  }
+  if (!value) return 'Date unavailable';
 
   const date = new Date(value);
 
@@ -70,12 +69,31 @@ function getSafeInternalPath(actionUrl) {
   }
 }
 
+function DashboardMetric({ label, value, description }) {
+  return (
+    <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
+      <p className="text-sm text-[#A5A6B0]">
+        {label}
+      </p>
+
+      <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
+        {value}
+      </p>
+
+      <p className="mt-2 text-xs leading-5 text-[#858590]">
+        {description}
+      </p>
+    </div>
+  );
+}
+
 function NotificationItem({
   notification,
   isUpdating,
   onMarkAsRead,
 }) {
   const isRead = Boolean(notification.readAt);
+
   const safeActionPath = getSafeInternalPath(
     notification.actionUrl,
   );
@@ -161,21 +179,79 @@ function NotificationItem({
   );
 }
 
-function DashboardMetric({ label, value, description }) {
+function AcademicLoadingState() {
   return (
-    <div className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
-      <p className="text-sm text-[#A5A6B0]">
-        {label}
-      </p>
-
-      <p className="mt-3 text-2xl font-semibold text-[#EAEAE6]">
-        {value}
-      </p>
-
-      <p className="mt-2 text-xs leading-5 text-[#858590]">
-        {description}
-      </p>
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-center justify-center gap-3 rounded-2xl border border-[#343640] bg-[#1D1F27] py-10 text-sm text-[#A5A6B0]"
+    >
+      <span
+        aria-hidden="true"
+        className="h-5 w-5 animate-spin rounded-full border-2 border-[#CDB5F7] border-r-transparent motion-reduce:animate-none"
+      />
+      Loading academic overview...
     </div>
+  );
+}
+
+function CourseCard({ course }) {
+  return (
+    <article className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <h3 className="font-semibold text-[#EAEAE6]">
+          {course.title || 'Untitled course'}
+        </h3>
+
+        {course.status && (
+          <StatusBadge
+            status={course.status.toLowerCase()}
+            size="sm"
+          />
+        )}
+      </div>
+
+      <p className="mt-2 text-sm text-[#A5A6B0]">
+        {course.code || 'Course code unavailable'}
+        {course.semester
+          ? ` · Semester ${course.semester}`
+          : ''}
+      </p>
+
+      <p className="mt-2 text-xs text-[#858590]">
+        {course.batches.length} batch(es)
+        {' · '}
+        {course.sections.length} section(s)
+      </p>
+    </article>
+  );
+}
+
+function AssignmentCard({ assignment }) {
+  return (
+    <article className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+      <h3 className="font-semibold text-[#EAEAE6]">
+        {assignment.title || 'Untitled assignment'}
+      </h3>
+
+      <p className="mt-1 text-xs text-[#A5A6B0]">
+        Due {formatDate(assignment.dueDate)}
+      </p>
+    </article>
+  );
+}
+
+function QuizCard({ quiz }) {
+  return (
+    <article className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+      <h3 className="font-semibold text-[#EAEAE6]">
+        {quiz.title || 'Untitled quiz'}
+      </h3>
+
+      <p className="mt-1 text-xs text-[#A5A6B0]">
+        Starts {formatDate(quiz.startAt)}
+      </p>
+    </article>
   );
 }
 
@@ -185,13 +261,19 @@ export default function FacultyDashboard() {
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(null);
 
+  const [academicOverview, setAcademicOverview] = useState(null);
+  const [isAcademicLoading, setIsAcademicLoading] = useState(true);
+  const [academicError, setAcademicError] = useState('');
+
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const [pageError, setPageError] = useState('');
   const [actionError, setActionError] = useState('');
+
   const [updatingNotificationId, setUpdatingNotificationId] =
     useState(null);
+
   const [isMarkingAll, setIsMarkingAll] = useState(false);
 
   const displayName =
@@ -204,54 +286,63 @@ export default function FacultyDashboard() {
       ? user.department
       : user?.department?.name || 'Department not available';
 
-  const loadNotifications = useCallback(async ({ silent = false } = {}) => {
-    if (silent) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-    }
+  // ---------------------------------------------
+  // Notifications
+  // ---------------------------------------------
 
-    setPageError('');
-    setActionError('');
-
-    try {
-      const [listResult, countResult] = await Promise.allSettled([
-        notificationService.getNotifications({
-          page: 1,
-          limit: 5,
-        }),
-        notificationService.getUnreadCount(),
-      ]);
-
-      if (listResult.status === 'fulfilled') {
-        setNotifications(listResult.value.items);
+  const loadNotifications = useCallback(
+    async ({ silent = false } = {}) => {
+      if (silent) {
+        setIsRefreshing(true);
       } else {
-        setPageError(
-          listResult.reason?.message ||
-            'Unable to load notifications.',
-        );
+        setIsLoading(true);
       }
 
-      if (countResult.status === 'fulfilled') {
-        setUnreadCount(countResult.value);
-      } else {
-        setUnreadCount(null);
+      setPageError('');
+      setActionError('');
+
+      try {
+        const [listResult, countResult] =
+          await Promise.allSettled([
+            notificationService.getNotifications({
+              page: 1,
+              limit: 5,
+            }),
+
+            notificationService.getUnreadCount(),
+          ]);
 
         if (listResult.status === 'fulfilled') {
-          setPageError(
-            'Notifications loaded, but the unread count could not be retrieved.',
-          );
+          setNotifications(listResult.value.items);
         } else {
           setPageError(
-            'Unable to retrieve notifications from the server. Please try again.',
+            listResult.reason?.message ||
+              'Unable to load notifications.',
           );
         }
+
+        if (countResult.status === 'fulfilled') {
+          setUnreadCount(countResult.value);
+        } else {
+          setUnreadCount(null);
+
+          if (listResult.status === 'fulfilled') {
+            setPageError(
+              'Notifications loaded, but the unread count could not be retrieved.',
+            );
+          } else {
+            setPageError(
+              'Unable to retrieve notifications from the server. Please try again.',
+            );
+          }
+        }
+      } finally {
+        setIsLoading(false);
+        setIsRefreshing(false);
       }
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     loadNotifications();
@@ -333,6 +424,43 @@ export default function FacultyDashboard() {
     }
   }, [unreadCount, isMarkingAll]);
 
+  // ---------------------------------------------
+  // Academic dashboard data
+  // ---------------------------------------------
+
+  const loadAcademicOverview = useCallback(async () => {
+    setIsAcademicLoading(true);
+    setAcademicError('');
+
+    try {
+      const overview =
+        await facultyAcademicService.getDashboardOverview();
+
+      setAcademicOverview(overview);
+
+      if (overview.hasErrors) {
+        setAcademicError(
+          'Some academic sections could not be loaded. Available sections are still shown.',
+        );
+      }
+    } catch (error) {
+      setAcademicError(
+        error?.message ||
+          'Unable to load your academic overview.',
+      );
+    } finally {
+      setIsAcademicLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAcademicOverview();
+  }, [loadAcademicOverview]);
+
+  // ---------------------------------------------
+  // Render
+  // ---------------------------------------------
+
   return (
     <div className="mx-auto w-full max-w-[1200px]">
       <PageHeader
@@ -353,6 +481,8 @@ export default function FacultyDashboard() {
           </Link>
         }
       />
+
+      {/* Faculty account overview */}
 
       <section
         aria-label="Faculty account overview"
@@ -407,7 +537,9 @@ export default function FacultyDashboard() {
         </div>
       </section>
 
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {/* Dashboard metrics */}
+
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <DashboardMetric
           label="Unread Notifications"
           value={unreadCount === null ? '—' : unreadCount}
@@ -415,11 +547,190 @@ export default function FacultyDashboard() {
         />
 
         <DashboardMetric
-          label="Academic Workspace"
-          value="Faculty"
-          description="Teaching and assessment pages will be connected as their backend APIs become available."
+          label="Assigned Courses"
+          value={
+            isAcademicLoading
+              ? '—'
+              : academicOverview?.summary.assignedCourses ?? 0
+          }
+          description="Courses assigned to your faculty account."
+        />
+
+        <DashboardMetric
+          label="Assignments"
+          value={
+            isAcademicLoading
+              ? '—'
+              : academicOverview?.summary.totalAssignments ?? 0
+          }
+          description="Assignments in your authorized courses."
+        />
+
+        <DashboardMetric
+          label="Upcoming Quizzes"
+          value={
+            isAcademicLoading
+              ? '—'
+              : academicOverview?.summary.upcomingQuizzes ?? 0
+          }
+          description="Published quizzes scheduled for the future."
         />
       </div>
+
+      {/* Academic overview */}
+
+      <section
+        aria-label="Academic overview"
+        className="mb-6 space-y-6"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#CDB5F7]">
+              Teaching workspace
+            </p>
+
+            <h2 className="mt-1 text-xl font-semibold text-[#EAEAE6]">
+              Academic Overview
+            </h2>
+
+            <p className="mt-1 text-sm text-[#A5A6B0]">
+              Course and assessment information available to your faculty account.
+            </p>
+          </div>
+
+          <ActionButton
+            variant="secondary"
+            size="sm"
+            onClick={loadAcademicOverview}
+            loading={isAcademicLoading}
+            disabled={isAcademicLoading}
+          >
+            Refresh Academic Data
+          </ActionButton>
+        </div>
+
+        {academicError && (
+          <div
+            role="status"
+            className="rounded-xl border border-[#E5DF98]/25 bg-[#E5DF98]/[0.07] p-3 text-sm leading-6 text-[#E5DF98]"
+          >
+            {academicError}
+          </div>
+        )}
+
+        {isAcademicLoading ? (
+          <AcademicLoadingState />
+        ) : (
+          <>
+            {/* Assigned courses */}
+
+            <SectionCard
+              eyebrow="YOUR TEACHING"
+              title="Assigned Courses"
+              description="Only courses assigned to your authenticated faculty account are shown."
+              action={
+                <Link
+                  to="/faculty/courses"
+                  className="text-sm font-semibold text-[#CDB5F7] hover:underline"
+                >
+                  View All Courses
+                </Link>
+              }
+            >
+              {academicOverview?.courses.items.length ? (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {academicOverview.courses.items
+                    .slice(0, 4)
+                    .map((course) => (
+                      <CourseCard
+                        key={course.id}
+                        course={course}
+                      />
+                    ))}
+                </div>
+              ) : (
+                <EmptyState
+                  title="No assigned courses"
+                  description="No active courses are currently assigned to your faculty account. Contact your HOD if this seems incorrect."
+                  className="border-0 bg-transparent"
+                />
+              )}
+            </SectionCard>
+
+            {/* Assignments and quizzes */}
+
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+              <SectionCard
+                eyebrow="ASSESSMENT WORK"
+                title="Upcoming Assignments"
+                description="Published assignments with upcoming due dates."
+                action={
+                  <Link
+                    to="/faculty/assignments"
+                    className="text-sm font-semibold text-[#CDB5F7] hover:underline"
+                  >
+                    Manage Assignments
+                  </Link>
+                }
+              >
+                {academicOverview?.assignments.upcoming.length ? (
+                  <div className="space-y-3">
+                    {academicOverview.assignments.upcoming
+                      .slice(0, 5)
+                      .map((assignment) => (
+                        <AssignmentCard
+                          key={assignment.id}
+                          assignment={assignment}
+                        />
+                      ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No upcoming assignments"
+                    description="There are no published assignments with future due dates in the available records."
+                    className="border-0 bg-transparent"
+                  />
+                )}
+              </SectionCard>
+
+              <SectionCard
+                eyebrow="ASSESSMENT WORK"
+                title="Upcoming Quizzes"
+                description="Published quizzes scheduled to start in the future."
+                action={
+                  <Link
+                    to="/faculty/quizzes"
+                    className="text-sm font-semibold text-[#CDB5F7] hover:underline"
+                  >
+                    Manage Quizzes
+                  </Link>
+                }
+              >
+                {academicOverview?.quizzes.upcoming.length ? (
+                  <div className="space-y-3">
+                    {academicOverview.quizzes.upcoming
+                      .slice(0, 5)
+                      .map((quiz) => (
+                        <QuizCard
+                          key={quiz.id}
+                          quiz={quiz}
+                        />
+                      ))}
+                  </div>
+                ) : (
+                  <EmptyState
+                    title="No upcoming quizzes"
+                    description="There are no published quizzes with future start times in the available records."
+                    className="border-0 bg-transparent"
+                  />
+                )}
+              </SectionCard>
+            </div>
+          </>
+        )}
+      </section>
+
+      {/* Recent notifications */}
 
       <SectionCard
         eyebrow="ACCOUNT ACTIVITY"
@@ -529,19 +840,6 @@ export default function FacultyDashboard() {
           </div>
         )}
       </SectionCard>
-
-      <div className="mt-6 rounded-xl border border-[#343640] bg-[#1D1F27] p-4">
-        <p className="text-sm font-medium text-[#EAEAE6]">
-          Academic features
-        </p>
-
-        <p className="mt-2 text-sm leading-6 text-[#A5A6B0]">
-          Timetable, courses, attendance, assignments, quizzes, and results
-          will be connected when their authorized faculty endpoints and
-          data contracts are available. This dashboard does not display
-          fabricated academic records.
-        </p>
-      </div>
     </div>
   );
 }
