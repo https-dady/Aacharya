@@ -7,7 +7,7 @@ import PageHeader from '../../components/PageHeader.jsx';
 import SearchInput from '../../components/SearchInput.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
-import hodAttendanceService from '../../services/hodAttendanceService.js';
+import attendanceManagementService from '../../services/attendanceManagementService.js';
 
 const PAGE_SIZE = 20;
 
@@ -81,7 +81,7 @@ export default function AttendanceOverview() {
 
     try {
       const result =
-        await hodAttendanceService.getAttendanceOverview({
+        await attendanceManagementService.getAttendanceOverview({
           page,
           limit: PAGE_SIZE,
           search: debouncedSearch,
