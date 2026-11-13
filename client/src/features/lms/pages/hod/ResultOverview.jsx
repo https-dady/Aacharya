@@ -7,10 +7,9 @@ import PageHeader from "../../components/PageHeader.jsx";
 import SearchInput from "../../components/SearchInput.jsx";
 import SectionCard from "../../components/SectionCard.jsx";
 
-import {
+import assessmentManagementService, {
   ASSESSMENT_TYPES,
   ASSESSMENT_STATUSES,
-  listAssessments,
 } from "../../services/assessmentManagementService.js";
 
 const PAGE_SIZE = 10;
@@ -130,7 +129,7 @@ export default function ResultOverview() {
       setError("");
 
       try {
-        const response = await listAssessments(
+        const response = await assessmentManagementService.listAssessments(
           {
             page,
             limit: PAGE_SIZE,
