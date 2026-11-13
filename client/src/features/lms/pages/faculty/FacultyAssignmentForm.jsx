@@ -1,9 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router-dom';
 
 import api from '../../../auth/services/api/axios.js';
 
 import ActionButton from '../../components/ActionButton.jsx';
+import EmptyState from '../../components/EmptyState.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
@@ -23,6 +29,7 @@ const INITIAL_FORM = {
 
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_TOTAL_ATTACHMENTS = 10;
 
 const ALLOWED_EXTENSIONS = [
   '.pdf',
@@ -56,21 +63,28 @@ function getErrorMessage(error, fallback) {
   );
 }
 
-function formatDate(value) {
-  if (!value) {
-    return '—';
+function getId(value) {
+  if (!value) return '';
+
+  if (typeof value === 'object') {
+    return String(value.id || value._id || '');
   }
+
+  return String(value);
+}
+
+function getDateTimeLocal(value) {
+  if (!value) return '';
 
   const date = new Date(value);
 
-  if (Number.isNaN(date.getTime())) {
-    return '—';
-  }
+  if (Number.isNaN(date.getTime())) return '';
 
-  return new Intl.DateTimeFormat('en-IN', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
+  const offset = date.getTimezoneOffset() * 60000;
+
+  return new Date(date.getTime() - offset)
+    .toISOString()
+    .slice(0, 16);
 }
 
 function getFileExtension(fileName) {
@@ -82,9 +96,7 @@ function getFileExtension(fileName) {
 }
 
 function formatFileSize(bytes) {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
+  if (bytes < 1024) return `${bytes} B`;
 
   if (bytes < 1024 * 1024) {
     return `${(bytes / 1024).toFixed(1)} KB`;
@@ -93,48 +105,269 @@ function formatFileSize(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+function extractInstructions(description = '') {
+  const marker = 'Student Instructions:';
+  const markerIndex = description.indexOf(marker);
+
+  if (markerIndex === -1) {
+    return {
+      description,
+      instructions: '',
+    };
+  }
+
+  return {
+    description: description.slice(0, markerIndex).trim(),
+    instructions: description
+      .slice(markerIndex + marker.length)
+      .trim(),
+  };
+}
+
+function normalizeExistingAttachment(attachment) {
+  return {
+    name: attachment.name || '',
+    url: attachment.url || '',
+    mimeType: attachment.mimeType || '',
+    size: Number(attachment.size || 0),
+    publicId: attachment.publicId || '',
+    resourceType: attachment.resourceType || '',
+  };
+}
+
+function getAssignmentId(assignment) {
+  return getId(assignment?.id || assignment?._id);
+}
+
+function validateFiles(files) {
+  const errors = [];
+
+  if (files.length > MAX_FILES) {
+    errors.push(`You can upload a maximum of ${MAX_FILES} new files per update.`);
+  }
+
+  files.forEach((file) => {
+    if (!file.size) {
+      errors.push(`${file.name} is empty.`);
+    } else if (file.size > MAX_FILE_SIZE) {
+      errors.push(`${file.name} exceeds the 10 MB limit.`);
+    }
+
+    if (!ALLOWED_EXTENSIONS.includes(getFileExtension(file.name))) {
+      errors.push(`${file.name} has an unsupported file format.`);
+    }
+  });
+
+  return errors;
+}
+
+function DetailNotice({ children, type = 'error' }) {
+  return (
+    <div
+      role="status"
+      className={[
+        'rounded-xl border p-4 text-sm leading-6',
+        type === 'success'
+          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+          : 'border-rose-500/30 bg-rose-500/10 text-rose-200',
+      ].join(' ')}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function FacultyAssignmentForm() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+
   const fileInputRef = useRef(null);
 
+  const assignmentFromNavigation =
+    location.state?.assignment || null;
+
+  const assignmentId =
+    searchParams.get('assignmentId') ||
+    getAssignmentId(assignmentFromNavigation);
+
+  const isEditMode = Boolean(assignmentId);
+
   const [form, setForm] = useState(INITIAL_FORM);
+
   const [courses, setCourses] = useState([]);
-  const [files, setFiles] = useState([]);
+  const [existingAttachments, setExistingAttachments] = useState([]);
+  const [newFiles, setNewFiles] = useState([]);
+
+  const [assignmentStatus, setAssignmentStatus] = useState('DRAFT');
 
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState('');
   const [noticeType, setNoticeType] = useState('error');
 
   const [isLoadingCourses, setIsLoadingCourses] = useState(true);
+  const [isLoadingAssignment, setIsLoadingAssignment] = useState(isEditMode);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const [assignmentLoadError, setAssignmentLoadError] = useState('');
 
-    async function loadAssignedCourses() {
+  const selectedCourse = useMemo(
+    () => courses.find(
+      (course) => getId(course) === form.courseId,
+    ) || null,
+    [courses, form.courseId],
+  );
+
+  const availableBatches = selectedCourse?.batches || [];
+  const availableSections = selectedCourse?.sections || [];
+
+  const selectedBatches = useMemo(
+    () => availableBatches.filter(
+      (batch) => form.batchIds.includes(getId(batch)),
+    ),
+    [availableBatches, form.batchIds],
+  );
+
+  const selectedSections = useMemo(
+    () => availableSections.filter(
+      (section) => form.sectionIds.includes(getId(section)),
+    ),
+    [availableSections, form.sectionIds],
+  );
+
+  const totalAttachmentCount =
+    existingAttachments.length + newFiles.length;
+
+  const loadCourses = useCallback(async (signal) => {
+    const response = await api.get(
+      '/v1/courses/assigned-to-me',
+      { signal },
+    );
+
+    const assignedCourses = response?.data?.data?.courses;
+
+    if (!Array.isArray(assignedCourses)) {
+      throw new Error(
+        'The server returned an invalid assigned-courses response.',
+      );
+    }
+
+    setCourses(assignedCourses);
+  }, []);
+
+  const loadAssignment = useCallback(async (signal) => {
+    if (!assignmentId) {
+      return;
+    }
+
+    setIsLoadingAssignment(true);
+    setAssignmentLoadError('');
+
+    try {
+      let matchedAssignment = assignmentFromNavigation;
+
+      if (getAssignmentId(matchedAssignment) !== assignmentId) {
+        matchedAssignment = null;
+      }
+
+      if (!matchedAssignment) {
+        const firstPage =
+          await assignmentManagementService.listAssignments(
+            {
+              page: 1,
+              limit: 100,
+            },
+            { signal },
+          );
+
+        matchedAssignment = firstPage.items.find(
+          (item) => item.id === assignmentId,
+        );
+
+        for (
+          let page = 2;
+          page <= firstPage.pagination.totalPages &&
+          !matchedAssignment;
+          page += 1
+        ) {
+          const result =
+            await assignmentManagementService.listAssignments(
+              {
+                page,
+                limit: 100,
+              },
+              { signal },
+            );
+
+          matchedAssignment = result.items.find(
+            (item) => item.id === assignmentId,
+          );
+        }
+      }
+
+      if (signal.aborted) return;
+
+      if (!matchedAssignment) {
+        throw new Error(
+          'The assignment could not be found in your accessible records.',
+        );
+      }
+
+      const parsed = extractInstructions(
+        matchedAssignment.description || '',
+      );
+
+      setForm({
+        contentType: matchedAssignment.contentType || 'ASSIGNMENT',
+        title: matchedAssignment.title || '',
+        courseId: getId(matchedAssignment.course),
+        batchIds: (matchedAssignment.batches || [])
+          .map(getId)
+          .filter(Boolean),
+        sectionIds: (matchedAssignment.sections || [])
+          .map(getId)
+          .filter(Boolean),
+        description: parsed.description,
+        instructions:
+          matchedAssignment.instructions || parsed.instructions,
+        dueDate: getDateTimeLocal(matchedAssignment.dueDate),
+        totalMarks: String(matchedAssignment.totalMarks ?? 100),
+      });
+
+      setExistingAttachments(
+        (matchedAssignment.attachments || [])
+          .map(normalizeExistingAttachment),
+      );
+
+      setAssignmentStatus(
+        String(matchedAssignment.status || 'DRAFT').toUpperCase(),
+      );
+    } catch (error) {
+      if (!signal.aborted) {
+        setAssignmentLoadError(
+          getErrorMessage(
+            error,
+            'Unable to load the assignment.',
+          ),
+        );
+      }
+    } finally {
+      if (!signal.aborted) {
+        setIsLoadingAssignment(false);
+      }
+    }
+  }, [assignmentId, assignmentFromNavigation]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function initialize() {
       setIsLoadingCourses(true);
 
       try {
-        const response = await api.get(
-          '/v1/courses/assigned-to-me',
-        );
-
-        const body = response?.data;
-        const assignedCourses = body?.data?.courses;
-
-        if (!Array.isArray(assignedCourses)) {
-          throw new Error(
-            'The server returned an invalid assigned-courses response.',
-          );
-        }
-
-        if (!cancelled) {
-          setCourses(assignedCourses);
-        }
+        await loadCourses(controller.signal);
       } catch (error) {
-        if (!cancelled) {
-          setCourses([]);
-
+        if (!controller.signal.aborted) {
           setNotice(
             getErrorMessage(
               error,
@@ -145,42 +378,29 @@ export default function FacultyAssignmentForm() {
           setNoticeType('error');
         }
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setIsLoadingCourses(false);
         }
       }
     }
 
-    loadAssignedCourses();
+    initialize();
 
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    return () => controller.abort();
+  }, [loadCourses]);
 
-  const selectedCourse = useMemo(
-    () => courses.find(
-      (course) => course.id === form.courseId,
-    ) || null,
-    [courses, form.courseId],
-  );
+  useEffect(() => {
+    if (!isEditMode) {
+      setIsLoadingAssignment(false);
+      return undefined;
+    }
 
-  const availableBatches = selectedCourse?.batches || [];
-  const availableSections = selectedCourse?.sections || [];
+    const controller = new AbortController();
 
-  const selectedBatches = useMemo(
-    () => availableBatches.filter(
-      (batch) => form.batchIds.includes(batch.id),
-    ),
-    [availableBatches, form.batchIds],
-  );
+    loadAssignment(controller.signal);
 
-  const selectedSections = useMemo(
-    () => availableSections.filter(
-      (section) => form.sectionIds.includes(section.id),
-    ),
-    [availableSections, form.sectionIds],
-  );
+    return () => controller.abort();
+  }, [isEditMode, loadAssignment]);
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -235,41 +455,11 @@ export default function FacultyAssignmentForm() {
     setNotice('');
   }
 
-  function validateFiles(selectedFiles) {
-    const nextErrors = [];
-
-    if (selectedFiles.length > MAX_FILES) {
-      nextErrors.push(
-        `You can upload a maximum of ${MAX_FILES} files.`,
-      );
-    }
-
-    selectedFiles.forEach((file) => {
-      if (file.size === 0) {
-        nextErrors.push(`${file.name} is empty.`);
-      } else if (file.size > MAX_FILE_SIZE) {
-        nextErrors.push(
-          `${file.name} exceeds the 10 MB file size limit.`,
-        );
-      }
-
-      const extension = getFileExtension(file.name);
-
-      if (!ALLOWED_EXTENSIONS.includes(extension)) {
-        nextErrors.push(
-          `${file.name} has an unsupported file format.`,
-        );
-      }
-    });
-
-    return nextErrors;
-  }
-
   function handleFileSelection(event) {
     const selectedFiles = Array.from(event.target.files || []);
 
     const combinedFiles = [
-      ...files,
+      ...newFiles,
       ...selectedFiles,
     ];
 
@@ -287,13 +477,19 @@ export default function FacultyAssignmentForm() {
 
     const fileErrors = validateFiles(uniqueFiles);
 
-    if (fileErrors.length > 0) {
+    if (existingAttachments.length + uniqueFiles.length > MAX_TOTAL_ATTACHMENTS) {
+      fileErrors.push(
+        `An assignment can contain at most ${MAX_TOTAL_ATTACHMENTS} attachments in total.`,
+      );
+    }
+
+    if (fileErrors.length) {
       setErrors((current) => ({
         ...current,
         attachments: fileErrors.join(' '),
       }));
     } else {
-      setFiles(uniqueFiles);
+      setNewFiles(uniqueFiles);
 
       setErrors((current) => ({
         ...current,
@@ -302,12 +498,22 @@ export default function FacultyAssignmentForm() {
     }
 
     event.target.value = '';
-    setNotice('');
   }
 
-  function removeFile(indexToRemove) {
-    setFiles((current) => (
-      current.filter((_, index) => index !== indexToRemove)
+  function removeExistingAttachment(index) {
+    setExistingAttachments((current) => (
+      current.filter((_, itemIndex) => itemIndex !== index)
+    ));
+
+    setErrors((current) => ({
+      ...current,
+      attachments: '',
+    }));
+  }
+
+  function removeNewFile(index) {
+    setNewFiles((current) => (
+      current.filter((_, itemIndex) => itemIndex !== index)
     ));
 
     setErrors((current) => ({
@@ -319,11 +525,7 @@ export default function FacultyAssignmentForm() {
   function validateForm() {
     const nextErrors = {};
 
-    if (
-      !['ASSIGNMENT', 'PRACTICAL'].includes(
-        form.contentType,
-      )
-    ) {
+    if (!['ASSIGNMENT', 'PRACTICAL'].includes(form.contentType)) {
       nextErrors.contentType = 'Select a valid content type.';
     }
 
@@ -333,15 +535,11 @@ export default function FacultyAssignmentForm() {
       form.title.trim().length < 2 ||
       form.title.trim().length > 200
     ) {
-      nextErrors.title =
-        'Title must contain between 2 and 200 characters.';
+      nextErrors.title = 'Title must contain 2–200 characters.';
     }
 
-    if (!form.courseId) {
-      nextErrors.courseId = 'Select an assigned course.';
-    } else if (!selectedCourse) {
-      nextErrors.courseId =
-        'The selected course is no longer available. Reload the page.';
+    if (!form.courseId || !selectedCourse) {
+      nextErrors.courseId = 'Select one of your assigned courses.';
     }
 
     if (
@@ -372,32 +570,35 @@ export default function FacultyAssignmentForm() {
     } else {
       const deadline = new Date(form.dueDate);
 
-      if (Number.isNaN(deadline.getTime())) {
-        nextErrors.dueDate = 'Enter a valid deadline.';
-      } else if (deadline.getTime() <= Date.now()) {
-        nextErrors.dueDate =
-          'The deadline must be in the future.';
-      }
-    }
-
-    if (!form.totalMarks.trim()) {
-      nextErrors.totalMarks = 'Maximum marks are required.';
-    } else {
-      const marks = Number(form.totalMarks);
-
       if (
-        !Number.isFinite(marks) ||
-        marks < 1 ||
-        marks > 10000
+        Number.isNaN(deadline.getTime()) ||
+        deadline.getTime() <= Date.now()
       ) {
-        nextErrors.totalMarks =
-          'Enter marks between 1 and 10,000.';
+        nextErrors.dueDate =
+          'Choose a valid future submission deadline.';
       }
     }
 
-    const fileErrors = validateFiles(files);
+    const marks = Number(form.totalMarks);
 
-    if (fileErrors.length > 0) {
+    if (
+      !Number.isFinite(marks) ||
+      marks < 1 ||
+      marks > 10000
+    ) {
+      nextErrors.totalMarks =
+        'Enter marks between 1 and 10,000.';
+    }
+
+    const fileErrors = validateFiles(newFiles);
+
+    if (existingAttachments.length + newFiles.length > MAX_TOTAL_ATTACHMENTS) {
+      fileErrors.push(
+        `An assignment can contain at most ${MAX_TOTAL_ATTACHMENTS} attachments.`,
+      );
+    }
+
+    if (fileErrors.length) {
       nextErrors.attachments = fileErrors.join(' ');
     }
 
@@ -407,24 +608,15 @@ export default function FacultyAssignmentForm() {
   async function handleSubmit(event) {
     event.preventDefault();
 
-    if (isSubmitting) {
-      return;
-    }
+    if (isSubmitting) return;
 
     const nextErrors = validateForm();
 
     setErrors(nextErrors);
     setNotice('');
 
-    if (Object.keys(nextErrors).length > 0) {
-      return;
-    }
+    if (Object.keys(nextErrors).length > 0) return;
 
-    /*
-     * The existing Assignment model stores one description field.
-     * Instructions remain part of that description to preserve
-     * the existing backend schema.
-     */
     const combinedDescription = [
       form.description.trim(),
       '',
@@ -441,58 +633,116 @@ export default function FacultyAssignmentForm() {
       sectionIds: form.sectionIds,
       dueDate: new Date(form.dueDate).toISOString(),
       totalMarks: Number(form.totalMarks),
-      status: 'DRAFT',
+      status: isEditMode ? assignmentStatus : 'DRAFT',
+      attachments: existingAttachments,
     };
 
     setIsSubmitting(true);
 
     try {
-      const result =
-        await assignmentManagementService.createAssignment(
+      if (isEditMode) {
+        await assignmentManagementService.updateAssignment(
+          assignmentId,
           payload,
-          files,
+          newFiles,
         );
 
-      setNoticeType('success');
-      setNotice(
-        `${form.contentType === 'PRACTICAL' ? 'Practical' : 'Assignment'} saved successfully as a draft.`,
-      );
+        setNotice('Assignment updated successfully.');
+      } else {
+        await assignmentManagementService.createAssignment(
+          payload,
+          newFiles,
+        );
 
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+        setNotice('Assignment saved successfully as a draft.');
       }
+
+      setNoticeType('success');
 
       window.setTimeout(() => {
         navigate('/faculty/assignments', {
           state: {
-            createdAssignmentId: result.assignment.id,
+            updatedAssignmentId: assignmentId || undefined,
           },
         });
       }, 700);
     } catch (error) {
-      setNoticeType('error');
-
       setNotice(
         getErrorMessage(
           error,
-          'Unable to save this item. Please try again.',
+          isEditMode
+            ? 'Unable to update the assignment.'
+            : 'Unable to create the assignment.',
         ),
       );
+
+      setNoticeType('error');
     } finally {
       setIsSubmitting(false);
     }
   }
 
   function handleReset() {
+    if (isEditMode) {
+      const controller = new AbortController();
+      loadAssignment(controller.signal);
+      return;
+    }
+
     setForm(INITIAL_FORM);
-    setFiles([]);
+    setExistingAttachments([]);
+    setNewFiles([]);
     setErrors({});
     setNotice('');
-    setNoticeType('error');
 
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
+  }
+
+  if (isLoadingAssignment) {
+    return (
+      <div className="mx-auto w-full max-w-[1200px]">
+        <PageHeader
+          eyebrow="FACULTY WORKSPACE"
+          title="Edit Assignment"
+          description="Loading the selected assignment."
+        />
+
+        <SectionCard>
+          <div className="flex min-h-48 items-center justify-center text-sm text-[#A5A6B0]">
+            Loading assignment information...
+          </div>
+        </SectionCard>
+      </div>
+    );
+  }
+
+  if (isEditMode && assignmentLoadError) {
+    return (
+      <div className="mx-auto w-full max-w-[1200px]">
+        <PageHeader
+          eyebrow="FACULTY WORKSPACE"
+          title="Edit Assignment"
+          description="The selected assignment could not be loaded."
+        />
+
+        <SectionCard>
+          <EmptyState
+            title="Assignment unavailable"
+            description={assignmentLoadError}
+            action={
+              <Link
+                to="/faculty/assignments"
+                className="rounded-xl border border-[#454650] px-4 py-2 text-sm text-[#EAEAE6]"
+              >
+                Back to Assignments
+              </Link>
+            }
+          />
+        </SectionCard>
+      </div>
+    );
   }
 
   return (
@@ -500,11 +750,17 @@ export default function FacultyAssignmentForm() {
       <PageHeader
         eyebrow="FACULTY WORKSPACE"
         title={
-          form.contentType === 'PRACTICAL'
-            ? 'Create Practical'
-            : 'Create Assignment'
+          isEditMode
+            ? 'Edit Assignment'
+            : form.contentType === 'PRACTICAL'
+              ? 'Create Practical'
+              : 'Create Assignment'
         }
-        description="Create coursework or practical work for students in your assigned courses."
+        description={
+          isEditMode
+            ? 'Update assignment information, targeting, deadline, marks, and attachments.'
+            : 'Create coursework or practical work for students in your assigned courses.'
+        }
         breadcrumbs={[
           {
             label: 'Faculty Dashboard',
@@ -515,7 +771,7 @@ export default function FacultyAssignmentForm() {
             to: '/faculty/assignments',
           },
           {
-            label: 'Create',
+            label: isEditMode ? 'Edit' : 'Create',
           },
         ]}
       />
@@ -523,18 +779,19 @@ export default function FacultyAssignmentForm() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#343640] bg-[#191A21] p-4">
         <div>
           <p className="text-sm font-semibold text-[#EAEAE6]">
-            Assignment & Practical Management
+            {isEditMode ? 'Assignment Update' : 'Assignment Creation'}
           </p>
 
           <p className="mt-1 text-sm leading-5 text-[#9697A2]">
-            Select an assigned course, choose its target groups,
-            configure the deadline and attach supporting files.
+            {isEditMode
+              ? `Current status: ${assignmentStatus}`
+              : 'New assignments are saved as drafts.'}
           </p>
         </div>
 
         <Link
           to="/faculty/assignments"
-          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-medium text-[#D0D0D8] transition-colors hover:border-[#CDB5F7]/50 hover:text-[#EAEAE6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-medium text-[#D0D0D8] transition-colors hover:border-[#CDB5F7]/50 hover:text-[#EAEAE6]"
         >
           Back to Assignments
         </Link>
@@ -545,16 +802,12 @@ export default function FacultyAssignmentForm() {
           <SectionCard
             eyebrow="STEP 01"
             title="Content Information"
-            description="Choose whether you are creating an assignment or a practical."
+            description="Choose the content type and maintain its title."
           >
             <div className="grid grid-cols-1 gap-5 p-5 sm:grid-cols-2 sm:p-6">
               <div>
-                <label
-                  htmlFor="contentType"
-                  className={LABEL_CLASS}
-                >
-                  Content Type
-                  <span className="ml-1 text-[#E5DF98]">*</span>
+                <label htmlFor="contentType" className={LABEL_CLASS}>
+                  Content Type *
                 </label>
 
                 <select
@@ -563,26 +816,15 @@ export default function FacultyAssignmentForm() {
                   value={form.contentType}
                   onChange={handleChange}
                   className={INPUT_CLASS}
-                  aria-invalid={Boolean(errors.contentType)}
                 >
                   <option value="ASSIGNMENT">Assignment</option>
                   <option value="PRACTICAL">Practical</option>
                 </select>
-
-                {errors.contentType && (
-                  <p className="mt-2 text-sm text-[#D58B95]">
-                    {errors.contentType}
-                  </p>
-                )}
               </div>
 
               <div>
-                <label
-                  htmlFor="title"
-                  className={LABEL_CLASS}
-                >
-                  Title
-                  <span className="ml-1 text-[#E5DF98]">*</span>
+                <label htmlFor="title" className={LABEL_CLASS}>
+                  Title *
                 </label>
 
                 <input
@@ -592,13 +834,8 @@ export default function FacultyAssignmentForm() {
                   onChange={handleChange}
                   maxLength={200}
                   required
-                  placeholder={
-                    form.contentType === 'PRACTICAL'
-                      ? 'e.g. Practical 01 — Linked Lists'
-                      : 'e.g. Data Structures — Linked Lists'
-                  }
+                  placeholder="Enter assignment title"
                   className={INPUT_CLASS}
-                  aria-invalid={Boolean(errors.title)}
                 />
 
                 {errors.title && (
@@ -613,16 +850,12 @@ export default function FacultyAssignmentForm() {
           <SectionCard
             eyebrow="STEP 02"
             title="Course and Target Groups"
-            description="Only courses assigned to your account are available."
+            description="Choose an assigned course and its eligible batches or sections."
           >
             <div className="space-y-6 p-5 sm:p-6">
               <div>
-                <label
-                  htmlFor="courseId"
-                  className={LABEL_CLASS}
-                >
-                  Assigned Course
-                  <span className="ml-1 text-[#E5DF98]">*</span>
+                <label htmlFor="courseId" className={LABEL_CLASS}>
+                  Assigned Course *
                 </label>
 
                 <select
@@ -630,25 +863,19 @@ export default function FacultyAssignmentForm() {
                   name="courseId"
                   value={form.courseId}
                   onChange={handleChange}
-                  className={INPUT_CLASS}
                   disabled={isLoadingCourses || courses.length === 0}
-                  aria-invalid={Boolean(errors.courseId)}
-                  required
+                  className={INPUT_CLASS}
                 >
                   <option value="">
                     {isLoadingCourses
                       ? 'Loading assigned courses...'
-                      : courses.length === 0
-                        ? 'No assigned active courses available'
-                        : 'Select an assigned course'}
+                      : 'Select an assigned course'}
                   </option>
 
                   {courses.map((course) => (
-                    <option
-                      key={course.id}
-                      value={course.id}
-                    >
-                      {course.code} — {course.title}
+                    <option key={getId(course)} value={getId(course)}>
+                      {course.code ? `${course.code} — ` : ''}
+                      {course.title}
                     </option>
                   ))}
                 </select>
@@ -658,155 +885,95 @@ export default function FacultyAssignmentForm() {
                     {errors.courseId}
                   </p>
                 )}
-
-                {!isLoadingCourses && courses.length === 0 && (
-                  <p className="mt-2 text-xs leading-5 text-[#9697A2]">
-                    Assign a course to your account before creating
-                    coursework. If you believe this is incorrect,
-                    contact your HOD.
-                  </p>
-                )}
-
-                {selectedCourse && (
-                  <div className="mt-3 rounded-xl border border-[#454650] bg-[#191A21] p-3">
-                    <p className="text-sm font-medium text-[#EAEAE6]">
-                      {selectedCourse.title}
-                    </p>
-
-                    <p className="mt-1 text-xs text-[#9697A2]">
-                      Code: {selectedCourse.code}
-                      {selectedCourse.semester
-                        ? ` · Semester: ${selectedCourse.semester}`
-                        : ''}
-                    </p>
-                  </div>
-                )}
               </div>
 
               {selectedCourse && (
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                   <div>
-                    <div className="mb-3">
-                      <h3 className="text-sm font-semibold text-[#EAEAE6]">
-                        Target Batches
-                      </h3>
-
-                      <p className="mt-1 text-xs leading-5 text-[#9697A2]">
-                        Select one or more batches assigned to this course.
-                      </p>
-                    </div>
+                    <h3 className="mb-3 text-sm font-semibold text-[#EAEAE6]">
+                      Target Batches
+                    </h3>
 
                     {availableBatches.length === 0 ? (
                       <p className="rounded-xl border border-dashed border-[#454650] p-4 text-sm text-[#9697A2]">
-                        No batches are assigned to this course.
+                        No batches assigned to this course.
                       </p>
                     ) : (
                       <div className="space-y-2">
-                        {availableBatches.map((batch) => (
-                          <label
-                            key={batch.id}
-                            className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#454650] bg-[#1D1F27] p-3 transition-colors hover:border-[#CDB5F7]/50"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={form.batchIds.includes(batch.id)}
-                              onChange={() => toggleSelection(
-                                'batchIds',
-                                batch.id,
-                              )}
-                              className="mt-1 accent-[#CDB5F7]"
-                            />
+                        {availableBatches.map((batch) => {
+                          const id = getId(batch);
 
-                            <span>
-                              <span className="block text-sm font-medium text-[#EAEAE6]">
-                                {batch.name}
-                              </span>
+                          return (
+                            <label
+                              key={id}
+                              className="flex cursor-pointer items-center gap-3 rounded-xl border border-[#454650] bg-[#1D1F27] p-3 hover:border-[#CDB5F7]/50"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={form.batchIds.includes(id)}
+                                onChange={() => toggleSelection('batchIds', id)}
+                                className="accent-[#CDB5F7]"
+                              />
 
-                              <span className="mt-1 block text-xs text-[#9697A2]">
-                                {batch.code}
-                                {batch.academicYear
-                                  ? ` · ${batch.academicYear}`
-                                  : ''}
+                              <span className="text-sm text-[#EAEAE6]">
+                                {batch.name || batch.code || id}
                               </span>
-                            </span>
-                          </label>
-                        ))}
+                            </label>
+                          );
+                        })}
                       </div>
-                    )}
-
-                    {errors.batchIds && (
-                      <p className="mt-2 text-sm text-[#D58B95]">
-                        {errors.batchIds}
-                      </p>
                     )}
                   </div>
 
                   <div>
-                    <div className="mb-3">
-                      <h3 className="text-sm font-semibold text-[#EAEAE6]">
-                        Target Sections
-                      </h3>
-
-                      <p className="mt-1 text-xs leading-5 text-[#9697A2]">
-                        Select specific sections when required.
-                      </p>
-                    </div>
+                    <h3 className="mb-3 text-sm font-semibold text-[#EAEAE6]">
+                      Target Sections
+                    </h3>
 
                     {availableSections.length === 0 ? (
                       <p className="rounded-xl border border-dashed border-[#454650] p-4 text-sm text-[#9697A2]">
-                        No sections are assigned to this course.
+                        No sections assigned to this course.
                       </p>
                     ) : (
                       <div className="space-y-2">
-                        {availableSections.map((section) => (
-                          <label
-                            key={section.id}
-                            className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#454650] bg-[#1D1F27] p-3 transition-colors hover:border-[#CDB5F7]/50"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={form.sectionIds.includes(section.id)}
-                              onChange={() => toggleSelection(
-                                'sectionIds',
-                                section.id,
-                              )}
-                              className="mt-1 accent-[#CDB5F7]"
-                            />
+                        {availableSections.map((section) => {
+                          const id = getId(section);
 
-                            <span>
-                              <span className="block text-sm font-medium text-[#EAEAE6]">
-                                {section.name}
-                              </span>
+                          return (
+                            <label
+                              key={id}
+                              className="flex cursor-pointer items-center gap-3 rounded-xl border border-[#454650] bg-[#1D1F27] p-3 hover:border-[#CDB5F7]/50"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={form.sectionIds.includes(id)}
+                                onChange={() => toggleSelection('sectionIds', id)}
+                                className="accent-[#CDB5F7]"
+                              />
 
-                              <span className="mt-1 block text-xs text-[#9697A2]">
-                                {section.code}
+                              <span className="text-sm text-[#EAEAE6]">
+                                {section.name || section.code || id}
                               </span>
-                            </span>
-                          </label>
-                        ))}
+                            </label>
+                          );
+                        })}
                       </div>
-                    )}
-
-                    {errors.sectionIds && (
-                      <p className="mt-2 text-sm text-[#D58B95]">
-                        {errors.sectionIds}
-                      </p>
                     )}
                   </div>
                 </div>
               )}
 
-              {selectedCourse && (
-                <div className="rounded-xl border border-[#454650] bg-[#191A21] p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-[#9697A2]">
-                    Selected Target Groups
-                  </p>
+              {errors.batchIds && (
+                <p className="text-sm text-[#D58B95]">
+                  {errors.batchIds}
+                </p>
+              )}
 
-                  <p className="mt-2 text-sm text-[#EAEAE6]">
-                    {selectedBatches.length} batch(es),{' '}
-                    {selectedSections.length} section(s)
-                  </p>
-                </div>
+              {selectedCourse && (
+                <p className="text-xs text-[#9697A2]">
+                  Selected: {selectedBatches.length} batch(es),{' '}
+                  {selectedSections.length} section(s).
+                </p>
               )}
             </div>
           </SectionCard>
@@ -814,16 +981,12 @@ export default function FacultyAssignmentForm() {
           <SectionCard
             eyebrow="STEP 03"
             title="Description and Instructions"
-            description="Explain the work and clearly describe the expected submission."
+            description="Maintain the assignment brief and student guidance."
           >
             <div className="space-y-5 p-5 sm:p-6">
               <div>
-                <label
-                  htmlFor="description"
-                  className={LABEL_CLASS}
-                >
-                  Description
-                  <span className="ml-1 text-[#E5DF98]">*</span>
+                <label htmlFor="description" className={LABEL_CLASS}>
+                  Description *
                 </label>
 
                 <textarea
@@ -833,36 +996,19 @@ export default function FacultyAssignmentForm() {
                   onChange={handleChange}
                   rows={4}
                   maxLength={5000}
-                  required
-                  placeholder="Describe the problem, learning objectives, or practical task..."
                   className={INPUT_CLASS}
-                  aria-invalid={Boolean(errors.description)}
                 />
 
-                <div className="mt-2 flex items-start justify-between gap-3">
-                  {errors.description ? (
-                    <p className="text-sm text-[#D58B95]">
-                      {errors.description}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-[#9697A2]">
-                      Maximum 5,000 characters.
-                    </p>
-                  )}
-
-                  <span className="shrink-0 text-xs text-[#9697A2]">
-                    {form.description.length}/5000
-                  </span>
-                </div>
+                {errors.description && (
+                  <p className="mt-2 text-sm text-[#D58B95]">
+                    {errors.description}
+                  </p>
+                )}
               </div>
 
               <div>
-                <label
-                  htmlFor="instructions"
-                  className={LABEL_CLASS}
-                >
-                  Student Instructions
-                  <span className="ml-1 text-[#E5DF98]">*</span>
+                <label htmlFor="instructions" className={LABEL_CLASS}>
+                  Student Instructions *
                 </label>
 
                 <textarea
@@ -872,27 +1018,14 @@ export default function FacultyAssignmentForm() {
                   onChange={handleChange}
                   rows={5}
                   maxLength={5000}
-                  required
-                  placeholder="Explain the submission process, formatting requirements, and evaluation criteria..."
                   className={INPUT_CLASS}
-                  aria-invalid={Boolean(errors.instructions)}
                 />
 
-                <div className="mt-2 flex items-start justify-between gap-3">
-                  {errors.instructions ? (
-                    <p className="text-sm text-[#D58B95]">
-                      {errors.instructions}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-[#9697A2]">
-                      Maximum 5,000 characters.
-                    </p>
-                  )}
-
-                  <span className="shrink-0 text-xs text-[#9697A2]">
-                    {form.instructions.length}/5000
-                  </span>
-                </div>
+                {errors.instructions && (
+                  <p className="mt-2 text-sm text-[#D58B95]">
+                    {errors.instructions}
+                  </p>
+                )}
               </div>
             </div>
           </SectionCard>
@@ -900,15 +1033,63 @@ export default function FacultyAssignmentForm() {
           <SectionCard
             eyebrow="STEP 04"
             title="Supporting Attachments"
-            description="Attach reference documents, worksheets, or practical instructions for students."
+            description="Keep existing attachments, remove unwanted files, or add new documents."
           >
             <div className="space-y-4 p-5 sm:p-6">
+              {existingAttachments.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-[#9697A2]">
+                    Existing Attachments
+                  </p>
+
+                  {existingAttachments.map((attachment, index) => (
+                    <div
+                      key={`${attachment.publicId || attachment.url}-${index}`}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#454650] bg-[#191A21] p-3"
+                    >
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-medium text-[#EAEAE6]">
+                          {attachment.name}
+                        </p>
+
+                        <p className="mt-1 text-xs text-[#9697A2]">
+                          {attachment.mimeType || 'Document'}
+                          {attachment.size
+                            ? ` · ${formatFileSize(attachment.size)}`
+                            : ''}
+                        </p>
+
+                        {attachment.url && (
+                          <a
+                            href={attachment.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-1 inline-block text-xs text-[#CDB5F7] hover:underline"
+                          >
+                            Open existing file
+                          </a>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => removeExistingAttachment(index)}
+                        disabled={isSubmitting}
+                        className="rounded-lg border border-rose-500/30 px-3 py-2 text-xs font-medium text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div>
                 <label
                   htmlFor="assignment-attachments"
                   className={LABEL_CLASS}
                 >
-                  Upload Files
+                  Add New Files
                 </label>
 
                 <input
@@ -919,12 +1100,12 @@ export default function FacultyAssignmentForm() {
                   accept={ALLOWED_EXTENSIONS.join(',')}
                   onChange={handleFileSelection}
                   disabled={isSubmitting}
-                  className="block w-full cursor-pointer rounded-xl border border-dashed border-[#62636E] bg-[#1D1F27] p-4 text-sm text-[#D0D0D8] file:mr-4 file:rounded-lg file:border-0 file:bg-[#CDB5F7] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-[#17151D] hover:border-[#CDB5F7]/70"
+                  className="block w-full cursor-pointer rounded-xl border border-dashed border-[#62636E] bg-[#1D1F27] p-4 text-sm text-[#D0D0D8] file:mr-4 file:rounded-lg file:border-0 file:bg-[#CDB5F7] file:px-4 file:py-2 file:text-sm file:font-semibold file:text-[#17151D]"
                 />
 
-                <p className="mt-2 text-xs leading-5 text-[#9697A2]">
-                  Maximum {MAX_FILES} files, 10 MB each. Supported:
-                  PDF, DOC, DOCX, PPT, PPTX, XLS, XLSX and TXT.
+                <p className="mt-2 text-xs text-[#9697A2]">
+                  Maximum {MAX_FILES} new files per request, 10 MB each.
+                  Total existing and new attachments cannot exceed {MAX_TOTAL_ATTACHMENTS}.
                 </p>
 
                 {errors.attachments && (
@@ -934,19 +1115,19 @@ export default function FacultyAssignmentForm() {
                 )}
               </div>
 
-              {files.length > 0 && (
+              {newFiles.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wider text-[#9697A2]">
-                    Selected Files ({files.length}/{MAX_FILES})
+                    New Files
                   </p>
 
-                  {files.map((file, index) => (
+                  {newFiles.map((file, index) => (
                     <div
-                      key={`${file.name}-${file.lastModified}-${index}`}
-                      className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#454650] bg-[#191A21] p-3"
+                      key={`${file.name}-${file.lastModified}`}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-[#454650] bg-[#191A21] p-3"
                     >
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-[#EAEAE6]">
+                        <p className="truncate text-sm text-[#EAEAE6]">
                           {file.name}
                         </p>
 
@@ -957,9 +1138,9 @@ export default function FacultyAssignmentForm() {
 
                       <button
                         type="button"
-                        onClick={() => removeFile(index)}
+                        onClick={() => removeNewFile(index)}
                         disabled={isSubmitting}
-                        className="rounded-lg border border-rose-500/30 px-3 py-2 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-500/10 disabled:opacity-50"
+                        className="rounded-lg border border-rose-500/30 px-3 py-2 text-xs text-rose-300 hover:bg-rose-500/10"
                       >
                         Remove
                       </button>
@@ -967,22 +1148,22 @@ export default function FacultyAssignmentForm() {
                   ))}
                 </div>
               )}
+
+              <p className="text-xs text-[#9697A2]">
+                Total attachments after saving: {totalAttachmentCount}
+              </p>
             </div>
           </SectionCard>
 
           <SectionCard
             eyebrow="STEP 05"
             title="Deadline and Evaluation"
-            description="Configure when students must submit their work and the maximum marks."
+            description="Configure the submission deadline and maximum marks."
           >
             <div className="grid grid-cols-1 gap-5 p-5 sm:grid-cols-2 sm:p-6">
               <div>
-                <label
-                  htmlFor="dueDate"
-                  className={LABEL_CLASS}
-                >
-                  Submission Deadline
-                  <span className="ml-1 text-[#E5DF98]">*</span>
+                <label htmlFor="dueDate" className={LABEL_CLASS}>
+                  Submission Deadline *
                 </label>
 
                 <input
@@ -993,29 +1174,18 @@ export default function FacultyAssignmentForm() {
                   onChange={handleChange}
                   required
                   className={INPUT_CLASS}
-                  aria-invalid={Boolean(errors.dueDate)}
                 />
 
-                {errors.dueDate ? (
+                {errors.dueDate && (
                   <p className="mt-2 text-sm text-[#D58B95]">
                     {errors.dueDate}
-                  </p>
-                ) : (
-                  <p className="mt-2 text-xs text-[#9697A2]">
-                    {form.dueDate
-                      ? `Deadline: ${formatDate(form.dueDate)}`
-                      : 'Choose a future date and time.'}
                   </p>
                 )}
               </div>
 
               <div>
-                <label
-                  htmlFor="totalMarks"
-                  className={LABEL_CLASS}
-                >
-                  Maximum Marks
-                  <span className="ml-1 text-[#E5DF98]">*</span>
+                <label htmlFor="totalMarks" className={LABEL_CLASS}>
+                  Maximum Marks *
                 </label>
 
                 <input
@@ -1028,9 +1198,7 @@ export default function FacultyAssignmentForm() {
                   value={form.totalMarks}
                   onChange={handleChange}
                   required
-                  placeholder="e.g. 100"
                   className={INPUT_CLASS}
-                  aria-invalid={Boolean(errors.totalMarks)}
                 />
 
                 {errors.totalMarks && (
@@ -1044,28 +1212,20 @@ export default function FacultyAssignmentForm() {
 
           <div className="rounded-xl border border-[#454650] bg-[#191A21] p-4">
             <p className="text-sm font-medium text-[#EAEAE6]">
-              Draft saving
+              Assignment status
             </p>
 
             <p className="mt-2 text-sm leading-6 text-[#9697A2]">
-              New assignments and practicals are saved as drafts.
-              They will not be published to students automatically.
+              {isEditMode
+                ? `The current ${assignmentStatus} status will be preserved during this update.`
+                : 'New assignments are saved as drafts and are not published automatically.'}
             </p>
           </div>
 
           {notice && (
-            <div
-              role="status"
-              aria-live="polite"
-              className={[
-                'rounded-xl border p-4 text-sm leading-6',
-                noticeType === 'success'
-                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
-                  : 'border-rose-500/30 bg-rose-500/10 text-rose-200',
-              ].join(' ')}
-            >
+            <DetailNotice type={noticeType}>
               {notice}
-            </div>
+            </DetailNotice>
           )}
 
           <div className="flex flex-col-reverse gap-3 border-t border-[#343640] pt-5 sm:flex-row sm:items-center sm:justify-between">
@@ -1075,13 +1235,13 @@ export default function FacultyAssignmentForm() {
               onClick={handleReset}
               disabled={isSubmitting}
             >
-              Reset Form
+              {isEditMode ? 'Reload Original Data' : 'Reset Form'}
             </ActionButton>
 
             <div className="flex flex-col-reverse gap-3 sm:flex-row">
               <Link
                 to="/faculty/assignments"
-                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[#454650] px-4 py-2.5 text-sm font-semibold text-[#EAEAE6] transition-colors hover:bg-[#26272B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[#454650] px-4 py-2.5 text-sm font-semibold text-[#EAEAE6] hover:bg-[#26272B]"
               >
                 Cancel
               </Link>
@@ -1095,8 +1255,10 @@ export default function FacultyAssignmentForm() {
                 }
               >
                 {isSubmitting
-                  ? 'Saving Draft...'
-                  : `Save ${form.contentType === 'PRACTICAL' ? 'Practical' : 'Assignment'} Draft`}
+                  ? 'Saving...'
+                  : isEditMode
+                    ? 'Save Assignment Changes'
+                    : 'Save Assignment Draft'}
               </ActionButton>
             </div>
           </div>
