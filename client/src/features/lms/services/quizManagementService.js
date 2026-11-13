@@ -100,7 +100,6 @@ function normalizeQuiz(quiz) {
 }
 
 function normalizeListResult(data) {
-  // Support a direct array as well as the paginated response contract.
   if (Array.isArray(data)) {
     return {
       items: data.map(normalizeQuiz).filter(Boolean),
@@ -189,21 +188,22 @@ const quizManagementService = {
   },
 
   /**
-   * Create a quiz for an existing course allocation.
+   * Get a single quiz using its ID.
    *
-   * Expected payload:
-   * {
-   *   title,
-   *   description,
-   *   courseId,
-   *   batchIds,
-   *   sectionIds,
-   *   startAt,
-   *   endAt,
-   *   durationMinutes,
-   *   questions,
-   *   status
-   * }
+   * GET /v1/quizzes/manage/:quizId
+   */
+  async getQuiz(quizId) {
+    const id = requireIdentifier(quizId, 'Quiz ID');
+
+    const response = await api.get(
+      `${QUIZ_MANAGEMENT_ENDPOINT}/${encodeURIComponent(id)}`,
+    );
+
+    return normalizeSingleQuiz(unwrapResponse(response));
+  },
+
+  /**
+   * Create a quiz for an existing course allocation.
    */
   async createQuiz(payload) {
     if (!payload || typeof payload !== 'object') {
