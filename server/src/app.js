@@ -31,6 +31,7 @@ import studentQuizRoutes from './routes/student-quiz.routes.js';
 import studentQuizAttemptRoutes from './routes/student-quiz-attempt.routes.js';
 import studentQuizResultRoutes from './routes/student-quiz-result.routes.js';
 import facultyQuizResultsRoutes from './routes/faculty-quiz-results.routes.js';
+import facultyQuizResultDetailsRoutes from './routes/faculty-quiz-result-details.routes.js';
 
 import studentAttendanceRoutes from './routes/student-attendance.routes.js';
 import facultyAttendanceRoutes from './routes/faculty-attendance.routes.js';
@@ -162,23 +163,22 @@ app.use('/api/v1/assignments', assignmentRoutes);
 app.use('/api/v1/assignments', studentAssignmentRoutes);
 
 // Quiz management for HOD and Faculty.
-//
-// IMPORTANT:
-// Mount this before the student quiz routers so that /manage
-// is handled by the management router first.
 app.use('/api/v1/quizzes', quizManagementRoutes);
 
 // Student quizzes.
 app.use('/api/v1/quizzes', studentQuizRoutes);
 
-// Student quiz attempts: start, retrieve, answer, submit.
+// Student quiz attempts.
 app.use('/api/v1/quizzes', studentQuizAttemptRoutes);
 
 // Student quiz results.
 app.use('/api/v1/quiz-results', studentQuizResultRoutes);
 
-// Faculty quiz results.
+// Faculty quiz results listing.
 app.use('/api/v1/quiz-results', facultyQuizResultsRoutes);
+
+// Individual Faculty quiz result details.
+app.use('/api/v1/quiz-results', facultyQuizResultDetailsRoutes);
 
 // Student attendance.
 app.use('/api/v1/attendance', studentAttendanceRoutes);
@@ -187,7 +187,6 @@ app.use('/api/v1/attendance', studentAttendanceRoutes);
 app.use('/api/v1/attendance', facultyAttendanceRoutes);
 
 // HOD department-wide attendance overview and reports.
-// Keep the existing student and Faculty attendance endpoints available.
 app.use('/api/v1/attendance', hodAttendanceRoutes);
 
 // HOD timetable management.
