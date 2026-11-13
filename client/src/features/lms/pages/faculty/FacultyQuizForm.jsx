@@ -1,40 +1,149 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
+import api from '../../auth/services/api/axios.js';
 import ActionButton from '../../components/ActionButton.jsx';
 import FormField from '../../components/FormField.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
+import quizManagementService from '../../services/quizManagementService.js';
+
 const INITIAL_FORM = {
   title: '',
-  courseName: '',
-  courseCode: '',
-  sectionName: '',
   description: '',
-  instructions: '',
-  startDate: '',
-  endDate: '',
+  courseId: '',
+  batchIds: [],
+  sectionIds: [],
+  startAt: '',
+  endAt: '',
   durationMinutes: '30',
-  totalMarks: '',
-  passingMarks: '',
-  attemptsAllowed: '1',
-  shuffleQuestions: false,
-  shuffleOptions: false,
-  showResultsAfterSubmission: false,
+  question: '',
+  options: ['', '', '', ''],
+  correctOptionIndex: '0',
+  questionMarks: '1',
 };
 
+function getId(value) {
+  if (!value) return '';
+
+  if (typeof value === 'object') {
+    return String(value.id || value._id || '');
+  }
+
+  return String(value);
+}
+
+function formatError(error) {
+  return (
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    'Unable to complete the quiz request.'
+  );
+}
+
+function CheckboxOption({
+  checked,
+  label,
+  description,
+  onChange,
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#343640] bg-[#191A21] p-4 transition-colors hover:border-[#CDB5F7]/50">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        className="mt-1 h-4 w-4 accent-[#CDB5F7]"
+      />
+
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-[#EAEAE6]">
+          {label}
+        </span>
+
+        {description && (
+          <span className="mt-1 block text-xs leading-5 text-[#9697A2]">
+            {description}
+          </span>
+        )}
+      </span>
+    </label>
+  );
+}
+
 export default function FacultyQuizForm() {
+  const navigate = useNavigate();
+
   const [form, setForm] = useState(INITIAL_FORM);
+  const [courses, setCourses] = useState([]);
+
+  const [courseLoading, setCourseLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+
   const [errors, setErrors] = useState({});
   const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
 
-  function handleChange(event) {
-    const { name, value, type, checked } = event.target;
+  useEffect(() => {
+    let active = true;
 
+    async function loadAssignedCourses() {
+      setCourseLoading(true);
+      setError('');
+
+      try {
+        const response = await api.get(
+          '/v1/courses/assigned-to-me',
+        );
+
+        const assignedCourses =
+          response?.data?.data?.courses;
+
+        if (!Array.isArray(assignedCourses)) {
+          throw new Error(
+            'The server returned an invalid assigned course list.',
+          );
+        }
+
+        if (active) {
+          setCourses(assignedCourses);
+        }
+      } catch (loadError) {
+        if (active) {
+          setError(formatError(loadError));
+          setCourses([]);
+        }
+      } finally {
+        if (active) {
+          setCourseLoading(false);
+        }
+      }
+    }
+
+    loadAssignedCourses();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const selectedCourse = useMemo(
+    () =>
+      courses.find(
+        (course) => getId(course) === form.courseId,
+      ) || null,
+    [courses, form.courseId],
+  );
+
+  const availableBatches = selectedCourse?.batches || [];
+  const availableSections = selectedCourse?.sections || [];
+
+  function updateField(name, value) {
     setForm((current) => ({
       ...current,
-      [name]: type === 'checkbox' ? checked : value,
+      [name]: value,
     }));
 
     setErrors((current) => ({
@@ -43,59 +152,99 @@ export default function FacultyQuizForm() {
     }));
 
     setNotice('');
+    setError('');
+  }
+
+  function handleCourseChange(event) {
+    const courseId = event.target.value;
+
+    setForm((current) => ({
+      ...current,
+      courseId,
+      batchIds: [],
+      sectionIds: [],
+    }));
+
+    setErrors({});
+    setNotice('');
+    setError('');
+  }
+
+  function toggleIdentifier(field, identifier) {
+    setForm((current) => {
+      const existing = current[field];
+
+      const next = existing.includes(identifier)
+        ? existing.filter((id) => id !== identifier)
+        : [...existing, identifier];
+
+      return {
+        ...current,
+        [field]: next,
+      };
+    });
+
+    setErrors((current) => ({
+      ...current,
+      [field]: '',
+    }));
+  }
+
+  function updateOption(index, value) {
+    setForm((current) => ({
+      ...current,
+      options: current.options.map((option, optionIndex) =>
+        optionIndex === index ? value : option,
+      ),
+    }));
+
+    setErrors((current) => ({
+      ...current,
+      options: '',
+    }));
   }
 
   function validateForm() {
     const nextErrors = {};
 
-    if (!form.title.trim()) {
-      nextErrors.title = 'Quiz title is required.';
-    } else if (form.title.trim().length > 120) {
-      nextErrors.title = 'Quiz title cannot exceed 120 characters.';
+    if (form.title.trim().length < 2) {
+      nextErrors.title =
+        'Quiz title must contain at least 2 characters.';
+    } else if (form.title.trim().length > 200) {
+      nextErrors.title =
+        'Quiz title cannot exceed 200 characters.';
     }
 
-    if (!form.courseName.trim()) {
-      nextErrors.courseName = 'Course name is required.';
+    if (!form.courseId) {
+      nextErrors.courseId = 'Select an assigned course.';
     }
 
-    if (!form.courseCode.trim()) {
-      nextErrors.courseCode = 'Course code is required.';
+    if (form.description.trim().length > 10000) {
+      nextErrors.description =
+        'Description cannot exceed 10,000 characters.';
     }
 
-    if (!form.sectionName.trim()) {
-      nextErrors.sectionName = 'Section or batch is required.';
-    }
-
-    if (!form.description.trim()) {
-      nextErrors.description = 'Quiz description is required.';
-    }
-
-    if (!form.instructions.trim()) {
-      nextErrors.instructions = 'Student instructions are required.';
-    }
-
-    const start = form.startDate
-      ? new Date(form.startDate).getTime()
+    const start = form.startAt
+      ? new Date(form.startAt).getTime()
       : NaN;
 
-    const end = form.endDate
-      ? new Date(form.endDate).getTime()
+    const end = form.endAt
+      ? new Date(form.endAt).getTime()
       : NaN;
 
-    if (!form.startDate || !Number.isFinite(start)) {
-      nextErrors.startDate = 'Enter a valid start date and time.';
+    if (!Number.isFinite(start)) {
+      nextErrors.startAt = 'Enter a valid start date and time.';
     }
 
-    if (!form.endDate || !Number.isFinite(end)) {
-      nextErrors.endDate = 'Enter a valid end date and time.';
+    if (!Number.isFinite(end)) {
+      nextErrors.endAt = 'Enter a valid end date and time.';
     } else if (Number.isFinite(start) && end <= start) {
-      nextErrors.endDate = 'End time must be after start time.';
+      nextErrors.endAt = 'End time must be after start time.';
     }
 
     const duration = Number(form.durationMinutes);
 
     if (
-      !form.durationMinutes ||
       !Number.isInteger(duration) ||
       duration < 1 ||
       duration > 1440
@@ -104,67 +253,130 @@ export default function FacultyQuizForm() {
         'Duration must be between 1 and 1,440 minutes.';
     }
 
-    const totalMarks = Number(form.totalMarks);
-
-    if (
-      !form.totalMarks ||
-      !Number.isFinite(totalMarks) ||
-      totalMarks <= 0 ||
-      totalMarks > 10000
-    ) {
-      nextErrors.totalMarks =
-        'Total marks must be greater than 0 and at most 10,000.';
+    if (!form.question.trim()) {
+      nextErrors.question = 'Question text is required.';
+    } else if (form.question.trim().length > 5000) {
+      nextErrors.question =
+        'Question cannot exceed 5,000 characters.';
     }
 
-    const passingMarks = Number(form.passingMarks);
+    const normalizedOptions = form.options.map((option) =>
+      option.trim(),
+    );
 
-    if (
-      form.passingMarks === '' ||
-      !Number.isFinite(passingMarks) ||
-      passingMarks < 0 ||
-      passingMarks > totalMarks
+    if (normalizedOptions.some((option) => !option)) {
+      nextErrors.options =
+        'All four answer options must be completed.';
+    } else if (
+      normalizedOptions.some((option) => option.length > 1000)
     ) {
-      nextErrors.passingMarks =
-        'Passing marks must be between 0 and total marks.';
+      nextErrors.options =
+        'An answer option cannot exceed 1,000 characters.';
     }
 
-    const attempts = Number(form.attemptsAllowed);
+    const marks = Number(form.questionMarks);
 
     if (
-      !Number.isInteger(attempts) ||
-      attempts < 1 ||
-      attempts > 100
+      !Number.isInteger(marks) ||
+      marks < 1 ||
+      marks > 1000
     ) {
-      nextErrors.attemptsAllowed =
-        'Attempts must be between 1 and 100.';
+      nextErrors.questionMarks =
+        'Question marks must be between 1 and 1,000.';
+    }
+
+    const correctIndex = Number(form.correctOptionIndex);
+
+    if (
+      !Number.isInteger(correctIndex) ||
+      correctIndex < 0 ||
+      correctIndex >= normalizedOptions.length
+    ) {
+      nextErrors.correctOptionIndex =
+        'Select a valid correct answer.';
     }
 
     return nextErrors;
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
+
+    if (submitting) return;
 
     const nextErrors = validateForm();
 
     setErrors(nextErrors);
+    setNotice('');
+    setError('');
 
     if (Object.keys(nextErrors).length > 0) {
-      setNotice('');
       return;
     }
 
-    // Quiz persistence is intentionally not simulated.
-    // Connect this form after confirming the backend contract.
-    setNotice(
-      'Validation successful. Quiz creation is not connected to the backend yet, so no quiz has been saved.',
-    );
+    setSubmitting(true);
+
+    try {
+      const payload = {
+        title: form.title.trim(),
+        description: form.description.trim(),
+
+        courseId: form.courseId,
+
+        batchIds: form.batchIds,
+        sectionIds: form.sectionIds,
+
+        startAt: new Date(form.startAt).toISOString(),
+        endAt: new Date(form.endAt).toISOString(),
+
+        durationMinutes: Number(form.durationMinutes),
+
+        totalMarks: Number(form.questionMarks),
+
+        status: 'DRAFT',
+
+        questions: [
+          {
+            question: form.question.trim(),
+
+            options: form.options.map((option) =>
+              option.trim(),
+            ),
+
+            correctOptionIndex: Number(
+              form.correctOptionIndex,
+            ),
+
+            marks: Number(form.questionMarks),
+          },
+        ],
+      };
+
+      const createdQuiz =
+        await quizManagementService.createQuiz(payload);
+
+      setNotice('Quiz created successfully.');
+
+      navigate(
+        `/faculty/quizzes/questions?quizId=${encodeURIComponent(createdQuiz.id)}`,
+        {
+          state: {
+            quiz: createdQuiz,
+          },
+        },
+      );
+    } catch (submitError) {
+      setError(formatError(submitError));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function handleReset() {
     setForm(INITIAL_FORM);
     setErrors({});
     setNotice('');
+    setError('');
   }
 
   return (
@@ -172,7 +384,7 @@ export default function FacultyQuizForm() {
       <PageHeader
         eyebrow="FACULTY WORKSPACE"
         title="Create Quiz"
-        description="Configure quiz information, assessment timing, scoring, and student access settings."
+        description="Configure the quiz, select its academic allocation, and add the first question."
         breadcrumbs={[
           {
             label: 'Faculty Dashboard',
@@ -195,66 +407,49 @@ export default function FacultyQuizForm() {
           </p>
 
           <p className="mt-1 text-sm text-[#9697A2]">
-            Complete the required fields before proceeding to question setup.
+            A quiz requires at least one question before it can be saved.
           </p>
         </div>
 
         <Link
           to="/faculty/quizzes"
-          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-medium text-[#D0D0D8] transition-colors hover:border-[#CDB5F7]/50 hover:text-[#EAEAE6] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+          className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-medium text-[#D0D0D8] transition-colors hover:border-[#CDB5F7]/50 hover:text-[#EAEAE6]"
         >
           Back to Quizzes
         </Link>
       </div>
+
+      {error && (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm leading-6 text-red-300"
+        >
+          {error}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} noValidate>
         <div className="space-y-6">
           <SectionCard
             eyebrow="STEP 01"
             title="Quiz Information"
-            description="Enter the quiz title and academic allocation."
+            description="Enter the quiz title and description."
           >
             <div className="grid grid-cols-1 gap-5 p-5 sm:grid-cols-2 sm:p-6">
-              <FormField
-                name="title"
-                label="Quiz Title"
-                value={form.title}
-                onChange={handleChange}
-                placeholder="Enter quiz title"
-                required
-                maxLength={120}
-                error={errors.title}
-              />
-
-              <FormField
-                name="courseName"
-                label="Course Name"
-                value={form.courseName}
-                onChange={handleChange}
-                placeholder="Enter assigned course"
-                required
-                error={errors.courseName}
-              />
-
-              <FormField
-                name="courseCode"
-                label="Course Code"
-                value={form.courseCode}
-                onChange={handleChange}
-                placeholder="Enter course code"
-                required
-                error={errors.courseCode}
-              />
-
-              <FormField
-                name="sectionName"
-                label="Section / Batch"
-                value={form.sectionName}
-                onChange={handleChange}
-                placeholder="Enter assigned section or batch"
-                required
-                error={errors.sectionName}
-              />
+              <div className="sm:col-span-2">
+                <FormField
+                  name="title"
+                  label="Quiz Title"
+                  value={form.title}
+                  onChange={(event) =>
+                    updateField('title', event.target.value)
+                  }
+                  placeholder="Enter quiz title"
+                  required
+                  maxLength={200}
+                  error={errors.title}
+                />
+              </div>
 
               <div className="sm:col-span-2">
                 <label
@@ -266,48 +461,19 @@ export default function FacultyQuizForm() {
 
                 <textarea
                   id="quiz-description"
-                  name="description"
                   value={form.description}
-                  onChange={handleChange}
-                  rows={3}
-                  maxLength={3000}
-                  required
-                  aria-invalid={Boolean(errors.description)}
-                  className="w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-3 text-sm leading-6 text-[#EAEAE6] outline-none transition-colors placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
-                  placeholder="Describe the assessment and its learning objectives..."
+                  onChange={(event) =>
+                    updateField('description', event.target.value)
+                  }
+                  rows={4}
+                  maxLength={10000}
+                  className="w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-3 text-sm leading-6 text-[#EAEAE6] outline-none placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+                  placeholder="Describe the quiz and its learning objectives..."
                 />
 
                 {errors.description && (
-                  <p role="alert" className="mt-2 text-sm text-[#D58B95]">
+                  <p className="mt-2 text-sm text-red-300">
                     {errors.description}
-                  </p>
-                )}
-              </div>
-
-              <div className="sm:col-span-2">
-                <label
-                  htmlFor="quiz-instructions"
-                  className="mb-2 block text-sm font-semibold text-[#EAEAE6]"
-                >
-                  Student Instructions
-                </label>
-
-                <textarea
-                  id="quiz-instructions"
-                  name="instructions"
-                  value={form.instructions}
-                  onChange={handleChange}
-                  rows={4}
-                  maxLength={5000}
-                  required
-                  aria-invalid={Boolean(errors.instructions)}
-                  className="w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-3 text-sm leading-6 text-[#EAEAE6] outline-none transition-colors placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
-                  placeholder="Explain quiz rules, allowed resources, and submission expectations..."
-                />
-
-                {errors.instructions && (
-                  <p role="alert" className="mt-2 text-sm text-[#D58B95]">
-                    {errors.instructions}
                   </p>
                 )}
               </div>
@@ -316,36 +482,175 @@ export default function FacultyQuizForm() {
 
           <SectionCard
             eyebrow="STEP 02"
+            title="Course Allocation"
+            description="Select a course assigned to your Faculty account."
+          >
+            <div className="space-y-5 p-5 sm:p-6">
+              <div>
+                <label
+                  htmlFor="quiz-course"
+                  className="mb-2 block text-sm font-semibold text-[#EAEAE6]"
+                >
+                  Assigned Course
+                </label>
+
+                <select
+                  id="quiz-course"
+                  value={form.courseId}
+                  onChange={handleCourseChange}
+                  disabled={courseLoading || courses.length === 0}
+                  className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-2.5 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <option value="">
+                    {courseLoading
+                      ? 'Loading assigned courses...'
+                      : 'Select a course'}
+                  </option>
+
+                  {courses.map((course) => (
+                    <option
+                      key={getId(course)}
+                      value={getId(course)}
+                    >
+                      {course.code
+                        ? `${course.code} — ${course.title}`
+                        : course.title}
+                    </option>
+                  ))}
+                </select>
+
+                {errors.courseId && (
+                  <p className="mt-2 text-sm text-red-300">
+                    {errors.courseId}
+                  </p>
+                )}
+
+                {!courseLoading && courses.length === 0 && (
+                  <p className="mt-2 text-sm text-amber-200">
+                    No active assigned courses are available.
+                  </p>
+                )}
+              </div>
+
+              {selectedCourse && (
+                <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
+                  <p className="font-medium text-[#EAEAE6]">
+                    {selectedCourse.title}
+                  </p>
+
+                  <p className="mt-1 text-xs text-[#9697A2]">
+                    {selectedCourse.code}
+                    {selectedCourse.semester
+                      ? ` · ${selectedCourse.semester}`
+                      : ''}
+                  </p>
+                </div>
+              )}
+
+              {selectedCourse && (
+                <>
+                  <div>
+                    <p className="mb-3 text-sm font-semibold text-[#EAEAE6]">
+                      Target Batches
+                    </p>
+
+                    {availableBatches.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {availableBatches.map((batch) => {
+                          const id = getId(batch);
+
+                          return (
+                            <CheckboxOption
+                              key={id}
+                              checked={form.batchIds.includes(id)}
+                              label={batch.name || batch.code || id}
+                              description={batch.academicYear || ''}
+                              onChange={() =>
+                                toggleIdentifier('batchIds', id)
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-[#9697A2]">
+                        No batches are allocated to this course.
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <p className="mb-3 text-sm font-semibold text-[#EAEAE6]">
+                      Target Sections
+                    </p>
+
+                    {availableSections.length > 0 ? (
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        {availableSections.map((section) => {
+                          const id = getId(section);
+
+                          return (
+                            <CheckboxOption
+                              key={id}
+                              checked={form.sectionIds.includes(id)}
+                              label={section.name || section.code || id}
+                              description={section.code || ''}
+                              onChange={() =>
+                                toggleIdentifier('sectionIds', id)
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-[#9697A2]">
+                        No sections are allocated to this course.
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            eyebrow="STEP 03"
             title="Schedule and Duration"
-            description="Set when the quiz becomes available and how long students have."
+            description="Set the availability window and quiz duration."
           >
             <div className="grid grid-cols-1 gap-5 p-5 sm:grid-cols-2 sm:p-6">
               <FormField
-                name="startDate"
+                name="startAt"
                 label="Start Date and Time"
                 type="datetime-local"
-                value={form.startDate}
-                onChange={handleChange}
+                value={form.startAt}
+                onChange={(event) =>
+                  updateField('startAt', event.target.value)
+                }
                 required
-                error={errors.startDate}
+                error={errors.startAt}
               />
 
               <FormField
-                name="endDate"
+                name="endAt"
                 label="End Date and Time"
                 type="datetime-local"
-                value={form.endDate}
-                onChange={handleChange}
+                value={form.endAt}
+                onChange={(event) =>
+                  updateField('endAt', event.target.value)
+                }
                 required
-                error={errors.endDate}
+                error={errors.endAt}
               />
 
               <FormField
                 name="durationMinutes"
-                label="Duration"
+                label="Duration (minutes)"
                 type="number"
                 value={form.durationMinutes}
-                onChange={handleChange}
+                onChange={(event) =>
+                  updateField('durationMinutes', event.target.value)
+                }
                 min="1"
                 max="1440"
                 step="1"
@@ -357,121 +662,137 @@ export default function FacultyQuizForm() {
           </SectionCard>
 
           <SectionCard
-            eyebrow="STEP 03"
-            title="Scoring Configuration"
-            description="Configure maximum marks, passing criteria, and attempts."
-          >
-            <div className="grid grid-cols-1 gap-5 p-5 sm:grid-cols-2 sm:p-6">
-              <FormField
-                name="totalMarks"
-                label="Total Marks"
-                type="number"
-                value={form.totalMarks}
-                onChange={handleChange}
-                placeholder="e.g. 50"
-                min="1"
-                max="10000"
-                step="1"
-                required
-                error={errors.totalMarks}
-              />
-
-              <FormField
-                name="passingMarks"
-                label="Passing Marks"
-                type="number"
-                value={form.passingMarks}
-                onChange={handleChange}
-                placeholder="e.g. 20"
-                min="0"
-                max={form.totalMarks || undefined}
-                step="1"
-                required
-                error={errors.passingMarks}
-              />
-
-              <FormField
-                name="attemptsAllowed"
-                label="Allowed Attempts"
-                type="number"
-                value={form.attemptsAllowed}
-                onChange={handleChange}
-                min="1"
-                max="100"
-                step="1"
-                required
-                error={errors.attemptsAllowed}
-                helperText="Number of attempts permitted per student."
-              />
-            </div>
-          </SectionCard>
-
-          <SectionCard
             eyebrow="STEP 04"
-            title="Quiz Behaviour"
-            description="Choose the intended quiz experience for students."
+            title="Initial Question"
+            description="The backend requires at least one question when a quiz is created."
           >
-            <div className="space-y-4 p-5 sm:p-6">
-              {[
-                {
-                  name: 'shuffleQuestions',
-                  label: 'Shuffle questions',
-                  description:
-                    'Randomize question order for each attempt.',
-                },
-                {
-                  name: 'shuffleOptions',
-                  label: 'Shuffle answer options',
-                  description:
-                    'Randomize answer-option order where supported.',
-                },
-                {
-                  name: 'showResultsAfterSubmission',
-                  label: 'Show results after submission',
-                  description:
-                    'Allow students to view their results after submitting.',
-                },
-              ].map((option) => (
+            <div className="space-y-5 p-5 sm:p-6">
+              <div>
                 <label
-                  key={option.name}
-                  className="flex cursor-pointer items-start gap-3 rounded-xl border border-[#343640] bg-[#191A21] p-4 transition-colors hover:border-[#555762]"
+                  htmlFor="quiz-question"
+                  className="mb-2 block text-sm font-semibold text-[#EAEAE6]"
                 >
-                  <input
-                    type="checkbox"
-                    name={option.name}
-                    checked={form[option.name]}
-                    onChange={handleChange}
-                    className="mt-1 h-4 w-4 accent-[#CDB5F7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
-                  />
-
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-[#EAEAE6]">
-                      {option.label}
-                    </span>
-
-                    <span className="mt-1 block text-sm leading-5 text-[#9697A2]">
-                      {option.description}
-                    </span>
-                  </span>
+                  Question
                 </label>
-              ))}
+
+                <textarea
+                  id="quiz-question"
+                  value={form.question}
+                  onChange={(event) =>
+                    updateField('question', event.target.value)
+                  }
+                  rows={3}
+                  maxLength={5000}
+                  className="w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-3 text-sm leading-6 text-[#EAEAE6] outline-none placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+                  placeholder="Enter your first multiple-choice question..."
+                />
+
+                {errors.question && (
+                  <p className="mt-2 text-sm text-red-300">
+                    {errors.question}
+                  </p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {form.options.map((option, index) => (
+                  <div key={index}>
+                    <label
+                      htmlFor={`quiz-option-${index}`}
+                      className="mb-2 block text-sm font-medium text-[#D0D0D8]"
+                    >
+                      Option {index + 1}
+                    </label>
+
+                    <input
+                      id={`quiz-option-${index}`}
+                      value={option}
+                      onChange={(event) =>
+                        updateOption(index, event.target.value)
+                      }
+                      maxLength={1000}
+                      className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-2.5 text-sm text-[#EAEAE6] outline-none placeholder:text-[#858590] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+                      placeholder={`Enter option ${index + 1}`}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {errors.options && (
+                <p className="text-sm text-red-300">
+                  {errors.options}
+                </p>
+              )}
+
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="quiz-correct-option"
+                    className="mb-2 block text-sm font-semibold text-[#EAEAE6]"
+                  >
+                    Correct Answer
+                  </label>
+
+                  <select
+                    id="quiz-correct-option"
+                    value={form.correctOptionIndex}
+                    onChange={(event) =>
+                      updateField(
+                        'correctOptionIndex',
+                        event.target.value,
+                      )
+                    }
+                    className="min-h-11 w-full rounded-xl border border-[#454650] bg-[#1D1F27] px-3.5 py-2.5 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+                  >
+                    {form.options.map((option, index) => (
+                      <option key={index} value={String(index)}>
+                        Option {index + 1}
+                      </option>
+                    ))}
+                  </select>
+
+                  {errors.correctOptionIndex && (
+                    <p className="mt-2 text-sm text-red-300">
+                      {errors.correctOptionIndex}
+                    </p>
+                  )}
+                </div>
+
+                <FormField
+                  name="questionMarks"
+                  label="Question Marks"
+                  type="number"
+                  value={form.questionMarks}
+                  onChange={(event) =>
+                    updateField('questionMarks', event.target.value)
+                  }
+                  min="1"
+                  max="1000"
+                  step="1"
+                  required
+                  error={errors.questionMarks}
+                />
+              </div>
             </div>
           </SectionCard>
 
-          {notice && (
-            <div
-              role="status"
-              className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-200"
-            >
-              {notice}
-            </div>
-          )}
+          <div className="rounded-xl border border-[#CDB5F7]/20 bg-[#CDB5F7]/5 p-4">
+            <p className="text-sm font-semibold text-[#DCCBFA]">
+              Quiz will be saved as Draft
+            </p>
+
+            <p className="mt-1 text-sm leading-6 text-[#B8B0C9]">
+              After creation, you can continue configuring its questions.
+              The quiz will not be published automatically.
+            </p>
+          </div>
 
           <div className="flex flex-col-reverse gap-3 border-t border-[#343640] pt-5 sm:flex-row sm:items-center sm:justify-between">
             <ActionButton
               type="button"
               variant="secondary"
               onClick={handleReset}
+              disabled={submitting}
             >
               Reset Form
             </ActionButton>
@@ -479,13 +800,16 @@ export default function FacultyQuizForm() {
             <div className="flex flex-col-reverse gap-3 sm:flex-row">
               <Link
                 to="/faculty/quizzes"
-                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[#454650] px-4 py-2.5 text-sm font-semibold text-[#EAEAE6] transition-colors hover:bg-[#26272B] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[#454650] px-4 py-2.5 text-sm font-semibold text-[#EAEAE6] transition-colors hover:bg-[#26272B]"
               >
                 Cancel
               </Link>
 
-              <ActionButton type="submit">
-                Validate Quiz
+              <ActionButton
+                type="submit"
+                disabled={submitting || courseLoading || courses.length === 0}
+              >
+                {submitting ? 'Creating Quiz...' : 'Create Draft Quiz'}
               </ActionButton>
             </div>
           </div>
