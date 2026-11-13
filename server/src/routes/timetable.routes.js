@@ -38,7 +38,10 @@ const timeSchema = z
     'Time must use 24-hour HH:mm format.',
   );
 
-const daySchema = z.enum(TIMETABLE_DAYS);
+// TIMETABLE_DAYS is an object, so use its values.
+const daySchema = z.enum(
+  Object.values(TIMETABLE_DAYS),
+);
 
 const statusSchema = z.enum([
   'ACTIVE',
@@ -199,10 +202,11 @@ const deleteTimetableSchema = z.object({
 });
 
 /**
+ * Faculty's personal timetable.
+ *
  * GET /api/v1/timetable/my-schedule
  *
- * Returns timetable entries belonging only to the authenticated
- * Faculty account.
+ * Faculty identity is obtained from authentication.
  */
 timetableRouter.get(
   '/my-schedule',
@@ -213,10 +217,10 @@ timetableRouter.get(
 );
 
 /**
- * GET /api/v1/timetable/manage
- *
- * Lists timetable entries belonging to the authenticated HOD's
+ * List timetable entries belonging to the authenticated HOD's
  * department.
+ *
+ * GET /api/v1/timetable/manage
  */
 timetableRouter.get(
   '/manage',
@@ -227,6 +231,8 @@ timetableRouter.get(
 );
 
 /**
+ * Create a timetable entry.
+ *
  * POST /api/v1/timetable/manage
  */
 timetableRouter.post(
@@ -256,6 +262,8 @@ timetableRouter.post(
 );
 
 /**
+ * Update an existing timetable entry.
+ *
  * PATCH /api/v1/timetable/manage/:timetableId
  */
 timetableRouter.patch(
@@ -281,6 +289,8 @@ timetableRouter.patch(
 );
 
 /**
+ * Delete an existing timetable entry.
+ *
  * DELETE /api/v1/timetable/manage/:timetableId
  */
 timetableRouter.delete(
