@@ -8,6 +8,10 @@ import {
   deleteDepartmentQuizController,
 } from '../controllers/quiz-management.controller.js';
 
+import {
+  getManagedQuizByIdController,
+} from '../controllers/quiz-details.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
@@ -116,6 +120,16 @@ const listQuizzesSchema = z.object({
   body: z.object({}).strict(),
 });
 
+const getQuizSchema = z.object({
+  params: z.object({
+    quizId: objectIdSchema,
+  }).strict(),
+
+  query: z.object({}).strict(),
+
+  body: z.object({}).strict(),
+});
+
 const createQuizSchema = z.object({
   params: z.object({}).strict(),
 
@@ -183,6 +197,21 @@ quizManagementRouter.get(
   quizManagementRoles,
   validate(listQuizzesSchema),
   listDepartmentQuizzesController,
+);
+
+/**
+ * Get a single quiz by ID.
+ * Access is restricted by the authenticated user's role,
+ * department, and course assignments.
+ *
+ * GET /api/v1/quizzes/manage/:quizId
+ */
+quizManagementRouter.get(
+  '/manage/:quizId',
+  authenticate,
+  quizManagementRoles,
+  validate(getQuizSchema),
+  getManagedQuizByIdController,
 );
 
 /**
