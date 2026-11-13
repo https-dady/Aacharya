@@ -76,6 +76,7 @@ import FacultyQuizzes from "../features/lms/pages/faculty/FacultyQuizzes.jsx";
 import FacultyQuizForm from "../features/lms/pages/faculty/FacultyQuizForm.jsx";
 import FacultyQuizQuestions from "../features/lms/pages/faculty/FacultyQuizQuestions.jsx";
 import FacultyQuizResults from "../features/lms/pages/faculty/FacultyQuizResults.jsx";
+import FacultyQuizResultDetails from "../features/lms/pages/faculty/FacultyQuizResultDetails.jsx";
 
 import FacultyResults from "../features/lms/pages/faculty/FacultyResults.jsx";
 import FacultyCourseDetails from "../features/lms/pages/faculty/FacultyCourseDetails.jsx";
@@ -472,6 +473,11 @@ export const applicationRoutes = [
         id: "faculty-quiz-results",
         path: "quizzes/results",
         element: <FacultyQuizResults />,
+      },
+      {
+        id: "faculty-quiz-result-details",
+        path: "quizzes/results/:attemptId",
+        element: <FacultyQuizResultDetails />,
       },
       {
         id: "faculty-results",
