@@ -134,7 +134,7 @@ const markAttendanceSchema = z.object({
 facultyAttendanceRouter.get(
   '/faculty/:courseId/students',
   authenticate,
-  authorize(USER_ROLES.FACULTY),
+  authorize(USER_ROLES.FACULTY, USER_ROLES.MENTOR),
   authRateLimiter,
   validate(attendanceStudentsSchema),
   listFacultyAttendanceStudentsController,
@@ -148,7 +148,7 @@ facultyAttendanceRouter.get(
 facultyAttendanceRouter.get(
   '/faculty/:courseId',
   authenticate,
-  authorize(USER_ROLES.FACULTY),
+  authorize(USER_ROLES.FACULTY, USER_ROLES.MENTOR),
   authRateLimiter,
   validate(attendanceListSchema),
   listFacultyAttendanceController,
@@ -162,7 +162,7 @@ facultyAttendanceRouter.get(
 facultyAttendanceRouter.post(
   '/faculty/:courseId',
   authenticate,
-  authorize(USER_ROLES.FACULTY),
+  authorize(USER_ROLES.FACULTY, USER_ROLES.MENTOR),
   authRateLimiter,
   validate(markAttendanceSchema),
   markFacultyAttendanceController,
