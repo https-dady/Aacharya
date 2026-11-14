@@ -114,7 +114,12 @@ async function fetchAssignedCourses(options = {}) {
 const facultyCourseService = {
   /**
    * GET /v1/courses/assigned-to-me
-   * Canonical response: { courses, total }
+   *
+   * Canonical response:
+   * {
+   *   courses: [],
+   *   total: number
+   * }
    */
   async listMyAssignedCourses(options = {}) {
     return fetchAssignedCourses(options);
@@ -122,7 +127,13 @@ const facultyCourseService = {
 
   /**
    * Compatibility adapter for FacultyAttendance.
-   * Response: { items, courses, total }
+   *
+   * Response:
+   * {
+   *   items: [],
+   *   courses: [],
+   *   total: number
+   * }
    */
   async listAssignedCourses(options = {}) {
     const result = await fetchAssignedCourses(options);

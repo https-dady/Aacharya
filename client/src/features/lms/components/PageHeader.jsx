@@ -14,22 +14,37 @@ function isSharedTeachingRole(user) {
   return role === 'MENTOR' || role === 'HOD';
 }
 
-function getSharedWorkspaceBreadcrumb(breadcrumb) {
+function normalizeBreadcrumbForSharedWorkspace(breadcrumb) {
   const label = breadcrumb.label ?? breadcrumb.title;
   const destination = breadcrumb.to ?? breadcrumb.path;
 
-  if (destination !== '/faculty/dashboard') {
-    return breadcrumb;
-  }
+  const normalizedLabel = typeof label === 'string'
+    ? label.trim().toLowerCase()
+    : '';
 
-  if (label === 'Faculty Dashboard') {
+  const isTeachingDashboardDestination =
+    destination === '/faculty/dashboard';
+
+  if (
+    normalizedLabel === 'faculty dashboard'
+    || (
+      normalizedLabel === 'dashboard'
+      && isTeachingDashboardDestination
+    )
+  ) {
     return {
       ...breadcrumb,
       label: 'Teaching Dashboard',
     };
   }
 
-  if (label === 'Faculty') {
+  if (
+    normalizedLabel === 'faculty'
+    && (
+      isTeachingDashboardDestination
+      || !destination
+    )
+  ) {
     return {
       ...breadcrumb,
       label: 'Teaching Workspace',
@@ -47,14 +62,20 @@ function getWorkspacePresentation(user, eyebrow, breadcrumbs) {
     };
   }
 
+  const normalizedEyebrow =
+    typeof eyebrow === 'string'
+      ? eyebrow.trim().toUpperCase()
+      : '';
+
   return {
     eyebrow:
-      typeof eyebrow === 'string'
-      && eyebrow.trim().toUpperCase() === 'FACULTY WORKSPACE'
+      normalizedEyebrow === 'FACULTY WORKSPACE'
         ? 'SHARED TEACHING WORKSPACE'
         : eyebrow,
 
-    breadcrumbs: breadcrumbs.map(getSharedWorkspaceBreadcrumb),
+    breadcrumbs: breadcrumbs.map(
+      normalizeBreadcrumbForSharedWorkspace,
+    ),
   };
 }
 
@@ -92,6 +113,7 @@ export default function PageHeader({
             {presentation.breadcrumbs.map((breadcrumb, index) => {
               const label = breadcrumb.label ?? breadcrumb.title;
               const destination = breadcrumb.to ?? breadcrumb.path;
+
               const isLast =
                 index === presentation.breadcrumbs.length - 1;
 
@@ -160,7 +182,11 @@ export default function PageHeader({
           </p>
         )}
 
-        {children && <div className="mt-3">{children}</div>}
+        {children && (
+          <div className="mt-3">
+            {children}
+          </div>
+        )}
       </div>
 
       {actions && (

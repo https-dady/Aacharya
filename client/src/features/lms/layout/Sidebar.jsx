@@ -24,6 +24,8 @@ const GROUP_LABELS = {
   mentoring: 'Mentoring',
   learning: 'Learning',
   account: 'Account',
+  career: 'Career',
+  community: 'Community',
 };
 
 const NAVIGATION_ICONS = {
@@ -172,29 +174,25 @@ function NavigationIcon({ item }) {
   );
 }
 
-function NavigationItem({
-  item,
-  onNavigate,
-}) {
+function NavigationItem({ item, onNavigate }) {
   return (
     <NavLink
       to={item.path}
+      end={false}
       title={item.label}
       aria-label={item.label}
       onClick={onNavigate}
-      className={({ isActive }) =>
-        [
-          'group relative flex min-h-11 items-center rounded-xl',
-          'transition-colors duration-150',
-          'focus-visible:outline-none focus-visible:ring-2',
-          'focus-visible:ring-[#CDB5F7]',
-          'focus-visible:ring-offset-2 focus-visible:ring-offset-[#14161C]',
-          'lg:justify-center lg:px-0',
-          isActive
-            ? 'bg-[#CDB5F7]/10 text-[#CDB5F7]'
-            : 'text-[#92929F] hover:bg-[#26272B] hover:text-[#EAEAE6]',
-        ].join(' ')
-      }
+      className={({ isActive }) => [
+        'group relative flex min-h-11 items-center rounded-xl',
+        'transition-colors duration-150',
+        'focus-visible:outline-none focus-visible:ring-2',
+        'focus-visible:ring-[#CDB5F7]',
+        'focus-visible:ring-offset-2 focus-visible:ring-offset-[#14161C]',
+        'lg:justify-center lg:px-0',
+        isActive
+          ? 'bg-[#CDB5F7]/10 text-[#CDB5F7]'
+          : 'text-[#92929F] hover:bg-[#26272B] hover:text-[#EAEAE6]',
+      ].join(' ')}
     >
       {({ isActive }) => (
         <>
