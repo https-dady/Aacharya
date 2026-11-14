@@ -54,7 +54,7 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       401,
       'INVALID_AUTHENTICATED_USER',
-      'A valid authenticated Faculty or Mentor account is required.',
+      'A valid authenticated Faculty, Mentor, or HOD account is required.',
     );
   }
 
@@ -74,7 +74,7 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       401,
       'ACTIVE_FACULTY_NOT_FOUND',
-      'The active Faculty or Mentor account could not be found.',
+      'The active Faculty, Mentor, or HOD account could not be found.',
     );
   }
 
@@ -82,7 +82,7 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       403,
       'FACULTY_DEPARTMENT_REQUIRED',
-      'Your Faculty or Mentor account is not assigned to a department.',
+      'Your teaching account is not assigned to a department.',
     );
   }
 
@@ -143,25 +143,26 @@ export async function listFacultyAttendanceStudentsController(
       status: ACCOUNT_STATUSES.ACTIVE,
     };
 
-    const placementConditions = [];
-
+    /*
+     * Apply canonical course ownership scope.
+     *
+     * When both batch and section are configured, the student
+     * must belong to both. This matches the attendance listing
+     * and marking controller's existing behavior.
+     *
+     * When only one scope is configured, only that scope applies.
+     */
     if (batchIds.length) {
-      placementConditions.push({
-        assignedBatches: {
-          $in: batchIds,
-        },
-      });
+      studentScope.assignedBatches = {
+        $in: batchIds,
+      };
     }
 
     if (sectionIds.length) {
-      placementConditions.push({
-        assignedSections: {
-          $in: sectionIds,
-        },
-      });
+      studentScope.assignedSections = {
+        $in: sectionIds,
+      };
     }
-
-    studentScope.$or = placementConditions;
 
     const students = await User.find(studentScope)
       .select(
