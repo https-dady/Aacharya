@@ -84,26 +84,53 @@ function normalizeCourse(course) {
   };
 }
 
-const facultyCourseService = {
-  async listMyAssignedCourses(options = {}) {
-    const response = await api.get(
-      ASSIGNED_COURSES_ENDPOINT,
-      options.signal
-        ? { signal: options.signal }
-        : undefined,
+async function fetchAssignedCourses(options = {}) {
+  const response = await api.get(
+    ASSIGNED_COURSES_ENDPOINT,
+    options.signal
+      ? { signal: options.signal }
+      : undefined,
+  );
+
+  const data = unwrapResponse(response);
+
+  if (!Array.isArray(data?.courses)) {
+    throw new Error(
+      'The server returned an invalid assigned course list.',
     );
+  }
 
-    const data = unwrapResponse(response);
+  const courses = data.courses.map(normalizeCourse);
+  const total = Number(data.total ?? courses.length);
 
-    if (!Array.isArray(data?.courses)) {
-      throw new Error(
-        'The server returned an invalid assigned course list.',
-      );
-    }
+  return {
+    courses,
+    total: Number.isFinite(total) && total >= 0
+      ? total
+      : courses.length,
+  };
+}
+
+const facultyCourseService = {
+  /**
+   * GET /v1/courses/assigned-to-me
+   * Canonical response: { courses, total }
+   */
+  async listMyAssignedCourses(options = {}) {
+    return fetchAssignedCourses(options);
+  },
+
+  /**
+   * Compatibility adapter for FacultyAttendance.
+   * Response: { items, courses, total }
+   */
+  async listAssignedCourses(options = {}) {
+    const result = await fetchAssignedCourses(options);
 
     return {
-      courses: data.courses.map(normalizeCourse),
-      total: Number(data.total ?? data.courses.length),
+      items: result.courses,
+      courses: result.courses,
+      total: result.total,
     };
   },
 };
