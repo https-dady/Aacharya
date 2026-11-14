@@ -1,12 +1,25 @@
+import {
+  useCallback,
+  useEffect,
+  useState,
+} from 'react';
+
 import { Link } from 'react-router-dom';
 
 import useAuth from '../../../auth/context/useAuth.js';
+
+import mentorDashboardService from '../../services/mentorDashboardService.js';
 
 import EmptyState from '../../components/EmptyState.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
-function OverviewCard({ title, description, icon, children }) {
+function OverviewCard({
+  title,
+  description,
+  icon,
+  children,
+}) {
   return (
     <SectionCard
       title={title}
@@ -19,7 +32,11 @@ function OverviewCard({ title, description, icon, children }) {
   );
 }
 
-function MetricCard({ label, value, description }) {
+function MetricCard({
+  label,
+  value,
+  description,
+}) {
   return (
     <article className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
       <p className="text-sm font-medium text-[#A5A6B0]">
@@ -37,7 +54,12 @@ function MetricCard({ label, value, description }) {
   );
 }
 
-function QuickAction({ title, description, to, icon }) {
+function QuickAction({
+  title,
+  description,
+  to,
+  icon,
+}) {
   return (
     <Link
       to={to}
@@ -91,64 +113,149 @@ function Icon({ children }) {
   );
 }
 
+function LoadingState() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
+    >
+      {Array.from({ length: 4 }).map((_, index) => (
+        <div
+          key={index}
+          className="animate-pulse rounded-2xl border border-[#343640] bg-[#1D1F27] p-5"
+        >
+          <div className="h-4 w-28 rounded bg-[#343640]" />
+
+          <div className="mt-5 h-8 w-16 rounded bg-[#343640]" />
+
+          <div className="mt-4 h-3 w-40 rounded bg-[#343640]" />
+        </div>
+      ))}
+
+      <span className="sr-only">
+        Loading mentor dashboard.
+      </span>
+    </div>
+  );
+}
+
+function ErrorState({
+  message,
+  onRetry,
+}) {
+  return (
+    <div
+      role="alert"
+      className="rounded-2xl border border-red-400/20 bg-red-400/5 p-5"
+    >
+      <h3 className="text-sm font-semibold text-[#EAEAE6]">
+        Unable to load dashboard
+      </h3>
+
+      <p className="mt-2 text-sm leading-6 text-[#A5A6B0]">
+        {message}
+      </p>
+
+      <button
+        type="button"
+        onClick={onRetry}
+        className="mt-4 inline-flex min-h-10 items-center justify-center rounded-xl bg-[#CDB5F7] px-4 py-2 text-sm font-semibold text-[#17151E] transition-colors hover:bg-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+      >
+        Try again
+      </button>
+    </div>
+  );
+}
+
+function getInitials(name) {
+  return String(name || '')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0))
+    .join('')
+    .toUpperCase();
+}
+
 export default function MentorDashboard() {
   const { user } = useAuth();
 
+  const [dashboard, setDashboard] = useState(null);
+
+  const [loading, setLoading] = useState(true);
+
+  const [error, setError] = useState('');
+
+  const loadDashboard = useCallback(async (signal) => {
+    setLoading(true);
+    setError('');
+
+    try {
+      const result = await mentorDashboardService.getDashboard({
+        signal,
+      });
+
+      if (!signal.aborted) {
+        setDashboard(result);
+      }
+    } catch (requestError) {
+      if (
+        !signal.aborted &&
+        requestError?.code !== 'ERR_CANCELED'
+      ) {
+        setError(
+          requestError?.message ||
+          'Unable to retrieve your mentoring information.',
+        );
+      }
+    } finally {
+      if (!signal.aborted) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    loadDashboard(controller.signal);
+
+    return () => {
+      controller.abort();
+    };
+  }, [loadDashboard]);
+
   const displayName =
+    dashboard?.mentor?.fullName?.trim() ||
     user?.fullName?.trim() ||
     user?.name?.trim() ||
     'Mentor';
 
   const departmentName =
-    typeof user?.department === 'string'
-      ? user.department
-      : user?.department?.name || '';
+    dashboard?.department?.name ||
+    (
+      typeof user?.department === 'object'
+        ? user.department?.name
+        : user?.department
+    ) ||
+    '';
 
-  const assignedBatches = Array.isArray(user?.assignedBatches)
-    ? user.assignedBatches
-    : [];
+  const batches = dashboard?.assignments?.batches ?? [];
 
-  const assignedSections = Array.isArray(user?.assignedSections)
-    ? user.assignedSections
-    : [];
+  const sections = dashboard?.assignments?.sections ?? [];
 
-  const assignedStudents = Array.isArray(user?.assignedStudents)
-    ? user.assignedStudents
-    : [];
+  const students = dashboard?.recentStudents ?? [];
 
-  const hasBatchData =
-    Array.isArray(user?.assignedBatches) ||
-    Array.isArray(user?.assignedSections);
+  const summary = dashboard?.summary;
 
-  const hasStudentData = Array.isArray(user?.assignedStudents);
+  const attendance = summary?.attendance;
 
-  const batchCount = hasBatchData
-    ? new Set(
-        assignedBatches
-          .map((batch) =>
-            typeof batch === 'string'
-              ? batch
-              : batch?._id || batch?.id || batch?.name,
-          )
-          .filter(Boolean),
-      ).size
-    : null;
+  const retryDashboard = () => {
+    const controller = new AbortController();
 
-  const sectionCount = hasBatchData
-    ? new Set(
-        assignedSections
-          .map((section) =>
-            typeof section === 'string'
-              ? section
-              : section?._id || section?.id || section?.name,
-          )
-          .filter(Boolean),
-      ).size
-    : null;
-
-  const studentCount = hasStudentData
-    ? assignedStudents.length
-    : null;
+    loadDashboard(controller.signal);
+  };
 
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-6">
@@ -166,6 +273,13 @@ export default function MentorDashboard() {
           },
         ]}
       />
+
+      {error && (
+        <ErrorState
+          message={error}
+          onRetry={retryDashboard}
+        />
+      )}
 
       <section className="relative overflow-hidden rounded-2xl border border-[#CDB5F7]/20 bg-gradient-to-br from-[#262333] via-[#1D1F27] to-[#1D1F27] p-5 sm:p-7">
         <div
@@ -224,48 +338,39 @@ export default function MentorDashboard() {
           </h2>
 
           <p className="mt-1 text-sm text-[#858590]">
-            Counts will appear when the corresponding assigned records are
-            available in the authenticated user context.
+            Live information retrieved from your assigned academic records.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <MetricCard
-            label="Assigned batches"
-            value={batchCount === null ? '—' : batchCount}
-            description={
-              batchCount === null
-                ? 'Assigned batch data is not available.'
-                : 'Batches assigned to your mentoring account.'
-            }
-          />
+        {loading ? (
+          <LoadingState />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <MetricCard
+              label="Assigned batches"
+              value={summary?.assignedBatches ?? '—'}
+              description="Active batches assigned to your mentoring account."
+            />
 
-          <MetricCard
-            label="Assigned sections"
-            value={sectionCount === null ? '—' : sectionCount}
-            description={
-              sectionCount === null
-                ? 'Assigned section data is not available.'
-                : 'Sections represented in your account.'
-            }
-          />
+            <MetricCard
+              label="Assigned sections"
+              value={summary?.assignedSections ?? '—'}
+              description="Active sections under your mentoring responsibility."
+            />
 
-          <MetricCard
-            label="Assigned students"
-            value={studentCount === null ? '—' : studentCount}
-            description={
-              studentCount === null
-                ? 'Student records are not available in the current account context.'
-                : 'Students represented in your assigned-student records.'
-            }
-          />
+            <MetricCard
+              label="Assigned students"
+              value={summary?.assignedStudents ?? '—'}
+              description="Active students belonging to your assigned sections."
+            />
 
-          <MetricCard
-            label="Attendance overview"
-            value="—"
-            description="Attendance summaries will be displayed when their records are available."
-          />
-        </div>
+            <MetricCard
+              label="Attendance records"
+              value={attendance?.total ?? '—'}
+              description={`${attendance?.present ?? 0} present · ${attendance?.absent ?? 0} absent · ${attendance?.late ?? 0} late`}
+            />
+          </div>
+        )}
       </section>
 
       <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -281,70 +386,52 @@ export default function MentorDashboard() {
             </Icon>
           }
         >
-          {hasStudentData && assignedStudents.length > 0 ? (
+          {loading ? (
+            <p className="text-sm text-[#858590]">
+              Loading assigned students...
+            </p>
+          ) : students.length > 0 ? (
             <div className="space-y-3">
-              {assignedStudents.slice(0, 5).map((student, index) => {
-                const studentId =
-                  student?._id || student?.id || index;
-
-                const studentName =
-                  student?.fullName ||
-                  student?.name ||
-                  student?.studentName ||
-                  'Student name unavailable';
-
-                const studentRoll =
-                  student?.rollNumber ||
-                  student?.enrollmentNumber ||
-                  student?.registrationNumber;
-
-                return (
-                  <div
-                    key={studentId}
-                    className="flex min-w-0 items-center gap-3 rounded-xl border border-[#343640] bg-[#191A21] p-3"
-                  >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#303139] text-sm font-semibold text-[#CDB5F7]">
-                      {studentName
-                        .split(/\s+/)
-                        .slice(0, 2)
-                        .map((part) => part.charAt(0))
-                        .join('')
-                        .toUpperCase()}
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="break-words text-sm font-medium text-[#EAEAE6]">
-                        {studentName}
-                      </p>
-
-                      {studentRoll && (
-                        <p className="mt-1 text-xs text-[#858590]">
-                          {studentRoll}
-                        </p>
-                      )}
-                    </div>
+              {students.slice(0, 5).map((student) => (
+                <div
+                  key={student.id}
+                  className="flex min-w-0 items-center gap-3 rounded-xl border border-[#343640] bg-[#191A21] p-3"
+                >
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#303139] text-sm font-semibold text-[#CDB5F7]">
+                    {getInitials(student.fullName) || 'ST'}
                   </div>
-                );
-              })}
+
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words text-sm font-medium text-[#EAEAE6]">
+                      {student.fullName || 'Student name unavailable'}
+                    </p>
+
+                    <p className="mt-1 text-xs text-[#858590]">
+                      {student.institutionalId || 'Institutional ID unavailable'}
+                    </p>
+                  </div>
+
+                  <span className="rounded-lg border border-[#343640] px-2 py-1 text-xs text-[#A5A6B0]">
+                    {student.status}
+                  </span>
+                </div>
+              ))}
 
               <Link
                 to="/mentor/students"
-                className="inline-flex min-h-10 items-center text-sm font-semibold text-[#CDB5F7] hover:text-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                className="inline-flex min-h-10 items-center text-sm font-semibold text-[#CDB5F7] hover:text-[#DCCBFA]"
               >
-                View all assigned students
-                <span className="ml-2" aria-hidden="true">
-                  →
-                </span>
+                View all assigned students →
               </Link>
             </div>
           ) : (
             <EmptyState
-              title="Assigned student records unavailable"
-              description="Student information will appear here when assigned-student records are supplied. The dashboard does not generate sample student records."
+              title="No assigned students found"
+              description="Students will appear here when active student accounts belong to your assigned sections."
               action={
                 <Link
                   to="/mentor/students"
-                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-semibold text-[#CDB5F7] transition-colors hover:bg-[#CDB5F7]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-semibold text-[#CDB5F7] transition-colors hover:bg-[#CDB5F7]/10"
                 >
                   Open assigned students
                 </Link>
@@ -363,89 +450,65 @@ export default function MentorDashboard() {
             </Icon>
           }
         >
-          {hasBatchData &&
-          (assignedBatches.length > 0 || assignedSections.length > 0) ? (
+          {loading ? (
+            <p className="text-sm text-[#858590]">
+              Loading assignments...
+            </p>
+          ) : batches.length > 0 || sections.length > 0 ? (
             <div className="space-y-4">
-              {assignedBatches.length > 0 && (
+              {batches.length > 0 && (
                 <div>
                   <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#858590]">
                     Assigned batches
                   </h3>
 
                   <div className="flex flex-wrap gap-2">
-                    {assignedBatches.map((batch, index) => {
-                      const name =
-                        typeof batch === 'string'
-                          ? batch
-                          : batch?.name ||
-                            batch?.batchName ||
-                            batch?.code ||
-                            `Batch ${index + 1}`;
-
-                      return (
-                        <span
-                          key={batch?._id || batch?.id || `${name}-${index}`}
-                          className="rounded-lg border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6]"
-                        >
-                          {name}
-                        </span>
-                      );
-                    })}
+                    {batches.map((batch) => (
+                      <span
+                        key={batch.id}
+                        className="rounded-lg border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6]"
+                      >
+                        {batch.name || batch.code || 'Unnamed batch'}
+                      </span>
+                    ))}
                   </div>
                 </div>
               )}
 
-              {assignedSections.length > 0 && (
+              {sections.length > 0 && (
                 <div>
                   <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-[#858590]">
                     Assigned sections
                   </h3>
 
                   <div className="flex flex-wrap gap-2">
-                    {assignedSections.map((section, index) => {
-                      const name =
-                        typeof section === 'string'
-                          ? section
-                          : section?.name ||
-                            section?.sectionName ||
-                            section?.code ||
-                            `Section ${index + 1}`;
-
-                      return (
-                        <span
-                          key={
-                            section?._id ||
-                            section?.id ||
-                            `${name}-${index}`
-                          }
-                          className="rounded-lg border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6]"
-                        >
-                          {name}
-                        </span>
-                      );
-                    })}
+                    {sections.map((section) => (
+                      <span
+                        key={section.id}
+                        className="rounded-lg border border-[#454650] bg-[#191A21] px-3 py-2 text-sm text-[#EAEAE6]"
+                      >
+                        {section.name || section.code || 'Unnamed section'}
+                      </span>
+                    ))}
                   </div>
                 </div>
               )}
 
               <Link
                 to="/mentor/batches"
-                className="inline-flex min-h-10 items-center text-sm font-semibold text-[#CDB5F7] hover:text-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                className="inline-flex min-h-10 items-center text-sm font-semibold text-[#CDB5F7] hover:text-[#DCCBFA]"
               >
-                Open batches and sections
-                <span className="ml-2" aria-hidden="true">
-                  →
-                </span>
+                Open batches and sections →
               </Link>
             </div>
           ) : (
             <EmptyState
               title="No assignment information available"
-              description="Your assigned batches and sections will appear here when that information is available in your account context."
+              description="Your assigned batches and sections will appear here when your department assigns them."
               action={
                 <Link
                   to="/mentor/batches"
-                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-semibold text-[#CDB5F7] transition-colors hover:bg-[#CDB5F7]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+                  className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#454650] px-4 py-2 text-sm font-semibold text-[#CDB5F7] transition-colors hover:bg-[#CDB5F7]/10"
                 >
                   View my batches
                 </Link>
@@ -502,7 +565,7 @@ export default function MentorDashboard() {
 
           <QuickAction
             title="Attendance"
-            description="Access the attendance overview for your assigned students."
+            description="Access attendance information for your assigned students."
             to="/mentor/attendance"
             icon={
               <Icon>
@@ -517,7 +580,7 @@ export default function MentorDashboard() {
       <SectionCard
         eyebrow="ACADEMIC OVERSIGHT"
         title="Student attendance and academic progress"
-        description="Access the relevant attendance and academic information for students within your mentoring scope."
+        description="Access relevant attendance and academic information for students within your mentoring scope."
       >
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="rounded-xl border border-[#343640] bg-[#191A21] p-4">
@@ -540,20 +603,43 @@ export default function MentorDashboard() {
               </div>
             </div>
 
-            <p className="mt-4 text-sm leading-6 text-[#A5A6B0]">
-              Attendance percentages, records and warnings for students
-              below 75% attendance will be represented here when the
-              relevant records are available.
-            </p>
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <div className="rounded-lg bg-[#20212A] p-3">
+                <p className="text-xs text-[#858590]">
+                  Present
+                </p>
+
+                <p className="mt-1 text-lg font-semibold text-[#EAEAE6]">
+                  {loading ? '—' : attendance?.present ?? 0}
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-[#20212A] p-3">
+                <p className="text-xs text-[#858590]">
+                  Absent
+                </p>
+
+                <p className="mt-1 text-lg font-semibold text-[#EAEAE6]">
+                  {loading ? '—' : attendance?.absent ?? 0}
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-[#20212A] p-3">
+                <p className="text-xs text-[#858590]">
+                  Late
+                </p>
+
+                <p className="mt-1 text-lg font-semibold text-[#EAEAE6]">
+                  {loading ? '—' : attendance?.late ?? 0}
+                </p>
+              </div>
+            </div>
 
             <Link
               to="/mentor/attendance"
-              className="mt-4 inline-flex min-h-10 items-center text-sm font-semibold text-[#CDB5F7] hover:text-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+              className="mt-4 inline-flex min-h-10 items-center text-sm font-semibold text-[#CDB5F7] hover:text-[#DCCBFA]"
             >
-              Open attendance
-              <span className="ml-2" aria-hidden="true">
-                →
-              </span>
+              Open attendance →
             </Link>
           </div>
 
@@ -573,24 +659,21 @@ export default function MentorDashboard() {
                 </h3>
 
                 <p className="mt-1 text-xs text-[#858590]">
-                  Relevant student information
+                  Student information
                 </p>
               </div>
             </div>
 
             <p className="mt-4 text-sm leading-6 text-[#A5A6B0]">
-              Relevant academic information will be displayed according
-              to the mentor's assigned students and permitted scope.
+              Access student profiles and their academic records according
+              to your assigned mentoring scope.
             </p>
 
             <Link
               to="/mentor/students"
-              className="mt-4 inline-flex min-h-10 items-center text-sm font-semibold text-[#CDB5F7] hover:text-[#DCCBFA] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+              className="mt-4 inline-flex min-h-10 items-center text-sm font-semibold text-[#CDB5F7] hover:text-[#DCCBFA]"
             >
-              View student records
-              <span className="ml-2" aria-hidden="true">
-                →
-              </span>
+              View student records →
             </Link>
           </div>
         </div>
