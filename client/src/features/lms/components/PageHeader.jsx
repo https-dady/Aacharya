@@ -8,44 +8,53 @@ function normalizeRole(role) {
     : '';
 }
 
+function isSharedTeachingRole(user) {
+  const role = normalizeRole(user?.role);
+
+  return role === 'MENTOR' || role === 'HOD';
+}
+
+function getSharedWorkspaceBreadcrumb(breadcrumb) {
+  const label = breadcrumb.label ?? breadcrumb.title;
+  const destination = breadcrumb.to ?? breadcrumb.path;
+
+  if (destination !== '/faculty/dashboard') {
+    return breadcrumb;
+  }
+
+  if (label === 'Faculty Dashboard') {
+    return {
+      ...breadcrumb,
+      label: 'Teaching Dashboard',
+    };
+  }
+
+  if (label === 'Faculty') {
+    return {
+      ...breadcrumb,
+      label: 'Teaching Workspace',
+    };
+  }
+
+  return breadcrumb;
+}
+
 function getWorkspacePresentation(user, eyebrow, breadcrumbs) {
-  const primaryRole = normalizeRole(user?.role);
-
-  const isSharedTeachingRole =
-    primaryRole === 'MENTOR' || primaryRole === 'HOD';
-
-  if (!isSharedTeachingRole) {
+  if (!isSharedTeachingRole(user)) {
     return {
       eyebrow,
       breadcrumbs,
     };
   }
 
-  const normalizedEyebrow =
-    typeof eyebrow === 'string'
-      ? eyebrow.trim().toUpperCase()
-      : '';
-
-  const isFacultyWorkspace =
-    normalizedEyebrow === 'FACULTY WORKSPACE';
-
   return {
-    eyebrow: isFacultyWorkspace
-      ? 'SHARED TEACHING WORKSPACE'
-      : eyebrow,
+    eyebrow:
+      typeof eyebrow === 'string'
+      && eyebrow.trim().toUpperCase() === 'FACULTY WORKSPACE'
+        ? 'SHARED TEACHING WORKSPACE'
+        : eyebrow,
 
-    breadcrumbs: breadcrumbs.map((breadcrumb) => {
-      const label = breadcrumb.label ?? breadcrumb.title;
-
-      if (label === 'Faculty Dashboard') {
-        return {
-          ...breadcrumb,
-          label: 'Teaching Dashboard',
-        };
-      }
-
-      return breadcrumb;
-    }),
+    breadcrumbs: breadcrumbs.map(getSharedWorkspaceBreadcrumb),
   };
 }
 
@@ -60,10 +69,14 @@ export default function PageHeader({
 }) {
   const { user } = useAuth();
 
+  const safeBreadcrumbs = Array.isArray(breadcrumbs)
+    ? breadcrumbs
+    : [];
+
   const presentation = getWorkspacePresentation(
     user,
     eyebrow,
-    Array.isArray(breadcrumbs) ? breadcrumbs : [],
+    safeBreadcrumbs,
   );
 
   return (
