@@ -347,14 +347,23 @@ export async function importStudentsController(req, res, next) {
       payloadHash,
     };
 
-    const assignedSectionIds = (
-      mentor.assignedSections || []
-    ).map((id) => id.toString());
+    // Section.mentor is the canonical ownership source.
+    // The denormalized User.assignedSections array must not
+    // independently authorize a student import.
+    const ownedSection = await Section.findOne({
+      _id: sectionId,
+      department: mentor.department,
+      mentor: mentor._id,
+      status: 'ACTIVE',
+    })
+      .select('_id batch department mentor status')
+      .lean()
+      .exec();
 
-    if (!assignedSectionIds.includes(sectionId)) {
+    if (!ownedSection) {
       return res.status(403).json({
         success: false,
-        message: 'You are not assigned to this section.',
+        message: 'You are not assigned to this active section.',
       });
     }
 
@@ -419,31 +428,21 @@ export async function importStudentsController(req, res, next) {
         throw error;
       }
 
-      const currentAssignedSections = (
-        activeMentor.assignedSections || []
-      ).map((id) => id.toString());
-
-      if (!currentAssignedSections.includes(sectionId)) {
-        const error = new Error(
-          'You are not assigned to this section.',
-        );
-
-        error.statusCode = 403;
-        throw error;
-      }
-
+      // Re-check canonical ownership inside the transaction.
+      // A stale assignment array cannot authorize this import.
       const section = await Section.findOne({
         _id: sectionId,
         department: activeMentor.department,
+        mentor: activeMentor._id,
         status: 'ACTIVE',
       }).session(session);
 
       if (!section) {
         const error = new Error(
-          'No active section was found in your department.',
+          'You are not assigned to this active section.',
         );
 
-        error.statusCode = 404;
+        error.statusCode = 403;
         throw error;
       }
 
@@ -459,19 +458,6 @@ export async function importStudentsController(req, res, next) {
         );
 
         error.statusCode = 400;
-        throw error;
-      }
-
-      const currentAssignedBatches = (
-        activeMentor.assignedBatches || []
-      ).map((id) => id.toString());
-
-      if (!currentAssignedBatches.includes(String(batch._id))) {
-        const error = new Error(
-          'You are not assigned to this batch.',
-        );
-
-        error.statusCode = 403;
         throw error;
       }
 
