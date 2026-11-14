@@ -212,7 +212,7 @@ export async function getMentorAttendanceOverviewController(
     };
 
     const students = await User.find(studentFilter)
-      .select('_id institutionalId fullName email')
+      .select('_id institutionalId fullName email assignedSections')
       .sort({ fullName: 1 })
       .lean()
       .exec();
@@ -239,6 +239,7 @@ export async function getMentorAttendanceOverviewController(
 
       if (endDate) {
         const exclusiveEndDate = new Date(endDate);
+
         exclusiveEndDate.setUTCDate(
           exclusiveEndDate.getUTCDate() + 1,
         );
@@ -256,6 +257,7 @@ export async function getMentorAttendanceOverviewController(
             $group: {
               _id: {
                 student: '$student',
+                section: '$section',
                 status: '$status',
               },
               count: {
@@ -265,6 +267,21 @@ export async function getMentorAttendanceOverviewController(
           },
         ])
       : [];
+
+    /*
+     * Verify the exact student-section relationship.
+     *
+     * Independent student and section $in filters can include
+     * stale attendance records after a student changes sections.
+     */
+    const assignedSectionsByStudent = new Map(
+      students.map((student) => [
+        String(student._id),
+        new Set(
+          (student.assignedSections || []).map(String),
+        ),
+      ]),
+    );
 
     const attendanceByStudent = new Map();
 
@@ -277,6 +294,14 @@ export async function getMentorAttendanceOverviewController(
 
     for (const record of groupedAttendance) {
       const studentId = String(record._id.student);
+      const sectionId = String(record._id.section);
+
+      const assignedSections =
+        assignedSectionsByStudent.get(studentId);
+
+      if (!assignedSections?.has(sectionId)) {
+        continue;
+      }
 
       if (!attendanceByStudent.has(studentId)) {
         attendanceByStudent.set(studentId, {

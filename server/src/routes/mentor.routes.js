@@ -12,6 +12,10 @@ import {
 } from '../controllers/mentor-dashboard.controller.js';
 
 import {
+  getMentorAttendanceOverviewController,
+} from '../controllers/mentor-attendance-overview.controller.js';
+
+import {
   getMentorSelfProfileController,
   updateMentorSelfProfileController,
 } from '../controllers/mentor-self-profile.controller.js';
@@ -37,6 +41,15 @@ const objectIdSchema = z
   .regex(/^[a-f\d]{24}$/i, 'A valid MongoDB ID is required.');
 
 const emptyObjectSchema = z.object({}).strict();
+
+const mentorAttendanceOverviewSchema = z.object({
+  params: emptyObjectSchema,
+  body: emptyObjectSchema,
+  query: z.object({
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  }).strict(),
+});
 
 const assignMentorSchema = z.object({
   params: z.object({
@@ -105,6 +118,21 @@ mentorRouter.get(
   authorize('MENTOR'),
   authRateLimiter,
   getMentorDashboardController,
+);
+
+/**
+ * GET /api/v1/provisioning/mentor/attendance-overview
+ *
+ * Returns attendance metrics only for the mentor's currently
+ * assigned active sections and students assigned to those sections.
+ */
+mentorRouter.get(
+  '/mentor/attendance-overview',
+  authenticate,
+  authorize('MENTOR'),
+  authRateLimiter,
+  validate(mentorAttendanceOverviewSchema),
+  getMentorAttendanceOverviewController,
 );
 
 /**
