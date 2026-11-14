@@ -33,13 +33,9 @@ function normalizeEmail(value) {
  * Generates an import preview without creating or modifying
  * any student accounts.
  *
- * The preview:
- * - Verifies the active mentor.
- * - Verifies the mentor's section and batch assignments.
- * - Detects institutional IDs already present in the database.
- * - Detects email addresses already present in the database.
- * - Returns row-level conflict information.
- * - Never returns passwords or password hashes.
+ * Mentor ownership is resolved through Section.mentor.
+ * Legacy User.assignedSections and User.assignedBatches arrays
+ * are not used to authorize the Mentor.
  */
 export async function previewStudentImport({
   mentorId,
@@ -79,7 +75,7 @@ export async function previewStudentImport({
     role: USER_ROLES.MENTOR,
     status: ACCOUNT_STATUSES.ACTIVE,
   })
-    .select('_id department assignedBatches assignedSections')
+    .select('_id department')
     .lean();
 
   if (!mentor) {
@@ -89,42 +85,20 @@ export async function previewStudentImport({
     );
   }
 
-  const normalizedSectionId = String(sectionId);
-
-  const assignedSections = (mentor.assignedSections || []).map(
-    (id) => String(id),
-  );
-
-  if (!assignedSections.includes(normalizedSectionId)) {
-    throw new StudentImportPreviewError(
-      'You are not assigned to this section.',
-      403,
-    );
-  }
-
+  // Canonical ownership: the section itself identifies its Mentor.
   const section = await Section.findOne({
     _id: sectionId,
+    mentor: mentor._id,
     status: 'ACTIVE',
     department: mentor.department,
   })
-    .select('_id name code batch department status')
+    .select('_id name code batch department status mentor')
     .lean();
 
   if (!section) {
     throw new StudentImportPreviewError(
-      'Active section not found in your department.',
+      'Active section not found in your assigned sections.',
       404,
-    );
-  }
-
-  const assignedBatches = (mentor.assignedBatches || []).map(
-    (id) => String(id),
-  );
-
-  if (!assignedBatches.includes(String(section.batch))) {
-    throw new StudentImportPreviewError(
-      'You are not assigned to the batch containing this section.',
-      403,
     );
   }
 
@@ -173,10 +147,6 @@ export async function previewStudentImport({
     };
   });
 
-  /*
-   * Detect duplicates inside the supplied rows as a defensive
-   * check, even though the CSV/XLSX parsers already validate them.
-   */
   const firstIdRow = new Map();
   const firstEmailRow = new Map();
   const inputErrors = [];
@@ -227,13 +197,6 @@ export async function previewStudentImport({
     .map((row) => row.email)
     .filter(Boolean);
 
-  /*
-   * Query existing records in batches instead of performing
-   * one database query per imported student.
-   *
-   * These checks are global because institutional IDs and
-   * email addresses are unique across the User collection.
-   */
   const existingUsers = await User.find({
     $or: [
       {

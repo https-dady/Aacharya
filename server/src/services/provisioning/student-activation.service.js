@@ -25,11 +25,7 @@ const ACTIVATION_TOKEN_BYTES = 32;
 const ACTIVATION_EXPIRY_MS = 24 * 60 * 60 * 1000;
 const MAX_FAILED_ATTEMPTS = 10;
 
-function createServiceError(
-  statusCode,
-  code,
-  message,
-) {
+function createServiceError(statusCode, code, message) {
   const error = new Error(message);
 
   error.statusCode = statusCode;
@@ -166,17 +162,15 @@ async function getAuthorizedActivationScope({
     );
   }
 
-  const mentor = await User.findById(mentorId)
-    .select(
-      '_id role status department assignedBatches assignedSections',
-    )
+  const mentor = await User.findOne({
+    _id: mentorId,
+    role: USER_ROLES.MENTOR,
+    status: ACCOUNT_STATUSES.ACTIVE,
+  })
+    .select('_id role status department')
     .exec();
 
-  if (
-    !mentor
-    || mentor.role !== USER_ROLES.MENTOR
-    || mentor.status !== ACCOUNT_STATUSES.ACTIVE
-  ) {
+  if (!mentor) {
     throw createServiceError(
       403,
       'MENTOR_NOT_AUTHORIZED',
@@ -233,55 +227,46 @@ async function getAuthorizedActivationScope({
     );
   }
 
-  const mentorBatchIds = normalizeObjectIdList(
-    mentor.assignedBatches || [],
-  );
-
-  const mentorSectionIds = normalizeObjectIdList(
-    mentor.assignedSections || [],
-  );
-
-  const studentBatchIds = normalizeObjectIdList(
-    student.assignedBatches || [],
-  );
-
   const studentSectionIds = normalizeObjectIdList(
     student.assignedSections || [],
   );
 
-  const commonSectionIds = mentorSectionIds.filter(
-    (sectionId) => studentSectionIds.includes(sectionId),
-  );
-
-  const commonBatchIds = mentorBatchIds.filter(
-    (batchId) => studentBatchIds.includes(batchId),
-  );
-
-  if (
-    commonSectionIds.length === 0
-    || commonBatchIds.length === 0
-  ) {
+  if (studentSectionIds.length === 0) {
     throw createServiceError(
       403,
       'STUDENT_NOT_ASSIGNED',
-      'You can only activate students in your assigned batches and sections.',
+      'The student is not assigned to any section.',
     );
   }
 
+  // Section.mentor is canonical. Student.assignedSections only
+  // verifies that the student belongs to that section.
   const section = await Section.findOne({
-    _id: { $in: commonSectionIds },
-    batch: { $in: commonBatchIds },
+    _id: { $in: studentSectionIds },
+    mentor: mentor._id,
     department: mentor.department,
     status: 'ACTIVE',
   })
-    .select('_id batch department status')
+    .select('_id batch department status mentor')
     .exec();
 
   if (!section) {
     throw createServiceError(
       403,
-      'ACTIVE_SECTION_NOT_ASSIGNED',
-      'No active section shared by this mentor and student was found.',
+      'STUDENT_NOT_ASSIGNED',
+      'You can only activate students belonging to your active assigned sections.',
+    );
+  }
+
+  const studentBatchIds = normalizeObjectIdList(
+    student.assignedBatches || [],
+  );
+
+  if (!studentBatchIds.includes(section.batch.toString())) {
+    throw createServiceError(
+      403,
+      'STUDENT_BATCH_MISMATCH',
+      'The student is not assigned to the batch containing the selected section.',
     );
   }
 
@@ -347,6 +332,69 @@ export async function createStudentActivationChallenge({
 
   try {
     await session.withTransaction(async () => {
+      const [
+        activeMentor,
+        currentStudent,
+        currentSection,
+        currentBatch,
+      ] = await Promise.all([
+        User.findOne({
+          _id: mentor._id,
+          role: USER_ROLES.MENTOR,
+          status: ACCOUNT_STATUSES.ACTIVE,
+          department: mentor.department,
+        })
+          .select('_id')
+          .session(session)
+          .exec(),
+
+        User.findOne({
+          _id: student._id,
+          role: USER_ROLES.STUDENT,
+          status: ACCOUNT_STATUSES.ACTIVE,
+          department: mentor.department,
+          assignedSections: section._id,
+          assignedBatches: batch._id,
+          isAccountActivated: false,
+        })
+          .select('_id')
+          .session(session)
+          .exec(),
+
+        Section.findOne({
+          _id: section._id,
+          mentor: mentor._id,
+          department: mentor.department,
+          batch: batch._id,
+          status: 'ACTIVE',
+        })
+          .select('_id')
+          .session(session)
+          .exec(),
+
+        Batch.findOne({
+          _id: batch._id,
+          department: mentor.department,
+          status: 'ACTIVE',
+        })
+          .select('_id')
+          .session(session)
+          .exec(),
+      ]);
+
+      if (
+        !activeMentor
+        || !currentStudent
+        || !currentSection
+        || !currentBatch
+      ) {
+        throw createServiceError(
+          409,
+          'STUDENT_ACTIVATION_SCOPE_CHANGED',
+          'The Mentor, student, section, or batch assignment changed. Refresh and try again.',
+        );
+      }
+
       await StudentActivationChallenge.updateMany(
         {
           student: student._id,
@@ -563,20 +611,67 @@ export async function activateStudentAccount({
         return;
       }
 
-      const now = new Date();
+      const [
+        issuingMentor,
+        currentSection,
+        currentBatch,
+        student,
+      ] = await Promise.all([
+        User.findOne({
+          _id: challenge.issuedBy,
+          role: USER_ROLES.MENTOR,
+          status: ACCOUNT_STATUSES.ACTIVE,
+          department: challenge.department,
+        })
+          .select('_id')
+          .session(session)
+          .exec(),
 
-      const student = await User.findOne({
-        _id: challenge.student,
-        role: USER_ROLES.STUDENT,
-        status: ACCOUNT_STATUSES.ACTIVE,
-        department: challenge.department,
-        assignedBatches: challenge.batch,
-        assignedSections: challenge.section,
-        isAccountActivated: false,
-      })
-        .select('+tokenVersion +passwordHash')
-        .session(session)
-        .exec();
+        Section.findOne({
+          _id: challenge.section,
+          mentor: challenge.issuedBy,
+          department: challenge.department,
+          batch: challenge.batch,
+          status: 'ACTIVE',
+        })
+          .select('_id')
+          .session(session)
+          .exec(),
+
+        Batch.findOne({
+          _id: challenge.batch,
+          department: challenge.department,
+          status: 'ACTIVE',
+        })
+          .select('_id')
+          .session(session)
+          .exec(),
+
+        User.findOne({
+          _id: challenge.student,
+          role: USER_ROLES.STUDENT,
+          status: ACCOUNT_STATUSES.ACTIVE,
+          department: challenge.department,
+          assignedBatches: challenge.batch,
+          assignedSections: challenge.section,
+          isAccountActivated: false,
+        })
+          .select('+tokenVersion +passwordHash')
+          .session(session)
+          .exec(),
+      ]);
+
+      if (
+        !issuingMentor
+        || !currentSection
+        || !currentBatch
+      ) {
+        throw createServiceError(
+          409,
+          'STUDENT_ACTIVATION_SCOPE_CHANGED',
+          'The Mentor assignment, section, or batch is no longer active. Request a new activation link.',
+        );
+      }
 
       if (!student) {
         throw createServiceError(
@@ -585,6 +680,8 @@ export async function activateStudentAccount({
           'This student account is already activated or is no longer eligible.',
         );
       }
+
+      const now = new Date();
 
       student.passwordHash = passwordHash;
       student.passwordChangedAt = now;
