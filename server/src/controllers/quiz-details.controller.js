@@ -15,6 +15,13 @@ import {
 
 import { Quiz } from '../models/quiz.model.js';
 
+import { hasUserRole } from '../utils/role-access.util.js';
+
+function hasFacultyTeachingCapability(user) {
+  return user?.role !== USER_ROLES.HOD
+    && hasUserRole(user, USER_ROLES.FACULTY);
+}
+
 function createControllerError(statusCode, code, message) {
   const error = new Error(message);
 
@@ -143,7 +150,7 @@ export async function getManagedQuizByIdController(
     }
 
     const actor = await User.findById(authenticatedUserId)
-      .select('_id role status department')
+      .select('_id role roles status department')
       .lean()
       .exec();
 
@@ -164,8 +171,8 @@ export async function getManagedQuizByIdController(
     }
 
     if (
-      actor.role !== USER_ROLES.HOD &&
-      actor.role !== USER_ROLES.FACULTY
+      actor.role !== USER_ROLES.HOD
+      && !hasUserRole(actor, USER_ROLES.FACULTY)
     ) {
       throw createControllerError(
         403,
@@ -209,7 +216,7 @@ export async function getManagedQuizByIdController(
       department: department._id,
     };
 
-    if (actor.role === USER_ROLES.FACULTY) {
+    if (hasFacultyTeachingCapability(actor)) {
       const assignedCourses = await Course.find({
         department: department._id,
         faculty: actor._id,

@@ -11,6 +11,9 @@ import {
   ACCOUNT_STATUSES,
 } from '../models/user.model.js';
 
+import { hasUserRole } from '../utils/role-access.util.js';
+import { Department } from '../models/department.model.js';
+
 function createError(statusCode, code, message) {
   const error = new Error(message);
 
@@ -88,12 +91,6 @@ function normalizeTimetableEntry(entry) {
   };
 }
 
-/**
- * GET /api/v1/timetable/my-schedule
- *
- * Returns timetable entries belonging only to the
- * authenticated Faculty account.
- */
 export async function listMyFacultyTimetableController(
   req,
   res,
@@ -112,18 +109,45 @@ export async function listMyFacultyTimetableController(
 
     const faculty = await User.findOne({
       _id: userId,
-      role: USER_ROLES.FACULTY,
       status: ACCOUNT_STATUSES.ACTIVE,
+      $or: [
+        {
+          role: {
+            $in: [
+              USER_ROLES.FACULTY,
+              USER_ROLES.MENTOR,
+              USER_ROLES.HOD,
+            ],
+          },
+        },
+        {
+          roles: {
+            $in: [
+              USER_ROLES.FACULTY,
+              USER_ROLES.MENTOR,
+              USER_ROLES.HOD,
+            ],
+          },
+        },
+      ],
     })
-      .select('_id department role status')
+      .select('_id department role roles status')
       .lean()
       .exec();
 
-    if (!faculty) {
+    if (
+      !faculty
+      || !hasUserRole(
+        faculty,
+        USER_ROLES.FACULTY,
+        USER_ROLES.MENTOR,
+        USER_ROLES.HOD,
+      )
+    ) {
       throw createError(
         403,
-        'FACULTY_ACCESS_REQUIRED',
-        'Only an active Faculty account can access this timetable.',
+        'TEACHING_ACCESS_REQUIRED',
+        'Only active Faculty, Mentor or HOD accounts can access this timetable.',
       );
     }
 
@@ -133,6 +157,25 @@ export async function listMyFacultyTimetableController(
         'DEPARTMENT_NOT_ASSIGNED',
         'Your faculty account is not assigned to a department.',
       );
+    }
+
+    if (faculty.role === USER_ROLES.HOD) {
+      const department = await Department.findOne({
+        _id: faculty.department,
+        hod: faculty._id,
+        status: 'ACTIVE',
+      })
+        .select('_id')
+        .lean()
+        .exec();
+
+      if (!department) {
+        throw createError(
+          403,
+          'HOD_DEPARTMENT_UNAVAILABLE',
+          'Your active HOD department assignment could not be verified.',
+        );
+      }
     }
 
     const page = Math.max(

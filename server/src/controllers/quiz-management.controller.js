@@ -23,6 +23,16 @@ import {
 
 import { QuizAttempt } from '../models/quiz-attempt.model.js';
 
+import { hasUserRole } from '../utils/role-access.util.js';
+
+function isHodActor(actor) {
+  return actor?.role === USER_ROLES.HOD;
+}
+
+function hasFacultyTeachingCapability(actor) {
+  return !isHodActor(actor) && hasUserRole(actor, USER_ROLES.FACULTY);
+}
+
 function createError(statusCode, code, message) {
   const error = new Error(message);
 
@@ -93,15 +103,6 @@ function normalizePagination(query) {
   return { page, limit };
 }
 
-/**
- * Resolve the authenticated account and its department.
- *
- * HOD:
- *   Must own the department assignment.
- *
- * FACULTY:
- *   Must be an active faculty account assigned to the department.
- */
 async function getActorContext(userId) {
   if (!isValidId(userId)) {
     throw createError(
@@ -112,7 +113,7 @@ async function getActorContext(userId) {
   }
 
   const actor = await User.findById(userId)
-    .select('_id role status department')
+    .select('_id role roles status department')
     .exec();
 
   if (!actor) {
@@ -132,8 +133,8 @@ async function getActorContext(userId) {
   }
 
   if (
-    actor.role !== USER_ROLES.HOD
-    && actor.role !== USER_ROLES.FACULTY
+    !isHodActor(actor)
+    && !hasUserRole(actor, USER_ROLES.FACULTY)
   ) {
     throw createError(
       403,
@@ -155,7 +156,7 @@ async function getActorContext(userId) {
     status: 'ACTIVE',
   };
 
-  if (actor.role === USER_ROLES.HOD) {
+  if (isHodActor(actor)) {
     departmentFilter.hod = actor._id;
   }
 
@@ -174,20 +175,11 @@ async function getActorContext(userId) {
   return {
     actor,
     department,
-    isHod: actor.role === USER_ROLES.HOD,
-    isFaculty: actor.role === USER_ROLES.FACULTY,
+    isHod: isHodActor(actor),
+    isFaculty: hasFacultyTeachingCapability(actor),
   };
 }
 
-/**
- * Find a course the current user is permitted to manage.
- *
- * HOD:
- *   Any active course in the HOD's department.
- *
- * Faculty:
- *   Only active courses assigned to that faculty account.
- */
 async function getManageableCourse({
   actor,
   departmentId,
@@ -207,7 +199,7 @@ async function getManageableCourse({
     status: COURSE_STATUSES.ACTIVE,
   };
 
-  if (actor.role === USER_ROLES.FACULTY) {
+  if (hasFacultyTeachingCapability(actor)) {
     filter.faculty = actor._id;
   }
 
@@ -228,17 +220,6 @@ async function getManageableCourse({
   return course;
 }
 
-/**
- * Validate the selected course, batch and section combination.
- *
- * A batch/section must:
- * - belong to the department;
- * - be active;
- * - be allocated to the selected course;
- * - have a valid batch-section relationship.
- *
- * Semester comes from the existing Course.semester field.
- */
 async function validateAssignments({
   actor,
   departmentId,
@@ -327,10 +308,6 @@ async function validateAssignments({
   for (const section of sections) {
     const sectionBatchId = normalizeId(section.batch);
 
-    /*
-     * When explicit batches are supplied, every section must
-     * belong to one of those batches.
-     */
     if (
       selectedBatchIds.size > 0
       && !selectedBatchIds.has(sectionBatchId)
@@ -657,11 +634,7 @@ function getQuizAccessFilter({
     department: departmentId,
   };
 
-  /*
-   * Faculty can only access quizzes for courses currently
-   * assigned to them. This is checked again for every request.
-   */
-  if (actor.role === USER_ROLES.FACULTY) {
+  if (hasFacultyTeachingCapability(actor)) {
     filter.course = {
       $in: [],
     };
@@ -688,7 +661,7 @@ async function findManageableQuiz({
     departmentId,
   });
 
-  if (actor.role === USER_ROLES.FACULTY) {
+  if (hasFacultyTeachingCapability(actor)) {
     const assignedCourses = await Course.find({
       department: departmentId,
       faculty: actor._id,
@@ -741,14 +714,6 @@ async function populateQuiz(quizId) {
     .exec();
 }
 
-/**
- * GET /api/v1/quizzes/manage
- *
- * Lists quizzes the current HOD or Faculty can manage.
- *
- * Query:
- * page, limit, search, status, courseId, semester, batchId, sectionId
- */
 export async function listDepartmentQuizzesController(
   req,
   res,
@@ -767,7 +732,7 @@ export async function listDepartmentQuizzesController(
       departmentId: department._id,
     });
 
-    if (actor.role === USER_ROLES.FACULTY) {
+    if (hasFacultyTeachingCapability(actor)) {
       const assignedCourses = await Course.find({
         department: department._id,
         faculty: actor._id,
@@ -807,7 +772,7 @@ export async function listDepartmentQuizzesController(
 
       filter.course = req.query.courseId;
 
-      if (actor.role === USER_ROLES.FACULTY) {
+      if (hasFacultyTeachingCapability(actor)) {
         const assignedCourse = await Course.findOne({
           _id: req.query.courseId,
           department: department._id,
@@ -833,7 +798,7 @@ export async function listDepartmentQuizzesController(
         department: department._id,
         semester: req.query.semester,
         status: COURSE_STATUSES.ACTIVE,
-        ...(actor.role === USER_ROLES.FACULTY
+        ...(hasFacultyTeachingCapability(actor)
           ? { faculty: actor._id }
           : {}),
       })
@@ -956,12 +921,6 @@ export async function listDepartmentQuizzesController(
   }
 }
 
-/**
- * POST /api/v1/quizzes/manage
- *
- * HOD creates quizzes for department courses.
- * Faculty creates quizzes only for their assigned courses.
- */
 export async function createDepartmentQuizController(
   req,
   res,
@@ -1036,14 +995,6 @@ export async function createDepartmentQuizController(
   }
 }
 
-/**
- * PATCH /api/v1/quizzes/manage/:quizId
- *
- * Updates quiz metadata, schedule, questions and assignments.
- *
- * If attempts exist, questions and academic assignments cannot
- * be changed because doing so could invalidate student records.
- */
 export async function updateDepartmentQuizController(
   req,
   res,
@@ -1177,11 +1128,6 @@ export async function updateDepartmentQuizController(
   }
 }
 
-/**
- * DELETE /api/v1/quizzes/manage/:quizId
- *
- * Quiz deletion is allowed only if no student attempts exist.
- */
 export async function deleteDepartmentQuizController(
   req,
   res,
