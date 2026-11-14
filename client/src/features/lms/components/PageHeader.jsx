@@ -1,5 +1,54 @@
 import { Link } from 'react-router-dom';
 
+import useAuth from '../../auth/context/useAuth.js';
+
+function normalizeRole(role) {
+  return typeof role === 'string'
+    ? role.trim().toUpperCase()
+    : '';
+}
+
+function getWorkspacePresentation(user, eyebrow, breadcrumbs) {
+  const primaryRole = normalizeRole(user?.role);
+
+  const isSharedTeachingRole =
+    primaryRole === 'MENTOR' || primaryRole === 'HOD';
+
+  if (!isSharedTeachingRole) {
+    return {
+      eyebrow,
+      breadcrumbs,
+    };
+  }
+
+  const normalizedEyebrow =
+    typeof eyebrow === 'string'
+      ? eyebrow.trim().toUpperCase()
+      : '';
+
+  const isFacultyWorkspace =
+    normalizedEyebrow === 'FACULTY WORKSPACE';
+
+  return {
+    eyebrow: isFacultyWorkspace
+      ? 'SHARED TEACHING WORKSPACE'
+      : eyebrow,
+
+    breadcrumbs: breadcrumbs.map((breadcrumb) => {
+      const label = breadcrumb.label ?? breadcrumb.title;
+
+      if (label === 'Faculty Dashboard') {
+        return {
+          ...breadcrumb,
+          label: 'Teaching Dashboard',
+        };
+      }
+
+      return breadcrumb;
+    }),
+  };
+}
+
 export default function PageHeader({
   title,
   description,
@@ -9,20 +58,29 @@ export default function PageHeader({
   children,
   className = '',
 }) {
+  const { user } = useAuth();
+
+  const presentation = getWorkspacePresentation(
+    user,
+    eyebrow,
+    Array.isArray(breadcrumbs) ? breadcrumbs : [],
+  );
+
   return (
     <section
       className={`mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-end sm:justify-between ${className}`}
     >
       <div className="min-w-0">
-        {Array.isArray(breadcrumbs) && breadcrumbs.length > 0 && (
+        {presentation.breadcrumbs.length > 0 && (
           <nav
             aria-label="Breadcrumb"
             className="mb-4 flex flex-wrap items-center gap-2 text-xs sm:text-sm"
           >
-            {breadcrumbs.map((breadcrumb, index) => {
+            {presentation.breadcrumbs.map((breadcrumb, index) => {
               const label = breadcrumb.label ?? breadcrumb.title;
               const destination = breadcrumb.to ?? breadcrumb.path;
-              const isLast = index === breadcrumbs.length - 1;
+              const isLast =
+                index === presentation.breadcrumbs.length - 1;
 
               if (!label) {
                 return null;
@@ -73,9 +131,9 @@ export default function PageHeader({
           </nav>
         )}
 
-        {eyebrow && (
+        {presentation.eyebrow && (
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-indigo-300">
-            {eyebrow}
+            {presentation.eyebrow}
           </p>
         )}
 
