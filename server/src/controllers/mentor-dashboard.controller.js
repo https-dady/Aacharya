@@ -61,7 +61,7 @@ async function getAuthenticatedMentor(userId) {
     ],
   })
     .select(
-      '_id institutionalId fullName email role roles status department assignedBatches',
+      '_id institutionalId fullName email role roles status department',
     )
     .lean()
     .exec();
@@ -126,18 +126,17 @@ export async function getMentorDashboardController(req, res, next) {
 
     const sectionIds = sections.map((section) => section._id);
 
-    const assignedBatchIds = new Set(
-      (mentor.assignedBatches ?? []).map(String),
-    );
-
-    // Include batches referenced by canonically assigned sections too.
-    for (const section of sections) {
-      if (section.batch) {
-        assignedBatchIds.add(String(section.batch));
-      }
-    }
-
-    const batchIds = [...assignedBatchIds];
+    // Batch visibility is derived only from active sections canonically
+    // assigned through Section.mentor. The legacy User.assignedBatches
+    // array is intentionally excluded because it can contain stale or
+    // superseded references after an assignment change.
+    const batchIds = [
+      ...new Set(
+        sections
+          .map((section) => normalizeId(section.batch))
+          .filter(Boolean),
+      ),
+    ];
 
     const studentFilter = {
       role: USER_ROLES.STUDENT,
