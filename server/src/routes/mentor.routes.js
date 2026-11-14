@@ -2,20 +2,23 @@ import { Router } from 'express';
 import { z } from 'zod';
 
 import {
-  createStudentController,
-  listStudentsController,
-  getStudentDetailsController,
-  updateStudentController,
-  updateStudentStatusController,
-} from '../controllers/student.controller.js';
+  assignMentorController,
+  clearDepartmentMentorAssignmentsController,
+  listMentorsController,
+} from '../controllers/mentor.controller.js';
 
 import {
-  getMentorStudentDetailsController,
-} from '../controllers/mentor-student-details.controller.js';
+  getMentorDashboardController,
+} from '../controllers/mentor-dashboard.controller.js';
 
 import {
-  createStudentActivationController,
-} from '../controllers/student-activation.controller.js';
+  getMentorSelfProfileController,
+  updateMentorSelfProfileController,
+} from '../controllers/mentor-self-profile.controller.js';
+
+import {
+  getMentorAssignedStudentsController,
+} from '../controllers/mentor-assigned-students.controller.js';
 
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
@@ -23,7 +26,11 @@ import { validate } from '../middleware/validate.middleware.js';
 import { authRateLimiter } from '../middleware/rate-limit.middleware.js';
 import { auditEvent } from '../middleware/audit.middleware.js';
 
-const studentRouter = Router();
+import {
+  ACCOUNT_STATUSES,
+} from '../models/user.model.js';
+
+const mentorRouter = Router();
 
 const objectIdSchema = z
   .string()
@@ -31,224 +38,176 @@ const objectIdSchema = z
 
 const emptyObjectSchema = z.object({}).strict();
 
-const studentParamsSchema = z.object({
-  sectionId: objectIdSchema,
-}).strict();
-
-const studentDetailsParamsSchema = z.object({
-  sectionId: objectIdSchema,
-  studentId: objectIdSchema,
-}).strict();
-
-const activationParamsSchema = z.object({
-  studentId: objectIdSchema,
-}).strict();
-
-const mentorStudentDetailsParamsSchema = z.object({
-  studentId: objectIdSchema,
-}).strict();
-
-const createStudentSchema = z.object({
-  params: studentParamsSchema,
+const assignMentorSchema = z.object({
+  params: z.object({
+    facultyId: objectIdSchema,
+  }).strict(),
 
   body: z.object({
-    institutionalId: z.string().trim().min(2).max(50),
-    fullName: z.string().trim().min(2).max(100),
-    email: z.string().trim().email().max(254).optional(),
-    password: z.string().min(8).max(72),
+    batchIds: z.array(objectIdSchema).max(100),
+    sectionIds: z.array(objectIdSchema).max(500),
   }).strict(),
-});
 
-const listStudentsSchema = z.object({
-  params: studentParamsSchema,
-
-  query: z.object({
-    page: z.coerce.number().int().min(1).default(1),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
-    search: z.string().trim().max(100).optional(),
-    status: z.enum([
-      'ACTIVE',
-      'SUSPENDED',
-      'DISABLED',
-    ]).optional(),
-  }).strict(),
-});
-
-const studentDetailsSchema = z.object({
-  params: studentDetailsParamsSchema,
-});
-
-const mentorStudentDetailsSchema = z.object({
-  params: mentorStudentDetailsParamsSchema,
-  body: emptyObjectSchema,
   query: emptyObjectSchema,
 });
 
-const updateStudentSchema = z.object({
-  params: studentDetailsParamsSchema,
+const listMentorsSchema = z.object({
+  params: emptyObjectSchema,
+  body: emptyObjectSchema,
 
-  body: z.object({
-    fullName: z.string().trim().min(2).max(100).optional(),
-
-    email: z.union([
-      z.string().trim().email().max(254),
-      z.literal(''),
-    ]).optional(),
-  }).strict().refine(
-    (body) =>
-      body.fullName !== undefined
-      || body.email !== undefined,
-    {
-      message: 'Provide at least one profile field to update.',
-    },
-  ),
-});
-
-const updateStudentStatusSchema = z.object({
-  params: studentDetailsParamsSchema,
-
-  body: z.object({
+  query: z.object({
+    page: z.coerce.number().int().min(1).max(100000).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    search: z.string().trim().max(100).optional(),
     status: z.enum([
-      'ACTIVE',
-      'SUSPENDED',
-      'DISABLED',
-    ]),
+      ACCOUNT_STATUSES.ACTIVE,
+      ACCOUNT_STATUSES.SUSPENDED,
+      ACCOUNT_STATUSES.DISABLED,
+    ]).optional(),
   }).strict(),
 });
 
-const createStudentActivationSchema = z.object({
-  params: activationParamsSchema,
+const clearDepartmentMentorAssignmentsSchema = z.object({
+  params: emptyObjectSchema,
+
+  body: z.object({
+    confirmation: z.literal(
+      'CLEAR_DEPARTMENT_MENTOR_ASSIGNMENTS',
+    ),
+  }).strict(),
+
+  query: emptyObjectSchema,
+});
+
+const updateMentorProfileSchema = z.object({
+  params: emptyObjectSchema,
+  query: emptyObjectSchema,
+
+  body: z.object({
+    fullName: z.string().trim().min(2).max(100).optional(),
+    email: z.string().trim().email().max(254).optional(),
+  })
+    .strict()
+    .refine(
+      (body) => Object.keys(body).length > 0,
+      {
+        message: 'Provide at least one profile field to update.',
+      },
+    ),
 });
 
 /**
- * Mentor-wide student details.
- *
- * GET /api/v1/provisioning/mentor/students/:studentId
- *
- * Access is restricted to the authenticated mentor.
- * The controller validates canonical section ownership.
+ * Mentor dashboard.
  */
-studentRouter.get(
-  '/mentor/students/:studentId',
+mentorRouter.get(
+  '/mentor/dashboard',
   authenticate,
   authorize('MENTOR'),
   authRateLimiter,
-  validate(mentorStudentDetailsSchema),
-  getMentorStudentDetailsController,
+  getMentorDashboardController,
 );
 
 /**
- * Create one student.
+ * GET /api/v1/provisioning/mentor/students
  *
- * POST /api/v1/provisioning/sections/:sectionId/students
+ * Paginated students across all sections canonically assigned
+ * to the authenticated mentor.
  */
-studentRouter.post(
-  '/sections/:sectionId/students',
+mentorRouter.get(
+  '/mentor/students',
   authenticate,
   authorize('MENTOR'),
   authRateLimiter,
-  validate(createStudentSchema),
+  validate(z.object({
+    params: z.object({}).strict(),
+    body: z.object({}).strict(),
+    query: z.object({
+      page: z.coerce.number().int().min(1).max(100000).default(1),
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+      search: z.string().trim().max(100).optional(),
+      status: z.enum([
+        ACCOUNT_STATUSES.ACTIVE,
+        ACCOUNT_STATUSES.SUSPENDED,
+        ACCOUNT_STATUSES.DISABLED,
+      ]).optional(),
+    }).strict(),
+  })),
+  getMentorAssignedStudentsController,
+);
+
+/**
+ * Mentor self profile.
+ */
+mentorRouter.get(
+  '/mentor/profile',
+  authenticate,
+  authorize('MENTOR'),
+  getMentorSelfProfileController,
+);
+
+mentorRouter.patch(
+  '/mentor/profile',
+  authenticate,
+  authorize('MENTOR'),
+  authRateLimiter,
+  validate(updateMentorProfileSchema),
   auditEvent({
-    action: 'STUDENT_ACCOUNT_CREATE',
-    resourceType: 'Student',
+    action: 'MENTOR_SELF_PROFILE_UPDATE',
+    resourceType: 'MentorProfile',
+    getResourceId: (req) => req.user?.id,
     getMetadata: (req) => ({
-      sectionId: req.params.sectionId,
+      updatedFields: Object.keys(req.body ?? {}),
     }),
   }),
-  createStudentController,
+  updateMentorSelfProfileController,
 );
 
 /**
- * List students with pagination and search.
- *
- * GET /api/v1/provisioning/sections/:sectionId/students
+ * HOD mentor management.
  */
-studentRouter.get(
-  '/sections/:sectionId/students',
+mentorRouter.get(
+  '/mentors',
   authenticate,
-  authorize('MENTOR'),
-  authRateLimiter,
-  validate(listStudentsSchema),
-  listStudentsController,
+  authorize('HOD'),
+  validate(listMentorsSchema),
+  listMentorsController,
 );
 
-/**
- * Request a student activation email.
- *
- * POST /api/v1/provisioning/students/:studentId/activation
- */
-studentRouter.post(
-  '/students/:studentId/activation',
+mentorRouter.patch(
+  '/faculty/:facultyId/mentor',
   authenticate,
-  authorize('MENTOR'),
+  authorize('HOD'),
   authRateLimiter,
-  validate(createStudentActivationSchema),
+  validate(assignMentorSchema),
   auditEvent({
-    action: 'STUDENT_ACTIVATION_EMAIL_REQUEST',
-    resourceType: 'Student',
-    getResourceId: (req) => req.params.studentId,
-  }),
-  createStudentActivationController,
-);
-
-/**
- * Get an individual student's details within a section.
- *
- * GET /api/v1/provisioning/sections/:sectionId/students/:studentId
- */
-studentRouter.get(
-  '/sections/:sectionId/students/:studentId',
-  authenticate,
-  authorize('MENTOR'),
-  authRateLimiter,
-  validate(studentDetailsSchema),
-  getStudentDetailsController,
-);
-
-/**
- * Update a student's permitted profile fields.
- *
- * PATCH /api/v1/provisioning/sections/:sectionId/students/:studentId
- */
-studentRouter.patch(
-  '/sections/:sectionId/students/:studentId',
-  authenticate,
-  authorize('MENTOR'),
-  authRateLimiter,
-  validate(updateStudentSchema),
-  auditEvent({
-    action: 'STUDENT_PROFILE_UPDATE',
-    resourceType: 'Student',
-    getResourceId: (req) => req.params.studentId,
+    action: 'MENTOR_ASSIGNMENT_UPDATE',
+    resourceType: 'FacultyMentorAssignment',
+    getResourceId: (req) => req.params.facultyId,
     getMetadata: (req) => ({
-      sectionId: req.params.sectionId,
-      updatedFields: Object.keys(req.body),
+      batchCount: req.body.batchIds.length,
+      sectionCount: req.body.sectionIds.length,
     }),
   }),
-  updateStudentController,
+  assignMentorController,
 );
 
-/**
- * Update a student's account status.
- *
- * PATCH /api/v1/provisioning/sections/:sectionId/students/:studentId/status
- */
-studentRouter.patch(
-  '/sections/:sectionId/students/:studentId/status',
+mentorRouter.post(
+  '/mentors/assignments/clear-department',
   authenticate,
-  authorize('MENTOR'),
+  authorize('HOD'),
   authRateLimiter,
-  validate(updateStudentStatusSchema),
+  validate(clearDepartmentMentorAssignmentsSchema),
   auditEvent({
-    action: 'STUDENT_STATUS_UPDATE',
-    resourceType: 'Student',
-    getResourceId: (req) => req.params.studentId,
-    getMetadata: (req) => ({
-      sectionId: req.params.sectionId,
-      newStatus: req.body.status,
+    action: 'DEPARTMENT_MENTOR_ASSIGNMENTS_CLEAR',
+    resourceType: 'DepartmentMentorAssignments',
+    getResourceId: (req) => req.user?.department
+      ? String(req.user.department)
+      : String(req.user?.id ?? 'unknown'),
+    getMetadata: () => ({
+      operation: 'CLEAR_DEPARTMENT_MENTOR_ASSIGNMENTS',
     }),
   }),
-  updateStudentStatusController,
+  clearDepartmentMentorAssignmentsController,
 );
 
-export default studentRouter;
+export default mentorRouter;

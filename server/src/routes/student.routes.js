@@ -10,6 +10,10 @@ import {
 } from '../controllers/student.controller.js';
 
 import {
+  getMentorStudentDetailsController,
+} from '../controllers/mentor-student-details.controller.js';
+
+import {
   createStudentActivationController,
 } from '../controllers/student-activation.controller.js';
 
@@ -23,7 +27,9 @@ const studentRouter = Router();
 
 const objectIdSchema = z
   .string()
-  .regex(/^[a-f\d]{24}$/i);
+  .regex(/^[a-f\d]{24}$/i, 'A valid MongoDB ID is required.');
+
+const emptyObjectSchema = z.object({}).strict();
 
 const studentParamsSchema = z.object({
   sectionId: objectIdSchema,
@@ -35,6 +41,10 @@ const studentDetailsParamsSchema = z.object({
 }).strict();
 
 const activationParamsSchema = z.object({
+  studentId: objectIdSchema,
+}).strict();
+
+const mentorStudentDetailsParamsSchema = z.object({
   studentId: objectIdSchema,
 }).strict();
 
@@ -66,6 +76,12 @@ const listStudentsSchema = z.object({
 
 const studentDetailsSchema = z.object({
   params: studentDetailsParamsSchema,
+});
+
+const mentorStudentDetailsSchema = z.object({
+  params: mentorStudentDetailsParamsSchema,
+  body: emptyObjectSchema,
+  query: emptyObjectSchema,
 });
 
 const updateStudentSchema = z.object({
@@ -104,8 +120,26 @@ const createStudentActivationSchema = z.object({
   params: activationParamsSchema,
 });
 
-/*
+/**
+ * Mentor-wide student details.
+ *
+ * GET /api/v1/provisioning/mentor/students/:studentId
+ *
+ * Access is restricted to the authenticated mentor.
+ * The controller validates canonical section ownership.
+ */
+studentRouter.get(
+  '/mentor/students/:studentId',
+  authenticate,
+  authorize('MENTOR'),
+  authRateLimiter,
+  validate(mentorStudentDetailsSchema),
+  getMentorStudentDetailsController,
+);
+
+/**
  * Create one student.
+ *
  * POST /api/v1/provisioning/sections/:sectionId/students
  */
 studentRouter.post(
@@ -124,8 +158,9 @@ studentRouter.post(
   createStudentController,
 );
 
-/*
+/**
  * List students with pagination and search.
+ *
  * GET /api/v1/provisioning/sections/:sectionId/students
  */
 studentRouter.get(
@@ -137,8 +172,9 @@ studentRouter.get(
   listStudentsController,
 );
 
-/*
+/**
  * Request a student activation email.
+ *
  * POST /api/v1/provisioning/students/:studentId/activation
  */
 studentRouter.post(
@@ -155,8 +191,9 @@ studentRouter.post(
   createStudentActivationController,
 );
 
-/*
- * Get an individual student's details.
+/**
+ * Get an individual student's details within a section.
+ *
  * GET /api/v1/provisioning/sections/:sectionId/students/:studentId
  */
 studentRouter.get(
@@ -168,8 +205,9 @@ studentRouter.get(
   getStudentDetailsController,
 );
 
-/*
+/**
  * Update a student's permitted profile fields.
+ *
  * PATCH /api/v1/provisioning/sections/:sectionId/students/:studentId
  */
 studentRouter.patch(
@@ -190,8 +228,9 @@ studentRouter.patch(
   updateStudentController,
 );
 
-/*
+/**
  * Update a student's account status.
+ *
  * PATCH /api/v1/provisioning/sections/:sectionId/students/:studentId/status
  */
 studentRouter.patch(
