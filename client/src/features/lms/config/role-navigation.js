@@ -350,14 +350,88 @@ export const ROLE_NAVIGATION = Object.freeze({
   ],
 });
 
+/**
+ * Shared Faculty teaching workspace.
+ *
+ * Mentor and HOD accounts use the exact same Faculty pages and services.
+ * Their primary-role navigation remains intact; these entries are added
+ * as a separate workspace group.
+ *
+ * Account-specific Faculty profile and notification pages are deliberately
+ * not duplicated into Mentor/HOD navigation.
+ */
+export const SHARED_FACULTY_NAVIGATION = Object.freeze([
+  {
+    id: 'faculty-workspace-overview',
+    label: 'Teaching Overview',
+    path: '/faculty/dashboard',
+    group: 'teaching',
+  },
+  {
+    id: 'faculty-workspace-timetable',
+    label: 'Teaching Timetable',
+    path: '/faculty/timetable',
+    group: 'teaching',
+  },
+  {
+    id: 'faculty-workspace-courses',
+    label: 'Teaching Courses',
+    path: '/faculty/courses',
+    group: 'teaching',
+  },
+  {
+    id: 'faculty-workspace-attendance',
+    label: 'Class Attendance',
+    path: '/faculty/attendance',
+    group: 'teaching',
+  },
+  {
+    id: 'faculty-workspace-assignments',
+    label: 'Teaching Assignments',
+    path: '/faculty/assignments',
+    group: 'teaching',
+  },
+  {
+    id: 'faculty-workspace-quizzes',
+    label: 'Teaching Quizzes',
+    path: '/faculty/quizzes',
+    group: 'teaching',
+  },
+  {
+    id: 'faculty-workspace-results',
+    label: 'Teaching Results',
+    path: '/faculty/results',
+    group: 'teaching',
+  },
+]);
+
 export function getRoleNavigation(role) {
   if (typeof role !== 'string') {
     return [];
   }
 
   const normalizedRole = role.trim().toUpperCase();
+  const primaryNavigation = ROLE_NAVIGATION[normalizedRole] ?? [];
 
-  return ROLE_NAVIGATION[normalizedRole] ?? [];
+  /*
+   * The approved role model guarantees that Mentor and HOD accounts
+   * inherit the shared FACULTY teaching capability.
+   *
+   * Preserve their existing primary-role navigation and append the
+   * common teaching workspace without creating duplicate pages/services.
+   */
+  const isSharedWorkspaceRole =
+    normalizedRole === LMS_ROLES.MENTOR
+    || normalizedRole === LMS_ROLES.HOD;
+
+  if (!isSharedWorkspaceRole) {
+    return primaryNavigation;
+  }
+
+  return [
+    ...primaryNavigation,
+    ...SHARED_FACULTY_NAVIGATION,
+  ];
 }
 
 export function isSupportedRole(role) {
