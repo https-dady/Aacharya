@@ -44,7 +44,7 @@ function normalizeStudent(student) {
 async function getActiveMentor(userId) {
   const mentor = await User.findById(userId)
     .select(
-      'role status department assignedBatches assignedSections',
+      'role status department',
     );
 
   if (!mentor) {
@@ -81,6 +81,7 @@ async function getAssignedSection(mentor, sectionId) {
   const section = await Section.findOne({
     _id: sectionId,
     department: mentor.department,
+    mentor: mentor._id,
     status: 'ACTIVE',
   }).select('_id name code batch department status');
 
@@ -89,30 +90,6 @@ async function getAssignedSection(mentor, sectionId) {
       404,
       'SECTION_NOT_FOUND',
       'The requested active section was not found in your department.',
-    );
-  }
-
-  const assignedSectionIds = (
-    mentor.assignedSections || []
-  ).map((id) => id.toString());
-
-  if (!assignedSectionIds.includes(section._id.toString())) {
-    throw createError(
-      403,
-      'SECTION_NOT_ASSIGNED',
-      'You can only manage students in your assigned sections.',
-    );
-  }
-
-  const assignedBatchIds = (
-    mentor.assignedBatches || []
-  ).map((id) => id.toString());
-
-  if (!assignedBatchIds.includes(section.batch.toString())) {
-    throw createError(
-      403,
-      'BATCH_NOT_ASSIGNED',
-      'The section belongs to a batch that is not assigned to you.',
     );
   }
 
