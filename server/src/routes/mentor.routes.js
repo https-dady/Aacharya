@@ -11,6 +11,11 @@ import {
   getMentorDashboardController,
 } from '../controllers/mentor-dashboard.controller.js';
 
+import {
+  getMentorSelfProfileController,
+  updateMentorSelfProfileController,
+} from '../controllers/mentor-self-profile.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
@@ -27,6 +32,8 @@ const objectIdSchema = z
   .string()
   .regex(/^[a-f\d]{24}$/i, 'A valid MongoDB ID is required.');
 
+const emptyObjectSchema = z.object({}).strict();
+
 const assignMentorSchema = z.object({
   params: z.object({
     facultyId: objectIdSchema,
@@ -37,43 +44,27 @@ const assignMentorSchema = z.object({
     sectionIds: z.array(objectIdSchema).max(500),
   }).strict(),
 
-  query: z.object({}).strict(),
+  query: emptyObjectSchema,
 });
 
 const listMentorsSchema = z.object({
-  params: z.object({}).strict(),
-
-  body: z.object({}).strict(),
+  params: emptyObjectSchema,
+  body: emptyObjectSchema,
 
   query: z.object({
-    page: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100000)
-      .optional(),
-
-    limit: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(100)
-      .optional(),
-
+    page: z.coerce.number().int().min(1).max(100000).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
     search: z.string().trim().max(100).optional(),
-
-    status: z
-      .enum([
-        ACCOUNT_STATUSES.ACTIVE,
-        ACCOUNT_STATUSES.SUSPENDED,
-        ACCOUNT_STATUSES.DISABLED,
-      ])
-      .optional(),
+    status: z.enum([
+      ACCOUNT_STATUSES.ACTIVE,
+      ACCOUNT_STATUSES.SUSPENDED,
+      ACCOUNT_STATUSES.DISABLED,
+    ]).optional(),
   }).strict(),
 });
 
 const clearDepartmentMentorAssignmentsSchema = z.object({
-  params: z.object({}).strict(),
+  params: emptyObjectSchema,
 
   body: z.object({
     confirmation: z.literal(
@@ -81,13 +72,28 @@ const clearDepartmentMentorAssignmentsSchema = z.object({
     ),
   }).strict(),
 
-  query: z.object({}).strict(),
+  query: emptyObjectSchema,
+});
+
+const updateMentorProfileSchema = z.object({
+  params: emptyObjectSchema,
+  query: emptyObjectSchema,
+
+  body: z.object({
+    fullName: z.string().trim().min(2).max(100).optional(),
+    email: z.string().trim().email().max(254).optional(),
+  })
+    .strict()
+    .refine(
+      (body) => Object.keys(body).length > 0,
+      {
+        message: 'Provide at least one profile field to update.',
+      },
+    ),
 });
 
 /**
- * GET /api/v1/provisioning/mentor/dashboard
- *
- * Mentor dashboard summary.
+ * Mentor dashboard.
  */
 mentorRouter.get(
   '/mentor/dashboard',
@@ -98,7 +104,34 @@ mentorRouter.get(
 );
 
 /**
- * GET /api/v1/provisioning/mentors
+ * Mentor self profile.
+ */
+mentorRouter.get(
+  '/mentor/profile',
+  authenticate,
+  authorize('MENTOR'),
+  getMentorSelfProfileController,
+);
+
+mentorRouter.patch(
+  '/mentor/profile',
+  authenticate,
+  authorize('MENTOR'),
+  authRateLimiter,
+  validate(updateMentorProfileSchema),
+  auditEvent({
+    action: 'MENTOR_SELF_PROFILE_UPDATE',
+    resourceType: 'MentorProfile',
+    getResourceId: (req) => req.user?.id,
+    getMetadata: (req) => ({
+      updatedFields: Object.keys(req.body ?? {}),
+    }),
+  }),
+  updateMentorSelfProfileController,
+);
+
+/**
+ * HOD mentor management.
  */
 mentorRouter.get(
   '/mentors',
@@ -108,54 +141,40 @@ mentorRouter.get(
   listMentorsController,
 );
 
-/**
- * PATCH /api/v1/provisioning/faculty/:facultyId/mentor
- */
 mentorRouter.patch(
   '/faculty/:facultyId/mentor',
   authenticate,
   authorize('HOD'),
   authRateLimiter,
   validate(assignMentorSchema),
-
   auditEvent({
     action: 'MENTOR_ASSIGNMENT_UPDATE',
     resourceType: 'FacultyMentorAssignment',
-
     getResourceId: (req) => req.params.facultyId,
-
     getMetadata: (req) => ({
       batchCount: req.body.batchIds.length,
       sectionCount: req.body.sectionIds.length,
     }),
   }),
-
   assignMentorController,
 );
 
-/**
- * POST /api/v1/provisioning/mentors/assignments/clear-department
- */
 mentorRouter.post(
   '/mentors/assignments/clear-department',
   authenticate,
   authorize('HOD'),
   authRateLimiter,
   validate(clearDepartmentMentorAssignmentsSchema),
-
   auditEvent({
     action: 'DEPARTMENT_MENTOR_ASSIGNMENTS_CLEAR',
     resourceType: 'DepartmentMentorAssignments',
-
     getResourceId: (req) => req.user?.department
       ? String(req.user.department)
       : String(req.user?.id ?? 'unknown'),
-
     getMetadata: () => ({
       operation: 'CLEAR_DEPARTMENT_MENTOR_ASSIGNMENTS',
     }),
   }),
-
   clearDepartmentMentorAssignmentsController,
 );
 
