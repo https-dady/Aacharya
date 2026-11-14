@@ -3,6 +3,8 @@ import {
   ACCOUNT_STATUSES,
 } from '../../models/user.model.js';
 
+import { getUserRoles } from '../../utils/role-access.util.js';
+
 import { comparePassword } from './password.service.js';
 
 import {
@@ -119,7 +121,12 @@ export async function login(
       institutionalId: user.institutionalId,
       fullName: user.fullName,
       email: user.email ?? null,
+
       role: user.role,
+
+      // Includes primary role and all additional capabilities.
+      roles: getUserRoles(user),
+
       status: user.status,
       department: user.department,
       isEmailVerified: user.isEmailVerified,

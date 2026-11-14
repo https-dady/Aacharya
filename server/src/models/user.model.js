@@ -65,8 +65,8 @@ const userSchema = new Schema(
     /*
      * Primary account role.
      *
-     * This field is retained for backward compatibility with
-     * existing authentication, provisioning and business logic.
+     * Retained for backward compatibility with existing
+     * authentication, provisioning and business logic.
      */
     role: {
       type: String,
@@ -78,13 +78,12 @@ const userSchema = new Schema(
     },
 
     /*
-     * Additional account roles.
+     * Additional account capabilities.
      *
-     * A Faculty member assigned as a Mentor can retain FACULTY
-     * as the primary role and receive MENTOR as an additional role.
+     * The primary role is always included.
      *
-     * The primary role is automatically included in this array
-     * during document validation.
+     * Mentor accounts retain Faculty capability.
+     * HOD accounts retain Faculty capability.
      */
     roles: {
       type: [
@@ -112,8 +111,9 @@ const userSchema = new Schema(
     /*
      * Tracks whether an account has completed its initial activation.
      *
-     * Existing accounts retain access by default. Provisioning code
-     * must explicitly set this to false for newly created students.
+     * Existing accounts retain access by default.
+     * Provisioning code must explicitly set this to false
+     * for newly created students.
      */
     isAccountActivated: {
       type: Boolean,
@@ -199,33 +199,60 @@ const userSchema = new Schema(
 );
 
 /*
- * Keep the primary role synchronized with the additional roles.
+ * Role capability invariants.
  *
- * This ensures that older account creation flows which only set
- * `role` continue to produce valid role membership.
+ * FACULTY is the shared teaching capability.
+ *
+ * FACULTY:
+ *   FACULTY
+ *
+ * MENTOR:
+ *   FACULTY + MENTOR
+ *
+ * HOD:
+ *   HOD + FACULTY
+ *
+ * The primary role is never overwritten.
+ *
+ * This hook applies whenever a User document is validated
+ * through normal Mongoose document creation or save operations.
  */
 userSchema.pre('validate', function synchronizeUserRoles() {
   const currentRoles = Array.isArray(this.roles)
     ? this.roles
     : [];
 
-  const normalizedRoles = new Set(
+  const validRoles = new Set(
     currentRoles.filter(
       (role) => Object.values(USER_ROLES).includes(role),
     ),
   );
 
   if (this.role) {
-    normalizedRoles.add(this.role);
+    validRoles.add(this.role);
   }
 
-  this.roles = [...normalizedRoles];
+  const hasMentorCapability = (
+    this.role === USER_ROLES.MENTOR
+    || validRoles.has(USER_ROLES.MENTOR)
+  );
+
+  const hasHodCapability = (
+    this.role === USER_ROLES.HOD
+    || validRoles.has(USER_ROLES.HOD)
+  );
+
+  if (hasMentorCapability || hasHodCapability) {
+    validRoles.add(USER_ROLES.FACULTY);
+  }
+
+  this.roles = [...validRoles];
 });
 
 /*
  * Unique institutional email address.
  *
- * Accounts without an email address are excluded from this index.
+ * Accounts without an email address are excluded.
  */
 userSchema.index(
   { email: 1 },
@@ -237,15 +264,29 @@ userSchema.index(
   },
 );
 
-userSchema.index({ department: 1, role: 1, status: 1 });
+userSchema.index({
+  department: 1,
+  role: 1,
+  status: 1,
+});
 
-userSchema.index({ department: 1, roles: 1, status: 1 });
+userSchema.index({
+  department: 1,
+  roles: 1,
+  status: 1,
+});
 
-userSchema.index({ createdBy: 1 });
+userSchema.index({
+  createdBy: 1,
+});
 
-userSchema.index({ assignedBatches: 1 });
+userSchema.index({
+  assignedBatches: 1,
+});
 
-userSchema.index({ assignedSections: 1 });
+userSchema.index({
+  assignedSections: 1,
+});
 
 userSchema.pre('validate', function validateEmailVerification() {
   if (this.isEmailVerified && !this.email) {
