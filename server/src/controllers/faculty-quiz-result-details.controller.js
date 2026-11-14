@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 
+import { buildRoleQuery } from '../utils/role-access.util.js';
+
 import {
   User,
   USER_ROLES,
@@ -55,7 +57,11 @@ function normalizeId(value) {
 async function getActiveFaculty(facultyId) {
   const faculty = await User.findOne({
     _id: facultyId,
-    role: USER_ROLES.FACULTY,
+    ...buildRoleQuery(
+      USER_ROLES.FACULTY,
+      USER_ROLES.MENTOR,
+      USER_ROLES.HOD,
+    ),
     status: ACCOUNT_STATUSES.ACTIVE,
   })
     .select('_id department role status')

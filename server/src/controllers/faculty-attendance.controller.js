@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 
+import { buildRoleQuery } from '../utils/role-access.util.js';
+
 import {
   Attendance,
   ATTENDANCE_STATUSES,
@@ -113,18 +115,17 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       401,
       'INVALID_AUTHENTICATED_USER',
-      'A valid authenticated Faculty or Mentor account is required.',
+      'A valid authenticated Faculty, Mentor, or HOD account is required.',
     );
   }
 
   const faculty = await User.findOne({
     _id: facultyId,
-    $or: [
-      { role: USER_ROLES.FACULTY },
-      { roles: USER_ROLES.FACULTY },
-      { role: USER_ROLES.MENTOR },
-      { roles: USER_ROLES.MENTOR },
-    ],
+    ...buildRoleQuery(
+      USER_ROLES.FACULTY,
+      USER_ROLES.MENTOR,
+      USER_ROLES.HOD,
+    ),
     status: ACCOUNT_STATUSES.ACTIVE,
   })
     .select('_id department role roles status')
@@ -135,7 +136,7 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       401,
       'ACTIVE_FACULTY_NOT_FOUND',
-      'The active Faculty or Mentor account could not be found.',
+      'The active Faculty, Mentor, or HOD account could not be found.',
     );
   }
 
@@ -143,7 +144,7 @@ async function getAuthenticatedFaculty(req) {
     throw createControllerError(
       403,
       'FACULTY_DEPARTMENT_REQUIRED',
-      'Your Faculty or Mentor account is not assigned to a department.',
+      'Your Faculty, Mentor, or HOD account is not assigned to a department.',
     );
   }
 
