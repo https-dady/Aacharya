@@ -9,15 +9,10 @@ import {
 import { Department } from '../models/department.model.js';
 import { Batch } from '../models/batch.model.js';
 import { Section } from '../models/section.model.js';
-import { Attendance } from '../models/attendance.model.js';
-
 import {
+  Attendance,
   ATTENDANCE_STATUSES,
 } from '../models/attendance.model.js';
-
-import {
-  hasUserRole,
-} from '../utils/role-access.util.js';
 
 function createError(statusCode, code, message) {
   const error = new Error(message);
@@ -42,15 +37,8 @@ function normalizeStudent(student) {
     fullName: student.fullName,
     email: student.email ?? null,
     status: student.status,
-
-    assignedBatches: (
-      student.assignedBatches ?? []
-    ).map(normalizeId),
-
-    assignedSections: (
-      student.assignedSections ?? []
-    ).map(normalizeId),
-
+    assignedBatches: (student.assignedBatches ?? []).map(normalizeId),
+    assignedSections: (student.assignedSections ?? []).map(normalizeId),
     createdAt: student.createdAt,
   };
 }
@@ -67,18 +55,13 @@ async function getAuthenticatedMentor(userId) {
   const mentor = await User.findOne({
     _id: userId,
     status: ACCOUNT_STATUSES.ACTIVE,
-
     $or: [
-      {
-        role: USER_ROLES.MENTOR,
-      },
-      {
-        roles: USER_ROLES.MENTOR,
-      },
+      { role: USER_ROLES.MENTOR },
+      { roles: USER_ROLES.MENTOR },
     ],
   })
     .select(
-      '_id institutionalId fullName email role roles status department assignedBatches assignedSections',
+      '_id institutionalId fullName email role roles status department assignedBatches',
     )
     .lean()
     .exec();
@@ -115,48 +98,63 @@ async function getAuthenticatedMentor(userId) {
     );
   }
 
-  return {
-    mentor,
-    department,
-  };
+  return { mentor, department };
 }
 
 /**
  * GET /api/v1/provisioning/mentor/dashboard
  *
- * Returns actual dashboard information for the authenticated
- * Mentor and their assigned batches and sections.
+ * Section.mentor is the canonical source of mentor-to-section
+ * ownership. User.assignedSections is intentionally not used here
+ * because it is a legacy denormalized assignment field.
  */
-export async function getMentorDashboardController(
-  req,
-  res,
-  next,
-) {
+export async function getMentorDashboardController(req, res, next) {
   try {
-    const { mentor, department } =
-      await getAuthenticatedMentor(req.user?.id);
+    const { mentor, department } = await getAuthenticatedMentor(
+      req.user?.id,
+    );
 
-    const assignedBatchIds = [
-      ...new Set(
-        (mentor.assignedBatches ?? []).map(String),
-      ),
-    ];
+    const sections = await Section.find({
+      department: department._id,
+      mentor: mentor._id,
+      status: 'ACTIVE',
+    })
+      .select('_id name code batch')
+      .sort({ name: 1 })
+      .lean()
+      .exec();
 
-    const assignedSectionIds = [
-      ...new Set(
-        (mentor.assignedSections ?? []).map(String),
-      ),
-    ];
+    const sectionIds = sections.map((section) => section._id);
+
+    const assignedBatchIds = new Set(
+      (mentor.assignedBatches ?? []).map(String),
+    );
+
+    // Include batches referenced by canonically assigned sections too.
+    for (const section of sections) {
+      if (section.batch) {
+        assignedBatchIds.add(String(section.batch));
+      }
+    }
+
+    const batchIds = [...assignedBatchIds];
+
+    const studentFilter = {
+      role: USER_ROLES.STUDENT,
+      department: department._id,
+      status: ACCOUNT_STATUSES.ACTIVE,
+      assignedSections: { $in: sectionIds },
+    };
 
     const [
       batches,
-      sections,
+      studentCount,
+      recentStudents,
+      attendanceSummary,
     ] = await Promise.all([
-      assignedBatchIds.length
+      batchIds.length
         ? Batch.find({
-            _id: {
-              $in: assignedBatchIds,
-            },
+            _id: { $in: batchIds },
             department: department._id,
             status: 'ACTIVE',
           })
@@ -166,78 +164,32 @@ export async function getMentorDashboardController(
             .exec()
         : [],
 
-      assignedSectionIds.length
-        ? Section.find({
-            _id: {
-              $in: assignedSectionIds,
-            },
-            department: department._id,
-            mentor: mentor._id,
-            status: 'ACTIVE',
-          })
-            .select('_id name code batch')
-            .populate('batch', 'name code academicYear')
-            .sort({ name: 1 })
-            .lean()
-            .exec()
-        : [],
-    ]);
-
-    const validBatchIds = batches.map(
-      (batch) => batch._id,
-    );
-
-    const validSectionIds = sections.map(
-      (section) => section._id,
-    );
-
-    const studentFilter = {
-      role: USER_ROLES.STUDENT,
-      department: department._id,
-      status: ACCOUNT_STATUSES.ACTIVE,
-      assignedSections: {
-        $in: validSectionIds,
-      },
-    };
-
-    const [
-      studentCount,
-      recentStudents,
-      attendanceSummary,
-    ] = await Promise.all([
-      validSectionIds.length
+      sectionIds.length
         ? User.countDocuments(studentFilter)
         : 0,
 
-      validSectionIds.length
+      sectionIds.length
         ? User.find(studentFilter)
             .select(
               '_id institutionalId fullName email status assignedBatches assignedSections createdAt',
             )
-            .sort({
-              createdAt: -1,
-              _id: -1,
-            })
+            .sort({ createdAt: -1, _id: -1 })
             .limit(5)
             .lean()
             .exec()
         : [],
 
-      validSectionIds.length
+      sectionIds.length
         ? Attendance.aggregate([
             {
               $match: {
-                section: {
-                  $in: validSectionIds,
-                },
+                section: { $in: sectionIds },
               },
             },
             {
               $group: {
                 _id: '$status',
-                count: {
-                  $sum: 1,
-                },
+                count: { $sum: 1 },
               },
             },
           ])
@@ -254,21 +206,11 @@ export async function getMentorDashboardController(
     for (const record of attendanceSummary) {
       attendance.total += record.count;
 
-      if (
-        record._id === ATTENDANCE_STATUSES.PRESENT
-      ) {
+      if (record._id === ATTENDANCE_STATUSES.PRESENT) {
         attendance.present = record.count;
-      }
-
-      if (
-        record._id === ATTENDANCE_STATUSES.ABSENT
-      ) {
+      } else if (record._id === ATTENDANCE_STATUSES.ABSENT) {
         attendance.absent = record.count;
-      }
-
-      if (
-        record._id === ATTENDANCE_STATUSES.LATE
-      ) {
+      } else if (record._id === ATTENDANCE_STATUSES.LATE) {
         attendance.late = record.count;
       }
     }
@@ -280,26 +222,32 @@ export async function getMentorDashboardController(
       academicYear: batch.academicYear,
     }));
 
-    const normalizedSections = sections.map((section) => ({
-      id: String(section._id),
-      name: section.name,
-      code: section.code,
+    const batchById = new Map(
+      normalizedBatches.map((batch) => [batch.id, batch]),
+    );
 
-      batch: section.batch
-        ? {
-            id: normalizeId(section.batch),
-            name: section.batch.name,
-            code: section.batch.code,
-            academicYear: section.batch.academicYear,
-          }
-        : null,
-    }));
+    const normalizedSections = sections.map((section) => {
+      const batchId = normalizeId(section.batch);
+      const batch = batchId ? batchById.get(batchId) : null;
+
+      return {
+        id: String(section._id),
+        name: section.name,
+        code: section.code,
+        batch: batch
+          ? {
+              id: batch.id,
+              name: batch.name,
+              code: batch.code,
+              academicYear: batch.academicYear,
+            }
+          : null,
+      };
+    });
 
     return res.status(200).json({
       success: true,
-
       message: 'Mentor dashboard retrieved successfully.',
-
       data: {
         mentor: {
           id: String(mentor._id),
@@ -309,29 +257,22 @@ export async function getMentorDashboardController(
           role: mentor.role,
           roles: mentor.roles ?? [],
         },
-
         department: {
           id: String(department._id),
           name: department.name,
           code: department.code,
         },
-
         assignments: {
           batches: normalizedBatches,
           sections: normalizedSections,
         },
-
         summary: {
-          assignedBatches: batches.length,
+          assignedBatches: normalizedBatches.length,
           assignedSections: sections.length,
           assignedStudents: studentCount,
           attendance,
         },
-
-        recentStudents: recentStudents.map(
-          normalizeStudent,
-        ),
-
+        recentStudents: recentStudents.map(normalizeStudent),
         generatedAt: new Date().toISOString(),
       },
     });
