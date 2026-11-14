@@ -11,8 +11,11 @@ import {
   COURSE_STATUSES,
 } from '../models/course.model.js';
 
+import { Department } from '../models/department.model.js';
+
 import {
   buildRoleQuery,
+  hasUserRole,
 } from '../utils/role-access.util.js';
 
 function createControllerError(statusCode, code, message) {
@@ -63,6 +66,7 @@ async function getAuthenticatedFaculty(req) {
     ...buildRoleQuery(
       USER_ROLES.FACULTY,
       USER_ROLES.MENTOR,
+      USER_ROLES.HOD,
     ),
     status: ACCOUNT_STATUSES.ACTIVE,
   })
@@ -73,7 +77,7 @@ async function getAuthenticatedFaculty(req) {
   if (!faculty) {
     throw createControllerError(
       401,
-      'ACTIVE_FACULTY_NOT_FOUND',
+      'ACTIVE_TEACHING_USER_NOT_FOUND',
       'The active Faculty, Mentor, or HOD account could not be found.',
     );
   }
@@ -81,9 +85,28 @@ async function getAuthenticatedFaculty(req) {
   if (!faculty.department) {
     throw createControllerError(
       403,
-      'FACULTY_DEPARTMENT_REQUIRED',
+      'TEACHING_DEPARTMENT_REQUIRED',
       'Your teaching account is not assigned to a department.',
     );
+  }
+
+  if (hasUserRole(faculty, USER_ROLES.HOD)) {
+    const department = await Department.findOne({
+      _id: faculty.department,
+      hod: faculty._id,
+      status: 'ACTIVE',
+    })
+      .select('_id')
+      .lean()
+      .exec();
+
+    if (!department) {
+      throw createControllerError(
+        403,
+        'HOD_DEPARTMENT_UNAVAILABLE',
+        'Your active HOD department assignment could not be verified.',
+      );
+    }
   }
 
   return faculty;
@@ -143,15 +166,8 @@ export async function listFacultyAttendanceStudentsController(
       status: ACCOUNT_STATUSES.ACTIVE,
     };
 
-    /*
-     * Apply canonical course ownership scope.
-     *
-     * When both batch and section are configured, the student
-     * must belong to both. This matches the attendance listing
-     * and marking controller's existing behavior.
-     *
-     * When only one scope is configured, only that scope applies.
-     */
+    // Apply every configured course placement constraint.
+    // This matches the attendance listing and marking controllers.
     if (batchIds.length) {
       studentScope.assignedBatches = {
         $in: batchIds,
@@ -196,7 +212,6 @@ export async function listFacultyAttendanceStudentsController(
         id: String(student._id),
         institutionalId: student.institutionalId,
         fullName: student.fullName,
-
         batchId: batchId ? String(batchId) : null,
         sectionId: sectionId ? String(sectionId) : null,
       };
@@ -210,7 +225,6 @@ export async function listFacultyAttendanceStudentsController(
           title: course.title,
           code: course.code,
         },
-
         items,
         total: items.length,
       },
