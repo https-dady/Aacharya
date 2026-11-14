@@ -20,6 +20,7 @@ import {
 import { Department } from '../models/department.model.js';
 import { Batch } from '../models/batch.model.js';
 import { Section } from '../models/section.model.js';
+import { hasUserRole } from '../utils/role-access.util.js';
 
 import {
   uploadAssignmentAttachments,
@@ -58,12 +59,9 @@ function escapeRegex(value) {
 function normalizeContent(item) {
   return {
     id: item._id.toString(),
-
     title: item.title,
-
     contentType:
       item.contentType || ASSIGNMENT_CONTENT_TYPES.ASSIGNMENT,
-
     description: item.description,
 
     course: item.course
@@ -95,7 +93,6 @@ function normalizeContent(item) {
     })),
 
     dueDate: item.dueDate,
-
     totalMarks: item.totalMarks,
 
     attachments: (item.attachments || []).map((attachment) => ({
@@ -137,7 +134,7 @@ async function getActiveUser(userId) {
     _id: userId,
     status: ACCOUNT_STATUSES.ACTIVE,
   })
-    .select('_id role status department')
+    .select('_id role roles status department')
     .lean()
     .exec();
 
@@ -150,11 +147,8 @@ async function getActiveUser(userId) {
   }
 
   if (
-    ![
-      USER_ROLES.HOD,
-      USER_ROLES.FACULTY,
-      USER_ROLES.MENTOR,
-    ].includes(user.role)
+    user.role !== USER_ROLES.HOD
+    && !hasUserRole(user, USER_ROLES.FACULTY)
   ) {
     throw createControllerError(
       403,
@@ -225,6 +219,7 @@ async function getAuthorizedCourse(user, courseId) {
 
   if (
     user.role !== USER_ROLES.HOD
+    && hasUserRole(user, USER_ROLES.FACULTY)
     && normalizeId(course.faculty) !== user._id.toString()
   ) {
     throw createControllerError(
@@ -352,7 +347,7 @@ async function buildContentQuery({ user, department, query }) {
 
   let assignedCourseIds = null;
 
-  if (user.role === USER_ROLES.FACULTY) {
+  if (hasUserRole(user, USER_ROLES.FACULTY)) {
     const assignedCourses = await Course.find({
       department: user.department,
       faculty: user._id,
@@ -367,8 +362,6 @@ async function buildContentQuery({ user, department, query }) {
     filter.course = {
       $in: assignedCourseIds,
     };
-  } else if (user.role !== USER_ROLES.HOD) {
-    filter.createdBy = user._id;
   }
 
   if (query.courseId) {
@@ -878,7 +871,7 @@ export async function updateDepartmentContentController(
       department: departmentId,
     };
 
-    if (user.role === USER_ROLES.FACULTY) {
+    if (hasUserRole(user, USER_ROLES.FACULTY)) {
       const assignedCourses = await Course.find({
         department: user.department,
         faculty: user._id,
@@ -891,8 +884,6 @@ export async function updateDepartmentContentController(
       assignmentFilter.course = {
         $in: assignedCourses.map((course) => course._id),
       };
-    } else if (user.role !== USER_ROLES.HOD) {
-      assignmentFilter.createdBy = user._id;
     }
 
     const assignment = await Assignment.findOne(assignmentFilter).exec();
@@ -1046,9 +1037,6 @@ export async function updateDepartmentContentController(
         requestedAttachments,
       );
 
-      // Only metadata already stored in this assignment can identify
-      // an existing Cloudinary asset. Never trust a client-supplied
-      // publicId for a new URL attachment.
       requestedAttachments = preserveKnownCloudinaryMetadata(
         requestedAttachments,
         previousAttachments,
@@ -1159,9 +1147,6 @@ export async function updateDepartmentContentController(
       },
     });
   } catch (error) {
-    // The storage service cleans partial uploads when its own upload
-    // operation fails. This handles files uploaded successfully before
-    // a later controller validation or database error.
     if (uploadedAttachments.length > 0) {
       await cleanupUploadedAttachments(uploadedAttachments);
     }
