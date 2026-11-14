@@ -179,7 +179,6 @@ function NavigationItem({
   return (
     <NavLink
       to={item.path}
-      end
       title={item.label}
       aria-label={item.label}
       onClick={onNavigate}
