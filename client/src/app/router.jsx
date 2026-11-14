@@ -12,42 +12,65 @@ import {
 
 import StudentActivation from '../features/auth/pages/StudentActivation.jsx';
 
+const ROLE_DASHBOARD_PATHS = Object.freeze({
+  SUPER_ADMIN: '/super-admin/dashboard',
+  HOD: '/hod/dashboard',
+  FACULTY: '/faculty/dashboard',
+  MENTOR: '/mentor/dashboard',
+  STUDENT: '/student/dashboard',
+  ALUMNI: '/alumni/dashboard',
+});
+
 function normalizeRole(role) {
   return typeof role === 'string'
     ? role.trim().toUpperCase()
     : '';
 }
 
-function RoleGuard({
-  roles,
-  children,
-}) {
+function getPrimaryDashboardPath(role) {
+  return ROLE_DASHBOARD_PATHS[normalizeRole(role)] || '/';
+}
+
+function SessionRestorationView() {
+  return (
+    <div
+      className="flex min-h-40 items-center justify-center"
+      role="status"
+      aria-live="polite"
+    >
+      <span className="text-sm text-[#A4A4AF]">
+        Restoring your session...
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Protects a route subtree using the authenticated user's effective roles.
+ *
+ * Mentor and HOD accounts receive the shared FACULTY capability through
+ * AuthContext normalization, while their primary role remains unchanged.
+ *
+ * Backend authorization remains authoritative.
+ */
+function RoleGuard({ roles, children }) {
   const {
     user,
     loading,
+    hasRole,
   } = useAuth();
 
   if (loading) {
-    return (
-      <div
-        className="flex min-h-40 items-center justify-center"
-        role="status"
-        aria-live="polite"
-      >
-        <span className="text-sm text-[#A4A4AF]">
-          Restoring your session...
-        </span>
-      </div>
-    );
+    return <SessionRestorationView />;
   }
 
   if (!user) {
     return <Navigate to="/" replace />;
   }
 
-  const userRole = normalizeRole(user.role);
+  const primaryRole = normalizeRole(user.role);
 
-  if (!isSupportedRole(userRole)) {
+  if (!isSupportedRole(primaryRole)) {
     return <Navigate to="/" replace />;
   }
 
@@ -55,14 +78,20 @@ function RoleGuard({
     return <Navigate to="/" replace />;
   }
 
+  const requiredRoles = Array.isArray(roles)
+    ? roles.map(normalizeRole).filter(Boolean)
+    : [];
+
   if (
-    Array.isArray(roles)
-    && roles.length > 0
-    && !roles.some(
-      (role) => normalizeRole(role) === userRole,
-    )
+    requiredRoles.length > 0
+    && !hasRole(...requiredRoles)
   ) {
-    return <Navigate to="/" replace />;
+    return (
+      <Navigate
+        to={getPrimaryDashboardPath(primaryRole)}
+        replace
+      />
+    );
   }
 
   return children;
@@ -76,7 +105,7 @@ function renderRoute(route, index) {
     children,
   } = route;
 
-  const protectedElement = roles?.length
+  const protectedElement = Array.isArray(roles) && roles.length > 0
     ? (
       <RoleGuard roles={roles}>
         {element}
@@ -102,16 +131,13 @@ export default function AppRouter({
 }) {
   return (
     <Routes>
-      {/* Public route: student activates their account via email link. */}
       <Route
         path="/activate-account"
         element={<StudentActivation />}
       />
 
-      {/* Preserve all existing application routes and role guards. */}
       {routes.map(renderRoute)}
 
-      {/* Preserve the existing authentication fallback. */}
       <Route
         path="*"
         element={children}
