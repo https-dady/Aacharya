@@ -104,9 +104,11 @@ async function getAuthenticatedMentor(userId) {
 /**
  * GET /api/v1/provisioning/mentor/dashboard
  *
- * Section.mentor is the canonical source of mentor-to-section
- * ownership. User.assignedSections is intentionally not used here
- * because it is a legacy denormalized assignment field.
+ * Canonical mentor ownership:
+ * - Section.mentor defines the mentor's assigned sections.
+ * - Active student records assigned to those sections define the
+ *   mentor's current student scope.
+ * - Attendance summaries must match both section and student scope.
  */
 export async function getMentorDashboardController(req, res, next) {
   try {
@@ -126,10 +128,6 @@ export async function getMentorDashboardController(req, res, next) {
 
     const sectionIds = sections.map((section) => section._id);
 
-    // Batch visibility is derived only from active sections canonically
-    // assigned through Section.mentor. The legacy User.assignedBatches
-    // array is intentionally excluded because it can contain stale or
-    // superseded references after an assignment change.
     const batchIds = [
       ...new Set(
         sections
@@ -149,7 +147,7 @@ export async function getMentorDashboardController(req, res, next) {
       batches,
       studentCount,
       recentStudents,
-      attendanceSummary,
+      assignedStudents,
     ] = await Promise.all([
       batchIds.length
         ? Batch.find({
@@ -179,21 +177,33 @@ export async function getMentorDashboardController(req, res, next) {
         : [],
 
       sectionIds.length
-        ? Attendance.aggregate([
-            {
-              $match: {
-                section: { $in: sectionIds },
-              },
-            },
-            {
-              $group: {
-                _id: '$status',
-                count: { $sum: 1 },
-              },
-            },
-          ])
+        ? User.find(studentFilter)
+            .select('_id')
+            .lean()
+            .exec()
         : [],
     ]);
+
+    const studentIds = assignedStudents.map((student) => student._id);
+
+    let attendanceSummary = [];
+
+    if (sectionIds.length > 0 && studentIds.length > 0) {
+      attendanceSummary = await Attendance.aggregate([
+        {
+          $match: {
+            section: { $in: sectionIds },
+            student: { $in: studentIds },
+          },
+        },
+        {
+          $group: {
+            _id: '$status',
+            count: { $sum: 1 },
+          },
+        },
+      ]);
+    }
 
     const attendance = {
       total: 0,
