@@ -1,85 +1,26 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import EmptyState from '../../components/EmptyState.jsx';
 import PageHeader from '../../components/PageHeader.jsx';
 import SectionCard from '../../components/SectionCard.jsx';
 
-function OverviewIcon({ type }) {
-  const paths = {
-    students: (
-      <>
-        <circle cx="9" cy="8" r="3" />
-        <path d="M3.5 19v-1.25A4.75 4.75 0 0 1 8.25 13h1.5a4.75 4.75 0 0 1 4.75 4.75V19" />
-        <path d="M16 5.2a3.25 3.25 0 0 1 0 6.1M17 13.5a4.75 4.75 0 0 1 3.5 4.58V19" />
-      </>
-    ),
-    attendance: (
-      <>
-        <rect x="3.5" y="5" width="17" height="16" rx="2" />
-        <path d="M7.5 3v4M16.5 3v4M3.5 10h17m-12 5 2.2 2.2 4.3-4.4" />
-      </>
-    ),
-    academic: (
-      <>
-        <path d="M3 9.5 12 5l9 4.5-9 4.5-9-4.5Z" />
-        <path d="M6.5 11.5V17c3.4 2.5 7.6 2.5 11 0v-5.5M21 9.5v6" />
-      </>
-    ),
-    progress: (
-      <>
-        <path d="M4 19V5m0 14h16" />
-        <path d="m7 15 4-4 3 2 5-6" strokeLinecap="round" strokeLinejoin="round" />
-      </>
-    ),
-  };
+import mentorAssignedStudentsService from '../../services/mentorAssignedStudentsService.js';
+import mentorAttendanceService from '../../services/mentorAttendanceService.js';
 
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-5 w-5"
-    >
-      {paths[type]}
-    </svg>
-  );
-}
-
-function OverviewCard({ title, description, icon, children }) {
+function MetricCard({ title, value, description }) {
   return (
     <article className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5">
-      <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-[#CDB5F7]/15 bg-[#CDB5F7]/10 text-[#CDB5F7]">
-          <OverviewIcon type={icon} />
-        </div>
+      <p className="text-sm text-[#A5A6B0]">{title}</p>
 
-        <div className="min-w-0">
-          <h2 className="font-semibold text-[#EAEAE6]">{title}</h2>
-          <p className="mt-1 text-sm leading-6 text-[#858590]">
-            {description}
-          </p>
-        </div>
-      </div>
+      <p className="mt-3 text-3xl font-semibold text-[#EAEAE6]">
+        {value}
+      </p>
 
-      <div className="mt-5 border-t border-[#343640] pt-4">
-        {children}
-      </div>
+      <p className="mt-2 text-xs leading-5 text-[#858590]">
+        {description}
+      </p>
     </article>
-  );
-}
-
-function PendingValue({ label }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-2">
-      <span className="text-sm text-[#A5A6B0]">{label}</span>
-      <span className="text-sm font-medium text-[#858590]">
-        Not available
-      </span>
-    </div>
   );
 }
 
@@ -87,144 +28,321 @@ function ActionLink({ to, children }) {
   return (
     <Link
       to={to}
-      className={[
-        'inline-flex min-h-10 items-center justify-center',
-        'rounded-xl border border-[#3B3C43] bg-[#26272B]',
-        'px-3 py-2 text-sm font-semibold text-[#EAEAE6]',
-        'transition-colors hover:border-[#CDB5F7]/40 hover:bg-[#303139]',
-        'focus-visible:outline-none focus-visible:ring-2',
-        'focus-visible:ring-[#CDB5F7]',
-      ].join(' ')}
+      className="inline-flex min-h-10 items-center justify-center rounded-xl border border-[#3B3C43] bg-[#26272B] px-4 py-2 text-sm font-semibold text-[#EAEAE6] transition hover:border-[#CDB5F7]/40 hover:bg-[#303139] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
     >
       {children}
     </Link>
   );
 }
 
+function AttendanceStatus({ percentage }) {
+  if (percentage === null || percentage === undefined) {
+    return (
+      <span className="text-xs text-[#858590]">
+        No attendance records
+      </span>
+    );
+  }
+
+  const safePercentage = Math.max(0, Math.min(100, percentage));
+
+  return (
+    <div className="min-w-[130px] space-y-2">
+      <div className="flex justify-between text-xs">
+        <span className="font-semibold text-[#EAEAE6]">
+          {percentage.toFixed(2)}%
+        </span>
+
+        <span className="text-[#858590]">100%</span>
+      </div>
+
+      <div className="h-2 overflow-hidden rounded-full bg-[#343640]">
+        <div
+          className={[
+            'h-full rounded-full',
+            percentage < 75 ? 'bg-rose-400' : 'bg-emerald-400',
+          ].join(' ')}
+          style={{ width: `${safePercentage}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export default function MentorStudentMentoring() {
-  /*
-   * The current frontend baseline does not define a confirmed mentoring
-   * overview API contract. Do not invent student records, attendance values,
-   * grades or progress percentages.
-   */
-  const mentoringData = null;
+  const [studentSummary, setStudentSummary] = useState({
+    total: 0,
+    active: 0,
+    suspended: 0,
+    disabled: 0,
+  });
+
+  const [attendance, setAttendance] = useState(null);
+  const [atRiskStudents, setAtRiskStudents] = useState([]);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadMentoringOverview() {
+      setLoading(true);
+      setError('');
+
+      try {
+        const [studentResult, attendanceResult] = await Promise.all([
+          mentorAssignedStudentsService.getStudents({
+            page: 1,
+            limit: 1,
+            signal: controller.signal,
+          }),
+
+          mentorAttendanceService.getOverview(
+            {},
+            { signal: controller.signal },
+          ),
+        ]);
+
+        if (controller.signal.aborted) return;
+
+        setStudentSummary(studentResult.summary);
+        setAttendance(attendanceResult.attendance);
+        setAtRiskStudents(attendanceResult.atRiskStudents);
+      } catch (err) {
+        if (
+          controller.signal.aborted ||
+          err.name === 'CanceledError' ||
+          err.name === 'AbortError'
+        ) {
+          return;
+        }
+
+        setError(
+          err.response?.data?.error?.message ||
+          err.message ||
+          'Unable to load mentoring overview.',
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadMentoringOverview();
+
+    return () => controller.abort();
+  }, []);
 
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-6">
       <PageHeader
-        eyebrow="Mentor workspace"
+        eyebrow="MENTOR WORKSPACE"
         title="Student Mentoring"
-        description="Review your assigned students' academic progress, attendance and mentoring needs from one workspace."
+        description="Review assigned students and identify attendance-related follow-up requirements."
         breadcrumbs={[
           { label: 'Mentor', to: '/mentor/dashboard' },
           { label: 'Student Mentoring' },
         ]}
         actions={
           <ActionLink to="/mentor/students">
-            Assigned students
+            Assigned Students
           </ActionLink>
         }
       />
 
+      {error && (
+        <div
+          role="alert"
+          className="rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm text-red-300"
+        >
+          {error}
+        </div>
+      )}
+
       <section
-        aria-label="Mentoring overview"
-        className="grid grid-cols-1 gap-4 md:grid-cols-2"
+        aria-label="Mentoring summary"
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
       >
-        <OverviewCard
-          title="Assigned students"
-          description="Students within your authorized batches and sections."
-          icon="students"
-        >
-          <PendingValue label="Student count" />
-          <PendingValue label="Students needing attention" />
+        <MetricCard
+          title="Assigned Students"
+          value={loading ? '—' : studentSummary.total}
+          description="Students within your authorized mentoring scope."
+        />
 
-          <div className="mt-4">
-            <ActionLink to="/mentor/students">
-              Open student directory
-            </ActionLink>
-          </div>
-        </OverviewCard>
+        <MetricCard
+          title="Active Students"
+          value={loading ? '—' : studentSummary.active}
+          description="Active student accounts."
+        />
 
-        <OverviewCard
-          title="Attendance overview"
-          description="Attendance patterns and students who may need follow-up."
-          icon="attendance"
-        >
-          <PendingValue label="Attendance summary" />
-          <PendingValue label="Students below 75%" />
+        <MetricCard
+          title="Average Attendance"
+          value={
+            loading
+              ? '—'
+              : attendance?.averagePercentage === null
+                ? 'N/A'
+                : `${attendance?.averagePercentage ?? 0}%`
+          }
+          description="Calculated from available attendance records."
+        />
 
-          <div className="mt-4">
-            <ActionLink to="/mentor/attendance">
-              View attendance
-            </ActionLink>
-          </div>
-        </OverviewCard>
-
-        <OverviewCard
-          title="Academic performance"
-          description="Review available academic results and assignment progress."
-          icon="academic"
-        >
-          <PendingValue label="Results overview" />
-          <PendingValue label="Assignment progress" />
-
-          <div className="mt-4">
-            <ActionLink to="/mentor/students">
-              Select a student
-            </ActionLink>
-          </div>
-        </OverviewCard>
-
-        <OverviewCard
-          title="Mentoring follow-up"
-          description="Identify students who may require academic guidance."
-          icon="progress"
-        >
-          <PendingValue label="Students requiring follow-up" />
-          <PendingValue label="Recent academic changes" />
-
-          <p className="mt-4 text-xs leading-5 text-[#858590]">
-            Follow-up indicators will use actual student, attendance and
-            academic records once the relevant data sources are integrated.
-          </p>
-        </OverviewCard>
+        <MetricCard
+          title="Students Below Threshold"
+          value={
+            loading
+              ? '—'
+              : attendance?.belowThresholdCount ?? 0
+          }
+          description={`Attendance below ${attendance?.threshold ?? 75}%.`}
+        />
       </section>
 
       <SectionCard
-        eyebrow="Mentoring workflow"
-        title="Review a student's progress"
-        description="Start from your assigned-students directory. Individual records must be verified against your mentoring assignments."
+        eyebrow="STUDENT FOLLOW-UP"
+        title="Students requiring attention"
+        description="Students identified from actual attendance records."
       >
-        {mentoringData ? (
+        {loading ? (
+          <div className="py-10 text-center text-sm text-[#A5A6B0]">
+            Loading mentoring records...
+          </div>
+        ) : atRiskStudents.length === 0 ? (
           <EmptyState
-            title="No mentoring activity"
-            description="There are no mentoring updates to display."
-            className="border-0 bg-transparent"
+            title="No attendance follow-up required"
+            description="No students currently fall below the configured attendance threshold in the available records."
+            className="border-0 bg-transparent py-8"
           />
         ) : (
-          <EmptyState
-            title="Mentoring data is not connected yet"
-            description="Student profiles, attendance records, results and assignment progress will appear here after their actual data sources are integrated. No fabricated academic information is shown."
-            className="border-0 bg-transparent py-8"
-            action={
-              <ActionLink to="/mentor/students">
-                Browse assigned students
-              </ActionLink>
-            }
-          />
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[650px] text-left text-sm">
+              <thead className="border-b border-[#343640] text-xs uppercase tracking-wide text-[#858590]">
+                <tr>
+                  <th className="px-4 py-3">Student</th>
+                  <th className="px-4 py-3">Institutional ID</th>
+                  <th className="px-4 py-3">Attendance</th>
+                  <th className="px-4 py-3">Present</th>
+                  <th className="px-4 py-3">Absent</th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-[#343640]">
+                {atRiskStudents.map((student) => (
+                  <tr
+                    key={student.id}
+                    className="transition hover:bg-[#26272B]/60"
+                  >
+                    <td className="px-4 py-4">
+                      <p className="font-medium text-[#EAEAE6]">
+                        {student.fullName}
+                      </p>
+
+                      <p className="mt-1 text-xs text-[#858590]">
+                        {student.email || 'Email unavailable'}
+                      </p>
+                    </td>
+
+                    <td className="px-4 py-4 text-[#B8B8C2]">
+                      {student.institutionalId || '—'}
+                    </td>
+
+                    <td className="px-4 py-4">
+                      <AttendanceStatus
+                        percentage={student.percentage}
+                      />
+                    </td>
+
+                    <td className="px-4 py-4 text-emerald-300">
+                      {student.present}
+                    </td>
+
+                    <td className="px-4 py-4 text-rose-300">
+                      {student.absent}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
+
+        <div className="mt-5 flex flex-wrap gap-3 border-t border-[#343640] pt-5">
+          <ActionLink to="/mentor/attendance">
+            Open Attendance Overview
+          </ActionLink>
+
+          <ActionLink to="/mentor/students">
+            Open Student Directory
+          </ActionLink>
+        </div>
       </SectionCard>
 
-      <div className="rounded-2xl border border-[#E5DF98]/15 bg-[#E5DF98]/[0.04] p-4 sm:p-5">
-        <h2 className="text-sm font-semibold text-[#E5DF98]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <SectionCard
+          title="Attendance follow-up"
+          description="Use verified attendance information to identify students who may need academic guidance."
+        >
+          <div className="space-y-3">
+            <div className="flex justify-between gap-4 text-sm">
+              <span className="text-[#A5A6B0]">Total attendance records</span>
+              <span className="font-semibold text-[#EAEAE6]">
+                {loading ? '—' : attendance?.totalRecords ?? 0}
+              </span>
+            </div>
+
+            <div className="flex justify-between gap-4 text-sm">
+              <span className="text-[#A5A6B0]">Present</span>
+              <span className="font-semibold text-emerald-300">
+                {loading ? '—' : attendance?.present ?? 0}
+              </span>
+            </div>
+
+            <div className="flex justify-between gap-4 text-sm">
+              <span className="text-[#A5A6B0]">Absent</span>
+              <span className="font-semibold text-rose-300">
+                {loading ? '—' : attendance?.absent ?? 0}
+              </span>
+            </div>
+
+            <div className="flex justify-between gap-4 text-sm">
+              <span className="text-[#A5A6B0]">Late</span>
+              <span className="font-semibold text-amber-300">
+                {loading ? '—' : attendance?.late ?? 0}
+              </span>
+            </div>
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Academic performance"
+          description="Academic results and assignment progress."
+        >
+          <p className="text-sm leading-6 text-[#A5A6B0]">
+            The current Mentor backend does not provide a verified
+            consolidated academic-performance response. Results and
+            assignment progress are therefore not displayed as fabricated
+            values.
+          </p>
+
+          <div className="mt-4">
+            <ActionLink to="/mentor/students">
+              Browse Student Records
+            </ActionLink>
+          </div>
+        </SectionCard>
+      </div>
+
+      <div className="rounded-2xl border border-[#CDB5F7]/15 bg-[#CDB5F7]/[0.04] p-5">
+        <h2 className="text-sm font-semibold text-[#CDB5F7]">
           Mentoring access policy
         </h2>
 
         <p className="mt-2 text-sm leading-6 text-[#B8B8C2]">
-          Only students assigned to the authenticated mentor should be
-          accessible. Attendance warnings, academic records and student
-          details must be based on verified backend data. The backend must
-          enforce access restrictions independently of the frontend.
+          Student records and attendance are retrieved through the
+          authenticated Mentor APIs. The backend remains responsible
+          for validating section ownership and student access.
         </p>
       </div>
     </div>
