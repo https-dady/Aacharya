@@ -16,6 +16,10 @@ import {
   updateMentorSelfProfileController,
 } from '../controllers/mentor-self-profile.controller.js';
 
+import {
+  getMentorAssignedStudentsController,
+} from '../controllers/mentor-assigned-students.controller.js';
+
 import { authenticate } from '../middleware/auth.middleware.js';
 import { authorize } from '../middleware/authorize.middleware.js';
 import { validate } from '../middleware/validate.middleware.js';
@@ -101,6 +105,34 @@ mentorRouter.get(
   authorize('MENTOR'),
   authRateLimiter,
   getMentorDashboardController,
+);
+
+/**
+ * GET /api/v1/provisioning/mentor/students
+ *
+ * Paginated students across all sections canonically assigned
+ * to the authenticated mentor.
+ */
+mentorRouter.get(
+  '/mentor/students',
+  authenticate,
+  authorize('MENTOR'),
+  authRateLimiter,
+  validate(z.object({
+    params: z.object({}).strict(),
+    body: z.object({}).strict(),
+    query: z.object({
+      page: z.coerce.number().int().min(1).max(100000).default(1),
+      limit: z.coerce.number().int().min(1).max(100).default(20),
+      search: z.string().trim().max(100).optional(),
+      status: z.enum([
+        ACCOUNT_STATUSES.ACTIVE,
+        ACCOUNT_STATUSES.SUSPENDED,
+        ACCOUNT_STATUSES.DISABLED,
+      ]).optional(),
+    }).strict(),
+  })),
+  getMentorAssignedStudentsController,
 );
 
 /**
