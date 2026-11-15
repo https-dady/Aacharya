@@ -7,6 +7,10 @@ import {
   verifyAccessToken,
 } from '../services/auth/token.service.js';
 
+import {
+  getUserRoles,
+} from '../utils/role-access.util.js';
+
 function createAuthError(statusCode, code, message) {
   const error = new Error(message);
 
@@ -15,29 +19,6 @@ function createAuthError(statusCode, code, message) {
   error.expose = true;
 
   return error;
-}
-
-function normalizeUserRoles(user) {
-  const roles = new Set();
-
-  if (Array.isArray(user.roles)) {
-    for (const role of user.roles) {
-      if (typeof role === 'string' && role.trim()) {
-        roles.add(role);
-      }
-    }
-  }
-
-  /*
-   * Backward compatibility:
-   * Older accounts may not have a roles array.
-   * Their existing primary role must remain valid.
-   */
-  if (typeof user.role === 'string' && user.role.trim()) {
-    roles.add(user.role);
-  }
-
-  return [...roles];
 }
 
 export async function authenticate(req, res, next) {
@@ -126,7 +107,7 @@ export async function authenticate(req, res, next) {
       );
     }
 
-    const userRoles = normalizeUserRoles(user);
+    const userRoles = getUserRoles(user);
 
     if (userRoles.length === 0) {
       return next(
@@ -142,14 +123,10 @@ export async function authenticate(req, res, next) {
       id: user._id.toString(),
       _id: user._id.toString(),
 
-      /*
-       * Preserve the primary role for existing application code.
-       */
+      // Preserve the original primary role.
       role: user.role,
 
-      /*
-       * Expose all assigned roles to authorization middleware.
-       */
+      // Expose effective capabilities.
       roles: userRoles,
 
       isEmailVerified: user.isEmailVerified === true,

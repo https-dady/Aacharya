@@ -1,8 +1,12 @@
+import { USER_ROLES } from '../models/user.model.js';
+
 /**
- * Returns all roles assigned to a user.
+ * Returns all effective roles assigned to a user.
  *
- * Supports legacy accounts that only have a primary `role`
- * and multi-role accounts that also have a `roles` array.
+ * The primary role is always preserved. Additional roles are merged
+ * without duplicates. HOD and Mentor accounts automatically receive
+ * the shared Faculty teaching capability, including legacy accounts
+ * whose persisted `roles` array predates capability synchronization.
  */
 export function getUserRoles(user) {
   if (!user) {
@@ -23,11 +27,18 @@ export function getUserRoles(user) {
     }
   }
 
+  if (
+    roles.has(USER_ROLES.HOD)
+    || roles.has(USER_ROLES.MENTOR)
+  ) {
+    roles.add(USER_ROLES.FACULTY);
+  }
+
   return [...roles];
 }
 
 /**
- * Checks whether a user has at least one requested role.
+ * Checks whether a user has at least one requested effective role.
  */
 export function hasUserRole(user, ...allowedRoles) {
   if (allowedRoles.length === 0) {
@@ -42,12 +53,6 @@ export function hasUserRole(user, ...allowedRoles) {
 /**
  * Creates a MongoDB role condition that supports both
  * legacy primary-role accounts and multi-role accounts.
- *
- * Usage:
- * User.find({
- *   department: departmentId,
- *   ...buildRoleQuery(USER_ROLES.FACULTY),
- * });
  */
 export function buildRoleQuery(...allowedRoles) {
   const roles = [
@@ -64,25 +69,41 @@ export function buildRoleQuery(...allowedRoles) {
     );
   }
 
+  const roleConditions = [
+    {
+      role: {
+        $in: roles,
+      },
+    },
+    {
+      roles: {
+        $in: roles,
+      },
+    },
+  ];
+
+  // Support legacy HOD/Mentor accounts without persisted FACULTY.
+  if (roles.includes(USER_ROLES.FACULTY)) {
+    roleConditions.push({
+      role: {
+        $in: [USER_ROLES.HOD, USER_ROLES.MENTOR],
+      },
+    });
+
+    roleConditions.push({
+      roles: {
+        $in: [USER_ROLES.HOD, USER_ROLES.MENTOR],
+      },
+    });
+  }
+
   return {
-    $or: [
-      {
-        role: {
-          $in: roles,
-        },
-      },
-      {
-        roles: {
-          $in: roles,
-        },
-      },
-    ],
+    $or: roleConditions,
   };
 }
 
 /**
- * Adds role matching to an existing MongoDB filter
- * without overwriting its existing conditions.
+ * Adds role matching to an existing MongoDB filter.
  */
 export function withRoleFilter(filter, ...allowedRoles) {
   if (!filter || typeof filter !== 'object' || Array.isArray(filter)) {
