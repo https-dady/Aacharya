@@ -530,10 +530,16 @@ export default function MentorAttendance() {
           },
         ]}
         actions={
-          <NavigationLink to="/mentor/students">
-            Assigned students
-          </NavigationLink>
-        }
+  <div className="flex flex-wrap gap-2">
+    <NavigationLink to="/mentor/class-attendance">
+      Mark class attendance
+    </NavigationLink>
+
+    <NavigationLink to="/mentor/students">
+      Assigned students
+    </NavigationLink>
+  </div>
+}
       />
 
       <div className="rounded-2xl border border-[#E5DF98]/20 bg-[#E5DF98]/[0.05] p-4 sm:p-5">

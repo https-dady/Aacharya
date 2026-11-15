@@ -56,7 +56,9 @@ function normalizeDate(value) {
   return String(value).slice(0, 10);
 }
 
-export default function FacultyAttendance() {
+export default function FacultyAttendance({
+  workspace = 'faculty',
+}) {
   const [courses, setCourses] = useState([]);
   const [selectedCourseId, setSelectedCourseId] = useState('');
 
@@ -383,18 +385,28 @@ export default function FacultyAttendance() {
   return (
     <div className="mx-auto w-full max-w-[1200px]">
       <PageHeader
-        eyebrow="FACULTY WORKSPACE"
-        title="Attendance"
-        description="Manage class attendance, mark student participation, and review saved attendance records."
-        breadcrumbs={[
-          {
-            label: 'Faculty Dashboard',
-            to: '/faculty/dashboard',
-          },
-          {
-            label: 'Attendance',
-          },
-        ]}
+  eyebrow={
+    workspace === 'mentor'
+      ? 'MENTOR WORKSPACE'
+      : 'FACULTY WORKSPACE'
+  }
+  title="Class Attendance"
+  description="Manage assigned course attendance, mark student participation, and review saved attendance records."
+  breadcrumbs={[
+    {
+      label:
+        workspace === 'mentor'
+          ? 'Mentor Dashboard'
+          : 'Faculty Dashboard',
+      to:
+        workspace === 'mentor'
+          ? '/mentor/dashboard'
+          : '/faculty/dashboard',
+    },
+    {
+      label: 'Class Attendance',
+    },
+  ]}
         actions={
           <ActionButton
             variant="secondary"

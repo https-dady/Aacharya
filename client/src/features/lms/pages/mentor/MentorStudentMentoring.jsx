@@ -475,7 +475,8 @@ export default function MentorStudentMentoring() {
 
                     <p className="mt-1 text-xs leading-5 text-[#A5A6B0]">
                       {attendanceError}
-                    </p                  </div>
+                    </p>
+                  </div>
                 ) : !attendance ? (
                   <EmptyState
                     title="No attendance information"

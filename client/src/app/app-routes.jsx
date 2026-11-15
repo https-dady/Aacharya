@@ -557,6 +557,11 @@ export const applicationRoutes = [
         element: <MentorAttendance />,
       },
       {
+        id: "mentor-class-attendance",
+        path: "class-attendance",
+        element: <FacultyAttendance workspace="mentor" />,
+      },
+      {
         id: "mentor-batches",
         path: "batches",
         element: <MentorBatches />,
