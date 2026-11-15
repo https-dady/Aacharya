@@ -45,9 +45,48 @@ const emptyObjectSchema = z.object({}).strict();
 const mentorAttendanceOverviewSchema = z.object({
   params: emptyObjectSchema,
   body: emptyObjectSchema,
+
   query: z.object({
-    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    startDate: z.string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+
+    endDate: z.string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional(),
+
+    sectionId: objectIdSchema.optional(),
+  }).strict(),
+});
+
+const mentorAssignedStudentsSchema = z.object({
+  params: emptyObjectSchema,
+  body: emptyObjectSchema,
+
+  query: z.object({
+    page: z.coerce.number()
+      .int()
+      .min(1)
+      .max(100000)
+      .default(1),
+
+    limit: z.coerce.number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(20),
+
+    search: z.string()
+      .trim()
+      .max(100)
+      .optional(),
+
+    status: z.enum([
+      ACCOUNT_STATUSES.ACTIVE,
+      ACCOUNT_STATUSES.SUSPENDED,
+      ACCOUNT_STATUSES.DISABLED,
+    ]).optional(),
+
     sectionId: objectIdSchema.optional(),
   }).strict(),
 });
@@ -73,6 +112,7 @@ const listMentorsSchema = z.object({
     page: z.coerce.number().int().min(1).max(100000).optional(),
     limit: z.coerce.number().int().min(1).max(100).optional(),
     search: z.string().trim().max(100).optional(),
+
     status: z.enum([
       ACCOUNT_STATUSES.ACTIVE,
       ACCOUNT_STATUSES.SUSPENDED,
@@ -110,9 +150,6 @@ const updateMentorProfileSchema = z.object({
     ),
 });
 
-/**
- * Mentor dashboard.
- */
 mentorRouter.get(
   '/mentor/dashboard',
   authenticate,
@@ -121,17 +158,6 @@ mentorRouter.get(
   getMentorDashboardController,
 );
 
-/**
- * GET /api/v1/provisioning/mentor/attendance-overview
- *
- * Returns attendance metrics only for sections assigned
- * to the authenticated Mentor.
- *
- * Optional query parameters:
- * - startDate
- * - endDate
- * - sectionId
- */
 mentorRouter.get(
   '/mentor/attendance-overview',
   authenticate,
@@ -141,37 +167,15 @@ mentorRouter.get(
   getMentorAttendanceOverviewController,
 );
 
-/**
- * GET /api/v1/provisioning/mentor/students
- *
- * Paginated students across all sections canonically assigned
- * to the authenticated mentor.
- */
 mentorRouter.get(
   '/mentor/students',
   authenticate,
   authorize('MENTOR'),
   authRateLimiter,
-  validate(z.object({
-    params: z.object({}).strict(),
-    body: z.object({}).strict(),
-    query: z.object({
-      page: z.coerce.number().int().min(1).max(100000).default(1),
-      limit: z.coerce.number().int().min(1).max(100).default(20),
-      search: z.string().trim().max(100).optional(),
-      status: z.enum([
-        ACCOUNT_STATUSES.ACTIVE,
-        ACCOUNT_STATUSES.SUSPENDED,
-        ACCOUNT_STATUSES.DISABLED,
-      ]).optional(),
-    }).strict(),
-  })),
+  validate(mentorAssignedStudentsSchema),
   getMentorAssignedStudentsController,
 );
 
-/**
- * Mentor self profile.
- */
 mentorRouter.get(
   '/mentor/profile',
   authenticate,
@@ -196,9 +200,6 @@ mentorRouter.patch(
   updateMentorSelfProfileController,
 );
 
-/**
- * HOD mentor management.
- */
 mentorRouter.get(
   '/mentors',
   authenticate,

@@ -57,13 +57,6 @@ function Icon({ type }) {
       </>
     ),
 
-    batch: (
-      <>
-        <rect x="3" y="4" width="18" height="16" rx="2" />
-        <path d="M8 4v16M8 9h13M8 14h13" />
-      </>
-    ),
-
     search: (
       <>
         <circle cx="10.8" cy="10.8" r="6.8" />
@@ -95,14 +88,14 @@ function SummaryCard({
   icon,
 }) {
   return (
-    <article className="min-w-0 rounded-2xl border border-[#343640] bg-[#1D1F27] p-5 transition-colors hover:border-[#CDB5F7]/30">
+    <article className="rounded-2xl border border-[#343640] bg-[#1D1F27] p-5 transition-colors hover:border-[#CDB5F7]/30">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <p className="text-sm font-medium text-[#A5A6B0]">
             {label}
           </p>
 
-          <p className="mt-3 text-3xl font-bold tracking-tight text-[#EAEAE6]">
+          <p className="mt-3 text-3xl font-bold text-[#EAEAE6]">
             {value}
           </p>
 
@@ -119,19 +112,19 @@ function SummaryCard({
   );
 }
 
-function StudentStatusBadge({ status }) {
+function StatusBadge({ status }) {
   const styles = {
-    ACTIVE: 'bg-emerald-400/10 text-emerald-300 border-emerald-400/15',
-    SUSPENDED: 'bg-amber-400/10 text-amber-300 border-amber-400/15',
-    DISABLED: 'bg-rose-400/10 text-rose-300 border-rose-400/15',
+    ACTIVE: 'bg-emerald-400/10 text-emerald-300',
+    SUSPENDED: 'bg-amber-400/10 text-amber-300',
+    DISABLED: 'bg-rose-400/10 text-rose-300',
   };
 
   return (
     <span
       className={[
-        'inline-flex rounded-lg border px-2.5 py-1',
+        'inline-flex rounded-lg px-2.5 py-1',
         'text-xs font-semibold',
-        styles[status] || 'border-slate-400/15 bg-slate-400/10 text-slate-300',
+        styles[status] || 'bg-slate-400/10 text-slate-300',
       ].join(' ')}
     >
       {status || 'UNKNOWN'}
@@ -154,7 +147,7 @@ function StudentRow({ student }) {
           {initials || '?'}
         </div>
 
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0">
           <p className="break-words text-sm font-semibold text-[#EAEAE6]">
             {student.fullName || 'Unnamed student'}
           </p>
@@ -172,7 +165,7 @@ function StudentRow({ student }) {
               {student.sections.map((section) => (
                 <span
                   key={section.id}
-                  className="rounded-md border border-[#CDB5F7]/15 bg-[#CDB5F7]/5 px-2 py-1 text-[10px] font-medium text-[#CDB5F7]"
+                  className="rounded-md border border-[#CDB5F7]/15 bg-[#CDB5F7]/5 px-2 py-1 text-[10px] text-[#CDB5F7]"
                 >
                   {section.name}
                   {section.code ? ` · ${section.code}` : ''}
@@ -184,14 +177,54 @@ function StudentRow({ student }) {
       </div>
 
       <div className="flex shrink-0 items-center gap-3">
-        <StudentStatusBadge status={student.status} />
+        <StatusBadge status={student.status} />
 
         <Link
           to={`/mentor/students/${encodeURIComponent(student.id)}`}
-          className="inline-flex min-h-9 items-center justify-center rounded-lg border border-[#454650] px-3 py-2 text-xs font-semibold text-[#D0D0D8] transition hover:border-[#CDB5F7]/40 hover:bg-[#303139] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+          className="rounded-lg border border-[#454650] px-3 py-2 text-xs font-semibold text-[#D0D0D8] transition hover:bg-[#303139] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
         >
           View details →
         </Link>
+      </div>
+    </div>
+  );
+}
+
+function Pagination({
+  pagination,
+  onPageChange,
+  loading,
+}) {
+  if (!pagination || pagination.totalPages <= 1) {
+    return null;
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#343640] pt-5">
+      <p className="text-xs text-[#858590]">
+        Page {pagination.page} of {pagination.totalPages}
+        {' · '}
+        {pagination.total} students
+      </p>
+
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={!pagination.hasPreviousPage || loading}
+          onClick={() => onPageChange(pagination.page - 1)}
+          className="rounded-lg border border-[#454650] px-3 py-2 text-xs font-semibold text-[#D0D0D8] disabled:opacity-40"
+        >
+          Previous
+        </button>
+
+        <button
+          type="button"
+          disabled={!pagination.hasNextPage || loading}
+          onClick={() => onPageChange(pagination.page + 1)}
+          className="rounded-lg border border-[#454650] px-3 py-2 text-xs font-semibold text-[#D0D0D8] disabled:opacity-40"
+        >
+          Next
+        </button>
       </div>
     </div>
   );
@@ -201,7 +234,7 @@ function AtRiskStudentRow({ student }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 border-b border-[#343640] py-4 last:border-0">
       <div className="min-w-0">
-        <p className="break-words text-sm font-semibold text-[#EAEAE6]">
+        <p className="text-sm font-semibold text-[#EAEAE6]">
           {student.fullName || 'Unnamed student'}
         </p>
 
@@ -230,7 +263,7 @@ function AtRiskStudentRow({ student }) {
         <Link
           to={`/mentor/students/${encodeURIComponent(student.id)}`}
           aria-label={`View ${student.fullName || 'student'} details`}
-          className="rounded-lg border border-[#454650] px-3 py-2 text-sm text-[#D0D0D8] transition hover:bg-[#303139] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#CDB5F7]"
+          className="rounded-lg border border-[#454650] px-3 py-2 text-sm text-[#D0D0D8] transition hover:bg-[#303139]"
         >
           →
         </Link>
@@ -239,79 +272,18 @@ function AtRiskStudentRow({ student }) {
   );
 }
 
-function AttendanceMetric({
-  label,
-  value,
-  style,
-}) {
+function Metric({ label, value, color }) {
   return (
     <div className="rounded-xl border border-[#343640] bg-[#17181F] p-4">
       <p className="text-xs text-[#858590]">
         {label}
       </p>
 
-      <p className={`mt-2 text-2xl font-bold ${style}`}>
+      <p className={`mt-2 text-2xl font-bold ${color}`}>
         {value}
       </p>
     </div>
   );
-}
-
-function Pagination({
-  pagination,
-  onPageChange,
-  loading,
-}) {
-  if (!pagination || pagination.totalPages <= 1) {
-    return null;
-  }
-
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#343640] pt-5">
-      <p className="text-xs text-[#858590]">
-        Page {pagination.page} of {pagination.totalPages}
-        {' · '}
-        {pagination.total} students
-      </p>
-
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          disabled={!pagination.hasPreviousPage || loading}
-          onClick={() => onPageChange(pagination.page - 1)}
-          className="rounded-lg border border-[#454650] px-3 py-2 text-xs font-semibold text-[#D0D0D8] transition hover:bg-[#303139] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Previous
-        </button>
-
-        <button
-          type="button"
-          disabled={!pagination.hasNextPage || loading}
-          onClick={() => onPageChange(pagination.page + 1)}
-          className="rounded-lg border border-[#454650] px-3 py-2 text-xs font-semibold text-[#D0D0D8] transition hover:bg-[#303139] disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Next
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function formatDate(value) {
-  if (!value) {
-    return 'Not available';
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return 'Not available';
-  }
-
-  return new Intl.DateTimeFormat('en-IN', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date);
 }
 
 export default function MentorStudentMentoring() {
@@ -370,6 +342,7 @@ export default function MentorStudentMentoring() {
         limit: PAGE_SIZE,
         search,
         status,
+        sectionId: selectedSection,
         signal,
       });
 
@@ -386,7 +359,7 @@ export default function MentorStudentMentoring() {
         setStudentsLoading(false);
       }
     }
-  }, [page, search, status]);
+  }, [page, search, status, selectedSection]);
 
   const loadAttendance = useCallback(async (signal) => {
     setAttendanceLoading(true);
@@ -452,21 +425,23 @@ export default function MentorStudentMentoring() {
     setPage(1);
   }
 
-  const summary = dashboard?.summary;
+  function handleSectionChange(event) {
+    setSelectedSection(event.target.value);
+    setPage(1);
+  }
 
+  const summary = dashboard?.summary;
   const sections = dashboard?.assignments?.sections ?? [];
 
   const threshold = attendance?.attendance?.threshold ?? 75;
-
-  const attendancePercentage =
-    attendance?.attendance?.averagePercentage;
+  const average = attendance?.attendance?.averagePercentage;
 
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-6">
       <PageHeader
         eyebrow="MENTOR WORKSPACE"
         title="Student Mentoring"
-        description="Manage your assigned student follow-up, review attendance patterns and identify students who require academic attention."
+        description="Manage assigned student follow-up, review attendance patterns and identify students who require academic attention."
         breadcrumbs={[
           {
             label: 'Mentor',
@@ -491,13 +466,20 @@ export default function MentorStudentMentoring() {
           role="alert"
           className="rounded-xl border border-rose-400/20 bg-rose-400/5 p-4"
         >
-          <p className="text-sm font-semibold text-rose-300">
-            Unable to load Mentor summary
-          </p>
-
-          <p className="mt-2 text-sm text-[#A5A6B0]">
+          <p className="text-sm text-rose-300">
             {dashboardError}
           </p>
+
+          <button
+            type="button"
+            onClick={() => {
+              const controller = new AbortController();
+              loadDashboard(controller.signal);
+            }}
+            className="mt-3 text-xs font-semibold text-[#CDB5F7]"
+          >
+            Retry dashboard
+          </button>
         </div>
       )}
 
@@ -507,24 +489,16 @@ export default function MentorStudentMentoring() {
       >
         <SummaryCard
           label="Assigned Students"
-          value={
-            dashboardLoading
-              ? '—'
-              : summary?.assignedStudents ?? 0
-          }
+          value={dashboardLoading ? '—' : summary?.assignedStudents ?? 0}
           description="Active students in your assigned sections."
           icon="students"
         />
 
         <SummaryCard
           label="Assigned Batches"
-          value={
-            dashboardLoading
-              ? '—'
-              : summary?.assignedBatches ?? 0
-          }
+          value={dashboardLoading ? '—' : summary?.assignedBatches ?? 0}
           description="Academic batches assigned to you."
-          icon="batch"
+          icon="students"
         />
 
         <SummaryCard
@@ -532,10 +506,9 @@ export default function MentorStudentMentoring() {
           value={
             attendanceLoading
               ? '—'
-              : attendancePercentage === null
-                || attendancePercentage === undefined
+              : average === null || average === undefined
                 ? 'N/A'
-                : `${attendancePercentage.toFixed(1)}%`
+                : `${average.toFixed(1)}%`
           }
           description="Based on actual attendance records."
           icon="attendance"
@@ -554,9 +527,43 @@ export default function MentorStudentMentoring() {
       </section>
 
       <SectionCard
+        eyebrow="SECTION SCOPE"
+        title="Select mentoring section"
+        description="The selected section filters both the student directory and attendance analytics."
+      >
+        <div className="max-w-xl">
+          <label
+            htmlFor="mentoring-section"
+            className="mb-2 block text-xs font-semibold text-[#B8B8C2]"
+          >
+            Assigned section
+          </label>
+
+          <select
+            id="mentoring-section"
+            value={selectedSection}
+            onChange={handleSectionChange}
+            disabled={dashboardLoading || sections.length === 0}
+            className="min-h-11 w-full rounded-xl border border-[#3B3C43] bg-[#14161C] px-3 py-2.5 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7] disabled:opacity-50"
+          >
+            <option value="">
+              All assigned sections
+            </option>
+
+            {sections.map((section) => (
+              <option key={section.id} value={section.id}>
+                {section.name}
+                {section.code ? ` (${section.code})` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+      </SectionCard>
+
+      <SectionCard
         eyebrow="STUDENT FOLLOW-UP"
         title="Assigned student directory"
-        description="Search and review students belonging to your authorized mentoring sections."
+        description="Search and review students belonging to your selected section or all authorized mentoring sections."
         action={
           <span className="rounded-lg border border-[#CDB5F7]/20 bg-[#CDB5F7]/10 px-3 py-2 text-xs font-semibold text-[#CDB5F7]">
             {pagination?.total ?? 0} students
@@ -585,7 +592,7 @@ export default function MentorStudentMentoring() {
               value={searchInput}
               onChange={(event) => setSearchInput(event.target.value)}
               placeholder="Search name, institutional ID or email..."
-              className="min-h-11 w-full rounded-xl border border-[#3B3C43] bg-[#14161C] py-2.5 pl-11 pr-3 text-sm text-[#EAEAE6] outline-none placeholder:text-[#777986] focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20"
+              className="min-h-11 w-full rounded-xl border border-[#3B3C43] bg-[#14161C] py-2.5 pl-11 pr-3 text-sm text-[#EAEAE6] outline-none placeholder:text-[#777986] focus:border-[#CDB5F7]"
             />
           </div>
 
@@ -642,10 +649,13 @@ export default function MentorStudentMentoring() {
 
             <button
               type="button"
-              onClick={() => setPage((current) => current)}
+              onClick={() => {
+                const controller = new AbortController();
+                loadStudents(controller.signal);
+              }}
               className="mt-3 text-xs font-semibold text-[#CDB5F7]"
             >
-              Retry by refreshing the page.
+              Retry student directory
             </button>
           </div>
         )}
@@ -667,8 +677,8 @@ export default function MentorStudentMentoring() {
           <EmptyState
             title="No students found"
             description={
-              search || status
-                ? 'No assigned students match the selected search and status filters.'
+              search || status || selectedSection
+                ? 'No assigned students match the selected section, search and status filters.'
                 : 'Students belonging to your assigned sections will appear here.'
             }
             className="mt-5 border-0 bg-transparent"
@@ -692,49 +702,9 @@ export default function MentorStudentMentoring() {
       </SectionCard>
 
       <SectionCard
-        eyebrow="ATTENDANCE FILTER"
-        title="Section-wise mentoring overview"
-        description="Select one of your assigned sections to review its attendance and student follow-up indicators."
-      >
-        <div className="max-w-xl">
-          <label
-            htmlFor="mentoring-section"
-            className="mb-2 block text-xs font-semibold text-[#B8B8C2]"
-          >
-            Assigned section
-          </label>
-
-          <select
-            id="mentoring-section"
-            value={selectedSection}
-            onChange={(event) => setSelectedSection(event.target.value)}
-            disabled={dashboardLoading || sections.length === 0}
-            className="min-h-11 w-full rounded-xl border border-[#3B3C43] bg-[#14161C] px-3 py-2.5 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7] disabled:opacity-50"
-          >
-            <option value="">
-              All assigned sections
-            </option>
-
-            {sections.map((section) => (
-              <option key={section.id} value={section.id}>
-                {section.name}
-                {section.code ? ` (${section.code})` : ''}
-              </option>
-            ))}
-          </select>
-
-          <p className="mt-2 text-xs text-[#858590]">
-            Attendance analytics and at-risk students update when you
-            change this selection. The directory above remains scoped
-            to all your assigned sections.
-          </p>
-        </div>
-      </SectionCard>
-
-      <SectionCard
         eyebrow="ATTENDANCE ANALYTICS"
         title="Attendance overview"
-        description="Actual attendance records for your assigned sections or selected section."
+        description="Attendance records for the same selected mentoring scope."
         action={
           <Link
             to="/mentor/attendance"
@@ -747,15 +717,22 @@ export default function MentorStudentMentoring() {
         {attendanceError ? (
           <div
             role="alert"
-            className="rounded-xl border border-amber-400/20 bg-amber-400/5 p-4"
+            className="rounded-xl border border-rose-400/20 bg-rose-400/5 p-4"
           >
-            <p className="text-sm text-amber-200">
-              Attendance analytics are currently unavailable.
-            </p>
-
-            <p className="mt-1 text-xs leading-5 text-[#A5A6B0]">
+            <p className="text-sm text-rose-300">
               {attendanceError}
             </p>
+
+            <button
+              type="button"
+              onClick={() => {
+                const controller = new AbortController();
+                loadAttendance(controller.signal);
+              }}
+              className="mt-3 text-xs font-semibold text-[#CDB5F7]"
+            >
+              Retry attendance
+            </button>
           </div>
         ) : attendanceLoading ? (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -769,22 +746,22 @@ export default function MentorStudentMentoring() {
         ) : attendance ? (
           <>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <AttendanceMetric
+              <Metric
                 label="Present"
                 value={attendance.attendance.present}
-                style="text-emerald-300"
+                color="text-emerald-300"
               />
 
-              <AttendanceMetric
+              <Metric
                 label="Absent"
                 value={attendance.attendance.absent}
-                style="text-rose-300"
+                color="text-rose-300"
               />
 
-              <AttendanceMetric
+              <Metric
                 label="Late"
                 value={attendance.attendance.late}
-                style="text-amber-300"
+                color="text-amber-300"
               />
             </div>
 
@@ -795,26 +772,19 @@ export default function MentorStudentMentoring() {
                 </span>
 
                 <span className="text-sm font-semibold text-[#EAEAE6]">
-                  {attendancePercentage === null
+                  {average === null
                     ? 'N/A'
-                    : `${attendancePercentage.toFixed(1)}%`}
+                    : `${average.toFixed(1)}%`}
                 </span>
               </div>
 
-              <div
-                className="h-3 overflow-hidden rounded-full bg-[#343640]"
-                role="progressbar"
-                aria-label="Average attendance"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={attendancePercentage ?? 0}
-              >
+              <div className="h-3 overflow-hidden rounded-full bg-[#343640]">
                 <div
                   className="h-full rounded-full bg-[#CDB5F7] transition-all"
                   style={{
                     width: `${Math.min(
                       100,
-                      Math.max(0, attendancePercentage ?? 0),
+                      Math.max(0, average ?? 0),
                     )}%`,
                   }}
                 />
@@ -841,13 +811,7 @@ export default function MentorStudentMentoring() {
         title="Students requiring attention"
         description={`Students whose attendance is below the configured ${threshold}% threshold.`}
       >
-        {attendanceError ? (
-          <EmptyState
-            title="Attendance risk data unavailable"
-            description="The attendance service could not provide student-level risk information."
-            className="border-0 bg-transparent"
-          />
-        ) : attendanceLoading ? (
+        {attendanceLoading ? (
           <div className="space-y-4">
             {[1, 2, 3].map((item) => (
               <div
@@ -856,10 +820,16 @@ export default function MentorStudentMentoring() {
               />
             ))}
           </div>
+        ) : attendanceError ? (
+          <EmptyState
+            title="Attendance risk data unavailable"
+            description="The attendance service could not provide student-level risk information."
+            className="border-0 bg-transparent"
+          />
         ) : !attendance?.atRiskStudents?.length ? (
           <EmptyState
             title="No students requiring attendance follow-up"
-            description="No students currently meet the attendance warning criteria in the selected attendance scope."
+            description="No students currently meet the attendance warning criteria in the selected scope."
             className="border-0 bg-transparent"
           />
         ) : (
@@ -885,7 +855,7 @@ export default function MentorStudentMentoring() {
           </p>
 
           <p className="mt-2 text-sm leading-6 text-[#A5A6B0]">
-            The current verified Mentor APIs provide assigned student
+            The verified Mentor APIs currently provide assigned student
             records and attendance analytics. Student result summaries
             and assignment progress are not exposed through a verified
             Mentor overview API yet.
@@ -904,19 +874,11 @@ export default function MentorStudentMentoring() {
 
         <p className="mt-2 text-sm leading-6 text-[#B8B8C2]">
           Student records and attendance information are retrieved
-          through authenticated Mentor APIs. Only students belonging
-          to your currently assigned active sections are included.
-          Backend authorization and data scoping remain mandatory.
+          through authenticated Mentor APIs. The backend verifies
+          active section ownership before returning section-specific
+          student information.
         </p>
       </div>
-
-      <p className="text-xs text-[#777986]">
-        Dashboard data is generated from existing backend records.
-        Last updated:{' '}
-        {formatDate(
-          attendance?.generatedAt ?? dashboard?.generatedAt,
-        )}
-      </p>
     </div>
   );
 }

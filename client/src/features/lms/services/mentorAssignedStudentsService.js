@@ -71,11 +71,15 @@ function normalizeStudent(student) {
     ),
 
     sections: Array.isArray(student.sections)
-      ? student.sections.map(normalizeSection).filter(Boolean)
+      ? student.sections
+        .map(normalizeSection)
+        .filter(Boolean)
       : [],
 
     batches: Array.isArray(student.batches)
-      ? student.batches.map(normalizeBatch).filter(Boolean)
+      ? student.batches
+        .map(normalizeBatch)
+        .filter(Boolean)
       : [],
 
     createdAt: student.createdAt ?? null,
@@ -128,6 +132,12 @@ function normalizeResponse(data) {
     summary: normalizeSummary(data.summary),
 
     pagination: normalizePagination(data.pagination),
+
+    filters: {
+      sectionId: data.filters?.sectionId ?? null,
+      search: data.filters?.search ?? '',
+      status: data.filters?.status ?? null,
+    },
   };
 }
 
@@ -137,6 +147,7 @@ const mentorAssignedStudentsService = {
     limit = 20,
     search = '',
     status = '',
+    sectionId = '',
     signal,
   } = {}) {
     const params = {
@@ -150,6 +161,10 @@ const mentorAssignedStudentsService = {
 
     if (status) {
       params.status = status;
+    }
+
+    if (sectionId) {
+      params.sectionId = sectionId;
     }
 
     const response = await api.get(

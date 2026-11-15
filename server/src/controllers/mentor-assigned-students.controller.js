@@ -42,6 +42,7 @@ function normalizeStudent(student, sectionMap, batchMap) {
     fullName: student.fullName,
     email: student.email ?? null,
     status: student.status,
+
     isAccountActivated: Boolean(student.isAccountActivated),
     isEmailVerified: Boolean(student.isEmailVerified),
 
@@ -115,6 +116,7 @@ export async function getMentorAssignedStudentsController(
     const limit = Number(req.query.limit ?? 20);
     const search = String(req.query.search ?? '').trim();
     const status = req.query.status;
+    const requestedSectionId = req.query.sectionId;
 
     const sections = await Section.find({
       department: mentor.department,
@@ -126,7 +128,40 @@ export async function getMentorAssignedStudentsController(
       .lean()
       .exec();
 
-    const sectionIds = sections.map((section) => section._id);
+    /*
+     * The client cannot choose arbitrary sections.
+     * Verify the requested section against canonical Mentor ownership.
+     */
+    if (
+      requestedSectionId
+      && !sections.some(
+        (section) => (
+          String(section._id) === String(requestedSectionId)
+        ),
+      )
+    ) {
+      throw createError(
+        404,
+        'SECTION_NOT_ASSIGNED',
+        'The selected section is not assigned to your Mentor account.',
+      );
+    }
+
+    const assignedSectionIds = sections.map(
+      (section) => section._id,
+    );
+
+    const selectedSections = requestedSectionId
+      ? sections.filter(
+          (section) => (
+            String(section._id) === String(requestedSectionId)
+          ),
+        )
+      : sections;
+
+    const selectedSectionIds = selectedSections.map(
+      (section) => section._id,
+    );
 
     const sectionMap = new Map(
       sections.map((section) => [
@@ -140,7 +175,7 @@ export async function getMentorAssignedStudentsController(
       ]),
     );
 
-    if (sectionIds.length === 0) {
+    if (assignedSectionIds.length === 0) {
       return res.status(200).json({
         success: true,
         message: 'No students are currently assigned to this mentor.',
@@ -161,6 +196,11 @@ export async function getMentorAssignedStudentsController(
             hasNextPage: false,
             hasPreviousPage: false,
           },
+          filters: {
+            sectionId: null,
+            search,
+            status: status ?? null,
+          },
         },
       });
     }
@@ -168,7 +208,9 @@ export async function getMentorAssignedStudentsController(
     const studentFilter = {
       role: USER_ROLES.STUDENT,
       department: mentor.department,
-      assignedSections: { $in: sectionIds },
+      assignedSections: {
+        $in: selectedSectionIds,
+      },
     };
 
     if (status) {
@@ -176,7 +218,10 @@ export async function getMentorAssignedStudentsController(
     }
 
     if (search) {
-      const searchRegex = new RegExp(escapeRegex(search), 'i');
+      const searchRegex = new RegExp(
+        escapeRegex(search),
+        'i',
+      );
 
       studentFilter.$or = [
         { fullName: searchRegex },
@@ -187,58 +232,67 @@ export async function getMentorAssignedStudentsController(
 
     const skip = (page - 1) * limit;
 
-    const [students, total, statusCounts, batches] = await Promise.all([
-      User.find(studentFilter)
-        .select(
-          [
-            'institutionalId',
-            'fullName',
-            'email',
-            'status',
-            'isAccountActivated',
-            'isEmailVerified',
-            'assignedSections',
-            'assignedBatches',
-            'createdAt',
-            'updatedAt',
-          ].join(' '),
-        )
-        .sort({ createdAt: -1, _id: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean()
-        .exec(),
+    const [students, total, statusCounts, batches] =
+      await Promise.all([
+        User.find(studentFilter)
+          .select(
+            [
+              'institutionalId',
+              'fullName',
+              'email',
+              'status',
+              'isAccountActivated',
+              'isEmailVerified',
+              'assignedSections',
+              'assignedBatches',
+              'createdAt',
+              'updatedAt',
+            ].join(' '),
+          )
+          .sort({ createdAt: -1, _id: -1 })
+          .skip(skip)
+          .limit(limit)
+          .lean()
+          .exec(),
 
-      User.countDocuments(studentFilter),
+        User.countDocuments(studentFilter),
 
-      User.aggregate([
-        {
-          $match: {
-            role: USER_ROLES.STUDENT,
-            department: mentor.department,
-            assignedSections: { $in: sectionIds },
+        /*
+         * Summary is scoped to the selected section(s),
+         * independently of search and status filters.
+         */
+        User.aggregate([
+          {
+            $match: {
+              role: USER_ROLES.STUDENT,
+              department: mentor.department,
+              assignedSections: {
+                $in: selectedSectionIds,
+              },
+            },
           },
-        },
-        {
-          $group: {
-            _id: '$status',
-            count: { $sum: 1 },
+          {
+            $group: {
+              _id: '$status',
+              count: {
+                $sum: 1,
+              },
+            },
           },
-        },
-      ]),
+        ]),
 
-      Batch.find({
-        _id: {
-          $in: sections
-            .map((section) => section.batch)
-            .filter(Boolean),
-        },
-        department: mentor.department,
-      })
-        .select('_id name code academicYear')
-        .lean()
-        .exec(),
-    ]);
+        Batch.find({
+          _id: {
+            $in: sections
+              .map((section) => section.batch)
+              .filter(Boolean),
+          },
+          department: mentor.department,
+        })
+          .select('_id name code academicYear')
+          .lean()
+          .exec(),
+      ]);
 
     const batchMap = new Map(
       batches.map((batch) => [
@@ -264,9 +318,13 @@ export async function getMentorAssignedStudentsController(
 
       if (record._id === ACCOUNT_STATUSES.ACTIVE) {
         summary.active = record.count;
-      } else if (record._id === ACCOUNT_STATUSES.SUSPENDED) {
+      } else if (
+        record._id === ACCOUNT_STATUSES.SUSPENDED
+      ) {
         summary.suspended = record.count;
-      } else if (record._id === ACCOUNT_STATUSES.DISABLED) {
+      } else if (
+        record._id === ACCOUNT_STATUSES.DISABLED
+      ) {
         summary.disabled = record.count;
       }
     }
@@ -274,16 +332,27 @@ export async function getMentorAssignedStudentsController(
     return res.status(200).json({
       success: true,
       message: 'Assigned students retrieved successfully.',
-      data: {
-        students: students.map((student) =>
-          normalizeStudent(student, sectionMap, batchMap),
-        ),
 
+      data: {
+        students: students.map((student) => (
+          normalizeStudent(
+            student,
+            sectionMap,
+            batchMap,
+          )
+        )),
+
+        /*
+         * Always return all Mentor-assigned sections
+         * so the frontend selector remains populated.
+         */
         sections: sections.map((section) => ({
           id: String(section._id),
           name: section.name,
           code: section.code,
-          batch: batchMap.get(normalizeId(section.batch)) ?? null,
+          batch: batchMap.get(
+            normalizeId(section.batch),
+          ) ?? null,
         })),
 
         summary,
@@ -295,6 +364,12 @@ export async function getMentorAssignedStudentsController(
           totalPages: Math.ceil(total / limit),
           hasNextPage: page * limit < total,
           hasPreviousPage: page > 1,
+        },
+
+        filters: {
+          sectionId: requestedSectionId ?? null,
+          search,
+          status: status ?? null,
         },
       },
     });
