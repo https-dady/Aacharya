@@ -8,6 +8,10 @@ import {
 
 import { Department } from '../models/department.model.js';
 
+import {
+  buildRoleQuery,
+} from '../utils/role-access.util.js';
+
 function createError(statusCode, code, message) {
   const error = new Error(message);
 
@@ -24,10 +28,14 @@ function normalizeFacultyProfile(faculty, department) {
     institutionalId: faculty.institutionalId,
     fullName: faculty.fullName,
     email: faculty.email ?? null,
+
+    // Always preserve the actual primary role.
     role: faculty.role,
+
     status: faculty.status,
     isEmailVerified: faculty.isEmailVerified,
     emailVerifiedAt: faculty.emailVerifiedAt ?? null,
+
     department: department
       ? {
           id: String(department._id),
@@ -36,6 +44,7 @@ function normalizeFacultyProfile(faculty, department) {
           status: department.status,
         }
       : null,
+
     createdAt: faculty.createdAt,
     updatedAt: faculty.updatedAt,
   };
@@ -52,7 +61,12 @@ async function getAuthenticatedFaculty(userId) {
 
   const faculty = await User.findOne({
     _id: userId,
-    role: USER_ROLES.FACULTY,
+
+    // Supports Faculty, Mentor and HOD.
+    // Also supports legacy HOD/Mentor accounts.
+    ...buildRoleQuery(USER_ROLES.FACULTY),
+
+    status: ACCOUNT_STATUSES.ACTIVE,
   })
     .select(
       [
@@ -60,6 +74,7 @@ async function getAuthenticatedFaculty(userId) {
         'fullName',
         'email',
         'role',
+        'roles',
         'status',
         'isEmailVerified',
         'emailVerifiedAt',
@@ -73,8 +88,8 @@ async function getAuthenticatedFaculty(userId) {
   if (!faculty) {
     throw createError(
       404,
-      'FACULTY_NOT_FOUND',
-      'The authenticated faculty account could not be found.',
+      'FACULTY_CAPABILITY_NOT_FOUND',
+      'The authenticated account does not have an active Faculty teaching capability.',
     );
   }
 
@@ -82,7 +97,7 @@ async function getAuthenticatedFaculty(userId) {
     throw createError(
       403,
       'FACULTY_ACCOUNT_INACTIVE',
-      'Your faculty account is not active.',
+      'Your teaching account is not active.',
     );
   }
 
@@ -111,6 +126,8 @@ async function getAuthenticatedFaculty(userId) {
 
 /**
  * GET /api/v1/faculty-profile/me
+ *
+ * Shared teaching profile.
  */
 export async function getFacultySelfProfileController(req, res, next) {
   try {
@@ -120,7 +137,7 @@ export async function getFacultySelfProfileController(req, res, next) {
 
     return res.status(200).json({
       success: true,
-      message: 'Faculty profile retrieved successfully.',
+      message: 'Teaching profile retrieved successfully.',
       data: {
         profile: normalizeFacultyProfile(faculty, department),
       },
@@ -132,12 +149,15 @@ export async function getFacultySelfProfileController(req, res, next) {
 
 /**
  * PATCH /api/v1/faculty-profile/me
+ *
+ * Updates permitted profile fields on the authenticated account.
  */
 export async function updateFacultySelfProfileController(req, res, next) {
   try {
     const { faculty } = await getAuthenticatedFaculty(req.user?.id);
 
     const allowedFields = ['fullName', 'email'];
+
     const submittedFields = Object.keys(req.body ?? {});
 
     const unsupportedFields = submittedFields.filter(
@@ -148,7 +168,7 @@ export async function updateFacultySelfProfileController(req, res, next) {
       throw createError(
         400,
         'PROFILE_FIELD_NOT_EDITABLE',
-        'Only fullName and email can be updated through the faculty profile.',
+        'Only fullName and email can be updated through the teaching profile.',
       );
     }
 
@@ -156,7 +176,7 @@ export async function updateFacultySelfProfileController(req, res, next) {
       throw createError(
         400,
         'EMPTY_PROFILE_UPDATE',
-        'Provide a full name or email address to update.',
+        'Provide at least one profile field to update.',
       );
     }
 
@@ -271,8 +291,8 @@ export async function updateFacultySelfProfileController(req, res, next) {
     return res.status(200).json({
       success: true,
       message: emailChanged
-        ? 'Faculty profile updated. Verify your new email address where required.'
-        : 'Faculty profile updated successfully.',
+        ? 'Teaching profile updated. Verify your new email address where required.'
+        : 'Teaching profile updated successfully.',
       data: {
         profile: normalizeFacultyProfile(faculty, department),
       },

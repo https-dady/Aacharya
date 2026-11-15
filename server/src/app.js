@@ -20,6 +20,7 @@ import notificationRoutes from './routes/notification.routes.js';
 
 import studentProfileRoutes from './routes/student-profile.routes.js';
 import hodSelfProfileRoutes from './routes/hod-self-profile.routes.js';
+import facultySelfProfileRoutes from './routes/faculty-self-profile.routes.js';
 
 import courseRoutes from './routes/course.routes.js';
 import assignmentRoutes from './routes/assignment.routes.js';
@@ -34,7 +35,9 @@ import facultyQuizResultsRoutes from './routes/faculty-quiz-results.routes.js';
 import facultyQuizResultDetailsRoutes from './routes/faculty-quiz-result-details.routes.js';
 
 import studentAttendanceRoutes from './routes/student-attendance.routes.js';
+import facultyAttendanceRoutes from './routes/faculty-attendance.routes.js';
 import hodAttendanceRoutes from './routes/hod-attendance.routes.js';
+
 import timetableRoutes from './routes/timetable.routes.js';
 import assessmentRoutes from './routes/assessment.routes.js';
 import facultyAssessmentResultsRoutes from './routes/faculty-assessment-results.routes.js';
@@ -149,6 +152,10 @@ app.use('/api/v1/provisioning', studentImportRoutes);
 // Student profile.
 app.use('/api/v1/student-profile', studentProfileRoutes);
 
+// Shared Faculty profile.
+// Faculty, Mentor and HOD use their authenticated account identity.
+app.use('/api/v1/faculty-profile', facultySelfProfileRoutes);
+
 // Courses.
 app.use('/api/v1/courses', courseRoutes);
 
@@ -183,11 +190,15 @@ app.use('/api/v1/quiz-results', facultyQuizResultDetailsRoutes);
 // Student attendance.
 app.use('/api/v1/attendance', studentAttendanceRoutes);
 
+// Shared Faculty attendance.
+// The router also exposes eligible students for assigned courses.
+app.use('/api/v1/attendance', facultyAttendanceRoutes);
+
 // HOD department-wide attendance overview and reports.
-// Keep the existing student attendance endpoints available.
+// Keep existing student and Faculty attendance endpoints available.
 app.use('/api/v1/attendance', hodAttendanceRoutes);
 
-// HOD timetable management.
+// HOD timetable management and shared Faculty timetable.
 app.use('/api/v1/timetable', timetableRoutes);
 
 // HOD assessment and results management.
