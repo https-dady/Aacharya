@@ -158,6 +158,24 @@ export async function getMentorAttendanceOverviewController(
       );
     }
 
+    const requestedSectionId = req.validated?.query?.sectionId
+      ?? req.query.sectionId;
+
+    if (
+      requestedSectionId
+      && !mongoose.isValidObjectId(requestedSectionId)
+    ) {
+      throw createError(
+        400,
+        'INVALID_SECTION_ID',
+        'A valid section ID is required.',
+      );
+    }
+
+    /*
+     * Fetch only active sections canonically assigned
+     * to the authenticated Mentor.
+     */
     const sections = await Section.find({
       department: department._id,
       mentor: mentor._id,
@@ -168,11 +186,40 @@ export async function getMentorAttendanceOverviewController(
       .lean()
       .exec();
 
-    const sectionIds = sections.map(
+    const assignedSectionIds = sections.map(
       (section) => section._id,
     );
 
-    if (sectionIds.length === 0) {
+    /*
+     * Never trust the section ID supplied by the client.
+     * Verify that it belongs to the authenticated Mentor.
+     */
+    if (
+      requestedSectionId
+      && !sections.some(
+        (section) => (
+          String(section._id) === String(requestedSectionId)
+        ),
+      )
+    ) {
+      throw createError(
+        404,
+        'SECTION_NOT_ASSIGNED',
+        'The selected section is not actively assigned to your Mentor account.',
+      );
+    }
+
+    const sectionIds = requestedSectionId
+      ? sections
+        .filter(
+          (section) => (
+            String(section._id) === String(requestedSectionId)
+          ),
+        )
+        .map((section) => section._id)
+      : assignedSectionIds;
+
+    if (assignedSectionIds.length === 0) {
       return res.status(200).json({
         success: true,
         message: 'No active sections are assigned to this mentor.',
@@ -196,22 +243,28 @@ export async function getMentorAttendanceOverviewController(
           filters: {
             startDate: req.query.startDate ?? null,
             endDate: req.query.endDate ?? null,
+            sectionId: null,
           },
           generatedAt: new Date().toISOString(),
         },
       });
     }
 
-    const studentFilter = {
+    /*
+     * When a section is selected, student records are
+     * restricted to that section only.
+     *
+     * When sectionId is absent, all assigned sections
+     * are included.
+     */
+    const students = await User.find({
       department: department._id,
       role: USER_ROLES.STUDENT,
       status: ACCOUNT_STATUSES.ACTIVE,
       assignedSections: {
         $in: sectionIds,
       },
-    };
-
-    const students = await User.find(studentFilter)
+    })
       .select('_id institutionalId fullName email assignedSections')
       .sort({ fullName: 1 })
       .lean()
@@ -270,9 +323,8 @@ export async function getMentorAttendanceOverviewController(
 
     /*
      * Verify the exact student-section relationship.
-     *
-     * Independent student and section $in filters can include
-     * stale attendance records after a student changes sections.
+     * This prevents stale attendance records from being
+     * included after a student changes sections.
      */
     const assignedSectionsByStudent = new Map(
       students.map((student) => [
@@ -294,12 +346,12 @@ export async function getMentorAttendanceOverviewController(
 
     for (const record of groupedAttendance) {
       const studentId = String(record._id.student);
-      const sectionId = String(record._id.section);
+      const recordSectionId = String(record._id.section);
 
       const assignedSections =
         assignedSectionsByStudent.get(studentId);
 
-      if (!assignedSections?.has(sectionId)) {
+      if (!assignedSections?.has(recordSectionId)) {
         continue;
       }
 
@@ -354,9 +406,9 @@ export async function getMentorAttendanceOverviewController(
 
     const atRiskStudents = studentAttendanceDetails
       .filter((student) => student.requiresAttention)
-      .sort((first, second) => {
-        return first.percentage - second.percentage;
-      });
+      .sort(
+        (first, second) => first.percentage - second.percentage,
+      );
 
     const averagePercentage = totals.totalRecords > 0
       ? Number(
@@ -386,6 +438,10 @@ export async function getMentorAttendanceOverviewController(
 
         atRiskStudents: atRiskStudents.slice(0, 20),
 
+        /*
+         * Always return all assigned sections so the UI
+         * can continue displaying the section selector.
+         */
         sections: sections.map((section) => ({
           id: String(section._id),
           name: section.name,
@@ -395,6 +451,7 @@ export async function getMentorAttendanceOverviewController(
         filters: {
           startDate: req.query.startDate ?? null,
           endDate: req.query.endDate ?? null,
+          sectionId: requestedSectionId ?? null,
         },
 
         generatedAt: new Date().toISOString(),

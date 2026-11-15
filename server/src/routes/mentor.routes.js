@@ -48,6 +48,7 @@ const mentorAttendanceOverviewSchema = z.object({
   query: z.object({
     startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    sectionId: objectIdSchema.optional(),
   }).strict(),
 });
 
@@ -123,8 +124,13 @@ mentorRouter.get(
 /**
  * GET /api/v1/provisioning/mentor/attendance-overview
  *
- * Returns attendance metrics only for the mentor's currently
- * assigned active sections and students assigned to those sections.
+ * Returns attendance metrics only for sections assigned
+ * to the authenticated Mentor.
+ *
+ * Optional query parameters:
+ * - startDate
+ * - endDate
+ * - sectionId
  */
 mentorRouter.get(
   '/mentor/attendance-overview',

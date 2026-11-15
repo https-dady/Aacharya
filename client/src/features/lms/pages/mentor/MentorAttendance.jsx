@@ -393,7 +393,7 @@ function DateFilter({
         <button
           type="button"
           onClick={onReset}
-          disabled={loading || (!startDate && !endDate)}
+          disabled={loading}
           className="min-h-11 rounded-xl border border-[#3B3C43] bg-[#26272B] px-5 py-2.5 text-sm font-semibold text-[#EAEAE6] transition-colors hover:bg-[#303139] disabled:cursor-not-allowed disabled:opacity-40"
         >
           Reset
@@ -426,10 +426,12 @@ export default function MentorAttendance() {
 
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [sectionId, setSectionId] = useState('');
 
   const [appliedFilters, setAppliedFilters] = useState({
     startDate: '',
     endDate: '',
+    sectionId: '',
   });
 
   const [loading, setLoading] = useState(true);
@@ -445,6 +447,7 @@ export default function MentorAttendance() {
         {
           startDate: appliedFilters.startDate || undefined,
           endDate: appliedFilters.endDate || undefined,
+          sectionId: appliedFilters.sectionId || undefined,
         },
         { signal },
       );
@@ -495,17 +498,20 @@ export default function MentorAttendance() {
     setAppliedFilters({
       startDate,
       endDate,
+      sectionId,
     });
   }
 
   function handleResetFilters() {
     setStartDate('');
     setEndDate('');
+    setSectionId('');
     setFilterError('');
 
     setAppliedFilters({
       startDate: '',
       endDate: '',
+      sectionId: '',
     });
   }
 
@@ -513,6 +519,10 @@ export default function MentorAttendance() {
   const students = overview?.students;
 
   const averagePercentage = attendance?.averagePercentage;
+
+  const selectedSection = overview?.sections?.find(
+    (section) => section.id === appliedFilters.sectionId,
+  );
 
   return (
     <div className="mx-auto w-full max-w-[1600px] space-y-6">
@@ -530,16 +540,16 @@ export default function MentorAttendance() {
           },
         ]}
         actions={
-  <div className="flex flex-wrap gap-2">
-    <NavigationLink to="/mentor/class-attendance">
-      Mark class attendance
-    </NavigationLink>
+          <div className="flex flex-wrap gap-2">
+            <NavigationLink to="/mentor/class-attendance">
+              Mark class attendance
+            </NavigationLink>
 
-    <NavigationLink to="/mentor/students">
-      Assigned students
-    </NavigationLink>
-  </div>
-}
+            <NavigationLink to="/mentor/students">
+              Assigned students
+            </NavigationLink>
+          </div>
+        }
       />
 
       <div className="rounded-2xl border border-[#E5DF98]/20 bg-[#E5DF98]/[0.05] p-4 sm:p-5">
@@ -563,6 +573,46 @@ export default function MentorAttendance() {
           </div>
         </div>
       </div>
+
+      <SectionCard
+        title="Section filter"
+        description="View attendance across all assigned sections or isolate one assigned section."
+      >
+        <div className="max-w-xl">
+          <label
+            htmlFor="mentor-attendance-section"
+            className="mb-2 block text-xs font-semibold text-[#B8B8C2]"
+          >
+            Assigned section
+          </label>
+
+          <select
+            id="mentor-attendance-section"
+            value={sectionId}
+            onChange={(event) => {
+              setSectionId(event.target.value);
+              setFilterError('');
+            }}
+            disabled={loading || !overview?.sections?.length}
+            className="min-h-11 w-full rounded-xl border border-[#3B3C43] bg-[#14161C] px-3 py-2.5 text-sm text-[#EAEAE6] outline-none focus:border-[#CDB5F7] focus:ring-2 focus:ring-[#CDB5F7]/20 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <option value="">
+              All assigned sections
+            </option>
+
+            {(overview?.sections ?? []).map((section) => (
+              <option key={section.id} value={section.id}>
+                {section.name}
+                {section.code ? ` (${section.code})` : ''}
+              </option>
+            ))}
+          </select>
+
+          <p className="mt-2 text-xs text-[#858590]">
+            Section selection is applied together with the date range below.
+          </p>
+        </div>
+      </SectionCard>
 
       <DateFilter
         startDate={startDate}
@@ -618,6 +668,20 @@ export default function MentorAttendance() {
         </div>
       ) : overview ? (
         <>
+          {selectedSection && (
+            <div className="rounded-xl border border-[#CDB5F7]/20 bg-[#CDB5F7]/[0.06] px-4 py-3">
+              <p className="text-sm text-[#CDB5F7]">
+                Showing attendance for{' '}
+                <span className="font-semibold">
+                  {selectedSection.name}
+                  {selectedSection.code
+                    ? ` (${selectedSection.code})`
+                    : ''}
+                </span>
+              </p>
+            </div>
+          )}
+
           <section
             aria-label="Attendance and academic summary"
             className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
@@ -650,7 +714,11 @@ export default function MentorAttendance() {
             <SummaryCard
               title="Assigned students"
               value={students.totalAssigned}
-              description="Students in your active assigned sections"
+              description={
+                appliedFilters.sectionId
+                  ? 'Students assigned to the selected section'
+                  : 'Students in your active assigned sections'
+              }
               icon="results"
             />
           </section>

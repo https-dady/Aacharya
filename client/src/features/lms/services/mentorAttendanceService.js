@@ -46,9 +46,11 @@ function normalizeAttendance(attendance = {}) {
 function normalizeStudents(students = {}) {
   return {
     totalAssigned: Number(students.totalAssigned ?? 0),
+
     withAttendanceRecords: Number(
       students.withAttendanceRecords ?? 0,
     ),
+
     withoutAttendanceRecords: Number(
       students.withoutAttendanceRecords ?? 0,
     ),
@@ -61,6 +63,7 @@ function normalizeAtRiskStudent(student) {
     institutionalId: student.institutionalId ?? '',
     fullName: student.fullName ?? '',
     email: student.email ?? null,
+
     totalRecords: Number(student.totalRecords ?? 0),
     present: Number(student.present ?? 0),
     absent: Number(student.absent ?? 0),
@@ -110,6 +113,7 @@ function normalizeResponse(data) {
     filters: {
       startDate: data.filters?.startDate ?? null,
       endDate: data.filters?.endDate ?? null,
+      sectionId: data.filters?.sectionId ?? null,
     },
 
     generatedAt: data.generatedAt ?? null,
@@ -127,6 +131,10 @@ function normalizeFilters(filters = {}) {
     params.endDate = filters.endDate;
   }
 
+  if (filters.sectionId) {
+    params.sectionId = filters.sectionId;
+  }
+
   return params;
 }
 
@@ -136,6 +144,7 @@ const mentorAttendanceService = {
       ENDPOINT,
       {
         params: normalizeFilters(filters),
+
         ...(options.signal
           ? { signal: options.signal }
           : {}),
